@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/sipha/sipha",
+  "crates/leekscript-rs/leekscript",
+]
+
+[workspace.lints]
+
+[workspace.lints.clippy]
+result_large_err = "allow"
+too_many_arguments = "allow"
+

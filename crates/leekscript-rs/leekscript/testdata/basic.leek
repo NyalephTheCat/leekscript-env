@@ -1,0 +1,8 @@
+// basic literals
+123;
+"hello";
+'world';
+π;
+∞;
+(1);
+

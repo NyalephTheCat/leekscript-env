@@ -1,0 +1,80 @@
+//! Merging a loaded include graph into one source file (`merge_included_sources_to_single_file`).
+
+use leekscript::{
+    Version, load_project_with_includes, merge_included_sources_to_single_file,
+};
+use std::path::Path;
+
+fn tmp_merge_root(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("leekscript_merge_test_{name}_{}", std::process::id()))
+}
+
+#[test]
+fn merge_triple_include_same_file_once() {
+    let root = tmp_merge_root("triple");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("lib.leek"), "return 1;\n").unwrap();
+    std::fs::write(
+        root.join("main.leek"),
+        "include(\"lib.leek\");\ninclude(\"lib.leek\");\ninclude(\"lib.leek\");\n",
+    )
+    .unwrap();
+
+    let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
+    let s = merge_included_sources_to_single_file(&root, &p).unwrap();
+    assert_eq!(
+        s.matches("return 1").count(),
+        1,
+        "body should appear once: {s:?}"
+    );
+    assert_eq!(s.matches("already merged:").count(), 2);
+    assert_eq!(s.matches("begin lib.leek").count(), 1);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn merge_diamond_common_once() {
+    let root = tmp_merge_root("diamond");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("common.leek"), "1;\n").unwrap();
+    std::fs::write(root.join("b.leek"), "include(\"common.leek\");\n").unwrap();
+    std::fs::write(root.join("c.leek"), "include(\"common.leek\");\n2;\n").unwrap();
+    std::fs::write(
+        root.join("a.leek"),
+        "include(\"b.leek\");\ninclude(\"c.leek\");\n",
+    )
+    .unwrap();
+
+    let p = load_project_with_includes(&root, Path::new("a.leek"), Version::V4).unwrap();
+    let s = merge_included_sources_to_single_file(&root, &p).unwrap();
+    assert_eq!(
+        s.matches("1;").count(),
+        1,
+        "common.leek should be inlined once: {s}"
+    );
+    assert!(
+        s.contains("already merged:"),
+        "second include of common should be skipped: {s}"
+    );
+    assert!(s.contains("2;"), "c.leek body should appear: {s}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn merge_matches_java_fixture_multiple_includes() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("..")
+        .join("leekscript-java")
+        .join("src")
+        .join("test")
+        .join("resources");
+    let p = load_project_with_includes(&root, Path::new("ai/multiple_includes.leek"), Version::V4)
+        .unwrap();
+    let s = merge_included_sources_to_single_file(&root, &p).unwrap();
+    assert_eq!(s.matches("return 'bonjour'").count(), 1);
+    assert_eq!(s.matches("already merged:").count(), 2);
+}

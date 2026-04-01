@@ -1,0 +1,52 @@
+[package]
+name = "leekscript"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+# Keep current behavior by default, but let downstream users opt in/out of
+# `sipha`'s optional capabilities via `leekscript`'s own feature flags.
+default = ["std", "walk", "emit", "transform", "diff", "miette", "partial-reparse"]
+
+# Core sipha surface
+std = ["sipha/std"]
+walk = ["sipha/walk"]
+emit = ["sipha/emit"]
+diff = ["sipha/diff"]
+
+# Performance / parsing modes
+#
+# Build lexer/parser graphs specialized for [`Version::V4`] only: omits `if_flag` / `if_not_flag`
+# branches for older dialects (smaller / faster bytecode when you never parse V1–V3).
+# Parsing with `Version::V1`..=`Version::V3` is then unsupported / incorrect.
+grammar-v4-only = []
+
+incremental = ["sipha/incremental"]
+parallel = ["sipha/parallel"]
+partial-reparse = ["sipha/partial-reparse"]
+experimental_parallel_units = ["sipha/experimental_parallel_units"]
+
+# Optional integrations / utilities
+miette = ["sipha/miette"]
+utf16 = ["sipha/utf16"]
+lsp = ["sipha/lsp"]
+analysis = ["sipha/analysis"]
+display = ["sipha/display"]
+patterns = ["sipha/patterns"]
+trace = ["sipha/trace"]
+
+# Transform / formatting / codegen helpers
+transform = ["sipha/transform"]
+sourcemap = ["sipha/sourcemap"]
+fmt = ["sipha/fmt"]
+codegen-pretty = ["sipha/codegen-pretty"]
+
+[dependencies]
+# Use the in-repo sipha crate; do not modify sipha.
+# `leekscript` currently relies on `sipha` APIs that are `std`-gated, so we
+# always enable `sipha/std` and forward additional opt-in features above.
+sipha = { path = "../../sipha/sipha", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# Keep tests simple for now; use sipha's S-expression helpers.
+
