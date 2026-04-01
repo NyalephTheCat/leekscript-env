@@ -1,0 +1,6 @@
+[submodule "crates/sipha"]
+	path = crates/sipha
+	url = git@github.com:sipha-parser/sipha.git
+[submodule "leekscript-java"]
+	path = leekscript-java
+	url = https://github.com/leek-wars/leekscript.git
