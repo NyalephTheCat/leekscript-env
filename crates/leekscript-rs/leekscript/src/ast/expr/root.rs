@@ -2,7 +2,7 @@ use crate::syntax::kinds::K;
 use sipha::AstNode;
 use sipha::prelude::*;
 
-/// Any expression node (`K::Expr`).
+/// Full expression from the `expr` / `assign` rule (`K::Expr`).
 #[derive(Debug, Clone, AstNode)]
 #[ast(kind = K::Expr)]
-pub struct Expr(SyntaxNode);
+pub struct ExprRoot(SyntaxNode);

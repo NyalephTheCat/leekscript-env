@@ -25,9 +25,9 @@ fn parses_reference_fixtures_subset_v4() {
     parse_reference_fixture("ai/code/assignments.leek", Version::V4);
     parse_reference_fixture("ai/code/return_in_function.leek", Version::V4);
     parse_reference_fixture("ai/code/strings.leek", Version::V4);
-    parse_reference_fixture("ai/code/array.leek", Version::V4);
-    parse_reference_fixture("ai/code/break_and_continue.leek", Version::V4);
-    parse_reference_fixture("ai/code/match.leek", Version::V4);
+    parse_reference_fixture("ai/code/array.leek", Version::VNext);
+    parse_reference_fixture("ai/code/break_and_continue.leek", Version::VNext);
+    parse_reference_fixture("ai/code/match.leek", Version::VNext);
     parse_reference_fixture("ai/code/dynamic_operators.leek", Version::V4);
     parse_reference_fixture("ai/code/pow5.leek", Version::V4);
 

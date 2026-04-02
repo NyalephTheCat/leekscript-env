@@ -537,7 +537,57 @@ pub fn define(g: &mut GrammarBuilder) {
         });
     });
 
-    g.parser_rule("bracket_inner", |g| {
+    // `]` or `[` — interval endpoint (Java `LeekInterval` open/closed bounds).
+    g.parser_rule("interval_closing_bracket", |g| {
+        g.choice(
+            |g| {
+                g.call("rbracket");
+            },
+            |g| {
+                g.call("lbracket");
+            },
+        );
+    });
+
+    // Array / map contents only (no `..` intervals — those use `bracket_interval_body`).
+    g.parser_rule("bracket_list_or_map_inner", |g| {
+        g.call("expr");
+        g.optional(|g| {
+            g.choice(
+                |g| {
+                    cfg_flags::v4(g);
+                    g.call("colon");
+                    g.node(K::BracketMapExpr, |g| {
+                        g.call("expr");
+                        g.zero_or_more(|g| {
+                            g.call("comma");
+                            g.call("expr");
+                            g.call("colon");
+                            g.call("expr");
+                        });
+                        g.optional(|g| {
+                            g.call("comma");
+                        });
+                    });
+                },
+                |g| {
+                    g.call("comma");
+                    g.call("expr");
+                    g.zero_or_more(|g| {
+                        g.call("comma");
+                        g.call("expr");
+                    });
+                    g.optional(|g| {
+                        g.call("comma");
+                    });
+                },
+            );
+        });
+    });
+
+    // After `[`: `[..]`, `[..2]`, `[1..2]`, `[1..2[`, … (aligned with `readArrayOrMapOrInterval` /
+    // `readInterval` in leekscript-java).
+    g.parser_rule("bracket_interval_body", |g| {
         g.choices(vec![
             Box::new(|g| {
                 g.call("dotdot");
@@ -547,42 +597,9 @@ pub fn define(g: &mut GrammarBuilder) {
             }),
             Box::new(|g| {
                 g.call("expr");
+                g.call("dotdot");
                 g.optional(|g| {
-                    g.choices(vec![
-                        Box::new(|g| {
-                            cfg_flags::v4(g);
-                            g.call("colon");
-                            g.node(K::BracketMapExpr, |g| {
-                                g.call("expr");
-                                g.zero_or_more(|g| {
-                                    g.call("comma");
-                                    g.call("expr");
-                                    g.call("colon");
-                                    g.call("expr");
-                                });
-                                g.optional(|g| {
-                                    g.call("comma");
-                                });
-                            });
-                        }),
-                        Box::new(|g| {
-                            g.call("comma");
-                            g.call("expr");
-                            g.zero_or_more(|g| {
-                                g.call("comma");
-                                g.call("expr");
-                            });
-                            g.optional(|g| {
-                                g.call("comma");
-                            });
-                        }),
-                        Box::new(|g| {
-                            g.call("dotdot");
-                            g.optional(|g| {
-                                g.call("expr");
-                            });
-                        }),
-                    ]);
+                    g.call("expr");
                 });
             }),
         ]);
@@ -596,14 +613,21 @@ pub fn define(g: &mut GrammarBuilder) {
                 g.node(K::BracketMapExpr, |g| {
                     g.call("colon");
                 });
+                g.call("rbracket");
+            }),
+            Box::new(|g| {
+                g.node(K::IntervalExpr, |g| {
+                    g.call("bracket_interval_body");
+                    g.call("interval_closing_bracket");
+                });
             }),
             Box::new(|g| {
                 g.optional(|g| {
-                    g.call("bracket_inner");
+                    g.call("bracket_list_or_map_inner");
                 });
+                g.call("rbracket");
             }),
         ]);
-        g.call("rbracket");
     });
 
     g.parser_rule("anon_function_expr", |g| {
@@ -629,13 +653,26 @@ pub fn define(g: &mut GrammarBuilder) {
         });
     });
 
+    // `]..[`, `]..2]`, `]1..2[`, … (aligned with `BRACKET_RIGHT` + `DOT_DOT` in leekscript-java).
     g.parser_rule("interval_rbracket_expr", |g| {
         g.node(K::IntervalExpr, |g| {
             g.call("rbracket");
-            g.call("dotdot");
-            g.optional(|g| {
-                g.call("expr");
-            });
+            g.choices(vec![
+                Box::new(|g| {
+                    g.call("dotdot");
+                    g.optional(|g| {
+                        g.call("expr");
+                    });
+                }),
+                Box::new(|g| {
+                    g.call("expr");
+                    g.call("dotdot");
+                    g.optional(|g| {
+                        g.call("expr");
+                    });
+                }),
+            ]);
+            g.call("interval_closing_bracket");
         });
     });
 

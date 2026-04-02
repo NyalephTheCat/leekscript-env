@@ -7,9 +7,14 @@ mod expr;
 mod literal;
 mod root;
 mod stmt;
-mod type_expr;
+pub mod types;
 
-pub use expr::Expr;
+pub use expr::{
+    AnonFunctionExpr, ArrayExpr, BinaryExpr, BracketMapExpr, BuiltinStringifyExpr,
+    BuiltinTypeNameExpr, CallExpr, CastExpr, ClassRefExpr, Expr, ExprRoot, IfExpr, IndexExpr,
+    IntervalExpr, LambdaExpr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, SetExpr, SuperExpr,
+    TernaryExpr, UnaryExpr,
+};
 pub use literal::LitStr;
 pub use root::Root;
 pub use stmt::{
@@ -18,4 +23,6 @@ pub use stmt::{
     IfStmt, ImportStmt, IncludeStmt, MatchStmt, PackageStmt, ReturnStmt, Stmt, StmtBlock,
     SwitchArm, SwitchStmt, ThrowStmt, TryStmt, VarDecl, WhileStmt,
 };
-pub use type_expr::TypeExpr;
+pub use types::{
+    TypeExpr, TypeNode, TypeNullableType, TypePrimaryType, TypeUnionType,
+};

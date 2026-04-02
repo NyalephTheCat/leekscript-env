@@ -1,6 +1,6 @@
 use super::Block;
 use crate::ast::expr::Expr;
-use crate::ast::type_expr::TypeExpr;
+use crate::ast::types::TypeExpr;
 use crate::syntax::kinds::K;
 use sipha::prelude::*;
 use sipha::tree::ast::AstNode;

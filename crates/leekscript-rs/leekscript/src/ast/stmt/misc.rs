@@ -1,11 +1,11 @@
 use super::Block;
 use crate::ast::expr::Expr;
 use crate::ast::literal::LitStr;
-use crate::ast::type_expr::TypeExpr;
+use crate::ast::types::TypeExpr;
 use crate::syntax::kinds::K;
 use sipha::AstNode;
 use sipha::prelude::*;
-use sipha::tree::ast::AstNodeExt;
+use sipha::tree::ast::{AstNodeExt, AstTokenExt};
 use sipha::types::IntoSyntaxKind;
 
 /// Empty statement: a single `;`.
@@ -151,9 +151,7 @@ pub struct ImportStmt(SyntaxNode);
 
 impl ImportStmt {
     pub fn string_path(&self) -> Option<LitStr> {
-        self.syntax()
-            .token(K::String.into_syntax_kind())
-            .map(LitStr::new)
+        self.syntax().token_ast::<LitStr>()
     }
 
     /// `import foo.bar` segments when not using a string literal.

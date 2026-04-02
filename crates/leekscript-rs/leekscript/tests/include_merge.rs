@@ -2,6 +2,7 @@
 
 use leekscript::{
     Version, load_project_with_includes, merge_included_sources_to_single_file,
+    merge_included_sources_to_single_file_mapped,
 };
 use std::path::Path;
 
@@ -59,6 +60,30 @@ fn merge_diamond_common_once() {
         "second include of common should be skipped: {s}"
     );
     assert!(s.contains("2;"), "c.leek body should appear: {s}");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn merge_source_mapping_points_at_original_file() {
+    let root = tmp_merge_root("mapping");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("lib.leek"), "class C {}\n").unwrap();
+    std::fs::write(
+        root.join("main.leek"),
+        "include(\"lib.leek\");\nvar x = 1;\n",
+    )
+    .unwrap();
+
+    let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
+    let (merged, map) = merge_included_sources_to_single_file_mapped(&root, &p).unwrap();
+    let pos = merged.find("class").expect("class keyword in merged") as u32;
+    let sm = map.span_at_merged_offset(pos).expect("mapping for lib body");
+    assert!(
+        sm.path.ends_with("lib.leek"),
+        "expected lib.leek, got {:?}",
+        sm.path
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 

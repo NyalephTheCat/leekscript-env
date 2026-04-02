@@ -41,6 +41,7 @@ fn is_type_keyword(k: K) -> bool {
             | K::SetTypeKw
             | K::MapKw
             | K::FunctionTypeKw
+            | K::IntervalKw
             | K::VoidKw
     )
 }
@@ -214,7 +215,9 @@ fn is_binary_op(k: K) -> bool {
 
 /// Insert a space between `prev` and `next` when both are semantic tokens.
 ///
-/// When `in_type_syntax` is true (inside [`K::TypeExpr`] or [`K::BuiltinTypeNameExpr`]), spacing of
+/// When `in_type_syntax` is true (inside type-syntax CST nodes such as [`K::TypeExpr`],
+/// [`K::TypeUnionType`], [`K::TypeNullableType`], [`K::TypePrimaryType`], or
+/// [`K::BuiltinTypeNameExpr`]), spacing of
 /// `|`, `<`, and `>` follows [`FormatOptions::space_around_type_operators`] (`false` →
 /// `integer|real`, `Array<number>`; `true` → `integer | real`, `Array < number >`).
 #[must_use]
@@ -424,6 +427,8 @@ pub fn needs_space_between(
             | K::ArrayKw
             | K::SetTypeKw
             | K::MapKw
+            | K::FunctionTypeKw
+            | K::IntervalKw
     ) && matches!(next, K::Ident)
     {
         return true;

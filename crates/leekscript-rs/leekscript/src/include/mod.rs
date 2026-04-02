@@ -2,12 +2,19 @@
 //! and main-block include pass (path rules, duplicate includes, depth cap).
 //!
 //! Only top-level `include(...)` statements are followed — same scope as the reference main block.
+//!
+//! When the resolved path is not a file, the loader and merge pass try `.leek`, `.ls`, and
+//! `.leekscript` on the final segment (see [`try_resolve_include_file`]). If the path already uses
+//! one of those extensions but the file is missing, the other two extensions are tried on the same stem.
 
 mod limits;
 pub mod merge;
 
 pub use limits::IncludeLimits;
-pub use merge::{MergeIncludesError, merge_included_sources_to_single_file};
+pub use merge::{
+    MergeIncludesError, MergedSourceMapping, MergedSpanMap,
+    merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
+};
 
 use std::collections::HashSet;
 use std::fmt;
@@ -102,12 +109,21 @@ impl std::error::Error for IncludeLoadError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveError {
     EmptyPath,
+    /// [`resolve_include_path`] succeeded, but no file exists at that path or with `.leek` / `.ls` / `.leekscript`.
+    NoMatchingFile {
+        logical: PathBuf,
+    },
 }
 
 impl fmt::Display for ResolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ResolveError::EmptyPath => write!(f, "empty include path after normalization"),
+            ResolveError::NoMatchingFile { logical } => write!(
+                f,
+                "no file at {} (tried .leek, .ls, .leekscript)",
+                logical.display()
+            ),
         }
     }
 }
@@ -123,6 +139,48 @@ pub fn resolve_include_path(
     path_arg: &str,
 ) -> Result<PathBuf, ResolveError> {
     resolve_inner(root_dir, current_file_dir, path_arg.trim())
+}
+
+/// Extensions tried after the path from [`resolve_include_path`] when that path is not a file.
+const INCLUDE_FILE_EXTENSIONS: &[&str] = &["leek", "ls", "leekscript"];
+
+fn include_path_candidates(base: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    out.push(base.to_path_buf());
+
+    let ext = base.extension().and_then(|e| e.to_str());
+    let has_known_ext = ext.is_some_and(|e| INCLUDE_FILE_EXTENSIONS.contains(&e));
+
+    if ext.is_none() {
+        for e in INCLUDE_FILE_EXTENSIONS {
+            out.push(base.with_extension(e));
+        }
+    } else if has_known_ext {
+        let without = base.with_extension("");
+        for e in INCLUDE_FILE_EXTENSIONS {
+            if Some(*e) == ext {
+                continue;
+            }
+            out.push(without.with_extension(e));
+        }
+    }
+    out
+}
+
+/// Resolve an include to an existing file path, same rules as [`resolve_include_path`] plus
+/// automatic `.leek`, `.ls`, and `.leekscript` suffixes when needed.
+pub fn try_resolve_include_file(
+    root_dir: &Path,
+    current_file_dir: &Path,
+    path_arg: &str,
+) -> Result<PathBuf, ResolveError> {
+    let base = resolve_include_path(root_dir, current_file_dir, path_arg)?;
+    include_path_candidates(&base)
+        .into_iter()
+        .find(|p| p.is_file())
+        .ok_or_else(|| ResolveError::NoMatchingFile {
+            logical: base.clone(),
+        })
 }
 
 fn resolve_inner(root: &Path, dir: &Path, path: &str) -> Result<PathBuf, ResolveError> {
@@ -280,15 +338,22 @@ fn load_file_recursive(
             continue;
         };
         let arg = lit.value();
-        let resolved = resolve_include_path(root_dir, &current_dir, &arg)
-            .map_err(|e| IncludeLoadError::Resolve(file_path.to_path_buf(), e))?;
-        if !resolved.is_file() {
-            return Err(IncludeLoadError::NotFound {
-                from_file: file_path.to_path_buf(),
-                include_argument: arg,
-                resolved,
-            });
-        }
+        let resolved = match try_resolve_include_file(root_dir, &current_dir, &arg) {
+            Ok(p) => p,
+            Err(ResolveError::EmptyPath) => {
+                return Err(IncludeLoadError::Resolve(
+                    file_path.to_path_buf(),
+                    ResolveError::EmptyPath,
+                ));
+            }
+            Err(ResolveError::NoMatchingFile { logical }) => {
+                return Err(IncludeLoadError::NotFound {
+                    from_file: file_path.to_path_buf(),
+                    include_argument: arg,
+                    resolved: logical,
+                });
+            }
+        };
         load_file_recursive(&resolved, root_dir, version, limits, seen, out)?;
     }
 
@@ -329,5 +394,51 @@ mod tests {
         let dir = Path::new("/res/ai");
         let p = resolve_include_path(root, dir, r"foo\/bar.leek").unwrap();
         assert_eq!(p, Path::new("/res/ai/foo/bar.leek"));
+    }
+
+    #[test]
+    fn try_resolve_adds_leek_suffix() {
+        let root = std::env::temp_dir().join(format!("leek_try_leek_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("m.leek"), "1;\n").unwrap();
+        let got = try_resolve_include_file(&root, &root, "m").unwrap();
+        assert_eq!(got.file_name().unwrap(), "m.leek");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn try_resolve_prefers_exact_path_then_leek() {
+        let root = std::env::temp_dir().join(format!("leek_try_order_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let f = root.join("m");
+        std::fs::write(&f, "a;\n").unwrap();
+        std::fs::write(root.join("m.leek"), "b;\n").unwrap();
+        let got = try_resolve_include_file(&root, &root, "m").unwrap();
+        assert_eq!(got, f);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn try_resolve_uses_ls_when_no_leek() {
+        let root = std::env::temp_dir().join(format!("leek_try_ls_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("m.ls"), "1;\n").unwrap();
+        let got = try_resolve_include_file(&root, &root, "m").unwrap();
+        assert_eq!(got.file_name().unwrap(), "m.ls");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn try_resolve_leekscript_suffix() {
+        let root = std::env::temp_dir().join(format!("leek_try_lss_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("x.leekscript"), "1;\n").unwrap();
+        let got = try_resolve_include_file(&root, &root, "x").unwrap();
+        assert_eq!(got.file_name().unwrap(), "x.leekscript");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

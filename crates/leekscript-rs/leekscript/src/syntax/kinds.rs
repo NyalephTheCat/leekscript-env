@@ -68,6 +68,12 @@ pub enum K {
 
     // CST — expressions
     TypeExpr,
+    /// `T | U | …` — child `TypeNullableType` nodes and `|` tokens.
+    TypeUnionType,
+    /// `T` or `T?` — child `TypePrimaryType`, optional `?`.
+    TypeNullableType,
+    /// One type primary: keyword / `ident` / `Array<…>` / … — see grammar `type_primary`.
+    TypePrimaryType,
     BracketMapExpr,
     IntervalExpr,
     AnonFunctionExpr,
@@ -173,6 +179,8 @@ pub enum K {
     SetTypeKw,
     MapKw,
     FunctionTypeKw,
+    /// Type `Interval<T>` (`T` is `integer` or `real` for bounds).
+    IntervalKw,
 
     // Java `LexicalParser` v3 reserved words — mostly lexer-only in leekscript-java (no
     // `WordCompiler` support yet); included here for token/CST parity.
@@ -294,6 +302,9 @@ impl K {
             Self::ThrowStmt => "THROW_STMT",
             Self::GotoStmt => "GOTO_STMT",
             Self::TypeExpr => "TYPE_EXPR",
+            Self::TypeUnionType => "TYPE_UNION_TYPE",
+            Self::TypeNullableType => "TYPE_NULLABLE_TYPE",
+            Self::TypePrimaryType => "TYPE_PRIMARY_TYPE",
             Self::BracketMapExpr => "BRACKET_MAP_EXPR",
             Self::IntervalExpr => "INTERVAL_EXPR",
             Self::AnonFunctionExpr => "ANON_FUNCTION_EXPR",
@@ -389,6 +400,7 @@ impl K {
             Self::SetTypeKw => "SET_TYPE_KW",
             Self::MapKw => "MAP_KW",
             Self::FunctionTypeKw => "FUNCTION_TYPE_KW",
+            Self::IntervalKw => "INTERVAL_KW",
             Self::AbstractKw => "ABSTRACT_KW",
             Self::AwaitKw => "AWAIT_KW",
             Self::ByteKw => "BYTE_KW",

@@ -12,17 +12,21 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     g.parser_rule("type_union", |g| {
-        g.call("type_nullable");
-        g.zero_or_more(|g| {
-            g.call("op_bitor");
+        g.node(K::TypeUnionType, |g| {
             g.call("type_nullable");
+            g.zero_or_more(|g| {
+                g.call("op_bitor");
+                g.call("type_nullable");
+            });
         });
     });
 
     g.parser_rule("type_nullable", |g| {
-        g.call("type_primary");
-        g.optional(|g| {
-            g.call("op_question");
+        g.node(K::TypeNullableType, |g| {
+            g.call("type_primary");
+            g.optional(|g| {
+                g.call("op_question");
+            });
         });
     });
 
@@ -47,34 +51,6 @@ pub fn define(g: &mut GrammarBuilder) {
             }),
             Box::new(|g| {
                 g.call("kw_string_type");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.call("kw_int");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.call("kw_char");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.call("kw_float");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.call("kw_double");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.call("kw_byte");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.call("kw_long");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.call("kw_short");
             }),
             Box::new(|g| {
                 cfg_flags::v2(g);
@@ -114,22 +90,9 @@ pub fn define(g: &mut GrammarBuilder) {
             }),
             Box::new(|g| {
                 cfg_flags::v2(g);
-                g.call("kw_function");
-                g.call("lparen");
+                g.call("kw_interval_type");
                 g.optional(|g| {
-                    g.call("fn_param");
-                    g.zero_or_more(|g| {
-                        g.call("comma");
-                        g.call("fn_param");
-                    });
-                    g.optional(|g| {
-                        g.call("comma");
-                    });
-                });
-                g.call("rparen");
-                g.optional(|g| {
-                    g.call("arrow");
-                    g.call("ls_type");
+                    g.call("generic_type_args");
                 });
             }),
             Box::new(|g| {
@@ -140,23 +103,31 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     g.parser_rule("type_primary", |g| {
-        g.choices(vec![
-            Box::new(|g| {
-                g.call("lambda_type_primary_no_ident");
-            }),
-            Box::new(|g| {
-                g.call("ident");
-            }),
-        ]);
+        g.node(K::TypePrimaryType, |g| {
+            g.choices(vec![
+                Box::new(|g| {
+                    g.call("lambda_type_primary_no_ident");
+                }),
+                Box::new(|g| {
+                    g.call("ident");
+                }),
+            ]);
+        });
     });
 
     // Return type after `=>` in arrow lambdas (`dp => real dp["avg"]`).
     // Single primary only here; unions/nullable use full `ls_type` if needed later.
     g.parser_rule("lambda_return_type", |g| {
         g.node(K::TypeExpr, |g| {
-            g.call("lambda_type_primary_no_ident");
-            g.optional(|g| {
-                g.call("op_question");
+            g.node(K::TypeUnionType, |g| {
+                g.node(K::TypeNullableType, |g| {
+                    g.node(K::TypePrimaryType, |g| {
+                        g.call("lambda_type_primary_no_ident");
+                    });
+                    g.optional(|g| {
+                        g.call("op_question");
+                    });
+                });
             });
         });
     });

@@ -463,7 +463,7 @@ mod tests {
     use crate::format::options::SemicolonStyle;
     #[test]
     fn directive_patch_indent() {
-        let doc = LeekDoc::parse("// leekfmt: indent-width=2\nlet x=1;", Version::V4).unwrap();
+        let doc = LeekDoc::parse("// leekfmt: indent-width=2\nlet x=1;", Version::VNext).unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.patches.len(), 1);
         assert_eq!(plan.patches[0].1.indent_width, Some(2));
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn file_wide_directive_patch_at_zero() {
         let src = "let x=1;\n//! leekfmt: indent-width=2\n";
-        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let doc = LeekDoc::parse(src, Version::VNext).unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.patches.len(), 1);
         assert_eq!(plan.patches[0].0, 0);
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn block_file_wide_directive_patch_at_zero() {
         let src = "let x=1;\n/*! leekfmt: indent-width=2 */\n";
-        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let doc = LeekDoc::parse(src, Version::VNext).unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.patches.len(), 1);
         assert_eq!(plan.patches[0].0, 0);
@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn ignore_next_line_scan_records_next_line_span() {
         let src = "// leekfmt: ignore-next-line\nlet   y=2;\nlet z=3;\n";
-        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let doc = LeekDoc::parse(src, Version::VNext).unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.preserve.len(), 1, "preserve={:?}", plan.preserve);
         let s = plan.preserve[0].start as usize;
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn off_on_span_covers_mangled_let_like_formatter_fixture() {
         let src = "a;\n// leekfmt: off\nlet x=1+  2;\n// leekfmt: on\nb;\n";
-        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let doc = LeekDoc::parse(src, Version::VNext).unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.preserve.len(), 1, "preserve={:?}", plan.preserve);
         let s = plan.preserve[0].start as usize;
@@ -522,7 +522,7 @@ mod tests {
 
     #[test]
     fn semicolons_directive_only_needed() {
-        let doc = LeekDoc::parse("// leekfmt: semicolons=only-needed\nlet x=1;", Version::V4).unwrap();
+        let doc = LeekDoc::parse("// leekfmt: semicolons=only-needed\nlet x=1;", Version::VNext).unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.patches.len(), 1);
         assert_eq!(plan.patches[0].1.semicolon_style, Some(SemicolonStyle::OnlyNeeded));

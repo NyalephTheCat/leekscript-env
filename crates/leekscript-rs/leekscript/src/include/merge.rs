@@ -11,7 +11,39 @@ use sipha::tree::ast::{AstNode, AstNodeExt};
 
 use crate::ast::{Root, Stmt};
 
-use super::{LoadedProject, LoadedSourceFile, ResolveError, resolve_include_path};
+use super::{LoadedProject, LoadedSourceFile, ResolveError, try_resolve_include_file};
+
+/// Maps byte offsets in merged include output back to a concrete source file and offset.
+#[derive(Debug, Clone, Default)]
+pub struct MergedSourceMapping {
+    /// Non-overlapping spans in merge order (each piece of copied source).
+    pub spans: Vec<MergedSpanMap>,
+}
+
+/// One contiguous slice of merged text copied from [`MergedSpanMap::path`].
+#[derive(Debug, Clone)]
+pub struct MergedSpanMap {
+    pub merged_start: u32,
+    pub merged_end: u32,
+    pub path: PathBuf,
+    /// Byte offset in that file’s UTF-8 source where this slice starts.
+    pub file_offset: u32,
+}
+
+impl MergedSourceMapping {
+    /// Returns the span map entry containing `merged_offset`, if any.
+    #[must_use]
+    pub fn span_at_merged_offset(&self, merged_offset: u32) -> Option<&MergedSpanMap> {
+        let i = self.spans.partition_point(|s| s.merged_start <= merged_offset);
+        let idx = i.checked_sub(1)?;
+        let s = self.spans.get(idx)?;
+        if merged_offset < s.merged_end {
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
 
 /// Failure while merging includes into one buffer.
 #[derive(Debug)]
@@ -72,16 +104,32 @@ fn build_file_index(project: &LoadedProject) -> Result<HashMap<PathBuf, usize>, 
     Ok(map)
 }
 
-fn emit_stmt_text(out: &mut String, file: &LoadedSourceFile, stmt: &Stmt) {
+fn emit_stmt_text(
+    out: &mut String,
+    file: &LoadedSourceFile,
+    stmt: &Stmt,
+    mapping: &mut MergedSourceMapping,
+) {
     let src = file.parsed.source();
     let range = stmt.syntax().text_range();
     let start = range.start as usize;
     let end = (range.end as usize).min(src.len());
+    let merged_start = out.len() as u32;
+    let file_offset = range.start;
     if start <= src.len() && start < end {
         let slice = &src[start..end];
         out.push_str(std::str::from_utf8(slice).unwrap_or(""));
     } else {
         out.push_str(&stmt.syntax().collect_text());
+    }
+    let merged_end = out.len() as u32;
+    if merged_end > merged_start {
+        mapping.spans.push(MergedSpanMap {
+            merged_start,
+            merged_end,
+            path: file.path.clone(),
+            file_offset,
+        });
     }
 }
 
@@ -100,6 +148,15 @@ pub fn merge_included_sources_to_single_file(
     project_root: impl AsRef<Path>,
     project: &LoadedProject,
 ) -> Result<String, MergeIncludesError> {
+    merge_included_sources_to_single_file_mapped(project_root, project).map(|(s, _)| s)
+}
+
+/// Like [`merge_included_sources_to_single_file`], plus a mapping from merged byte offsets to
+/// original file paths and offsets (for diagnostics).
+pub fn merge_included_sources_to_single_file_mapped(
+    project_root: impl AsRef<Path>,
+    project: &LoadedProject,
+) -> Result<(String, MergedSourceMapping), MergeIncludesError> {
     let project_root = project_root.as_ref();
     let root_dir = fs::canonicalize(project_root)
         .map_err(|e| MergeIncludesError::Io(project_root.to_path_buf(), e))?;
@@ -113,6 +170,7 @@ pub fn merge_included_sources_to_single_file(
 
     let mut emitted = HashSet::<PathBuf>::new();
     let mut out = String::new();
+    let mut mapping = MergedSourceMapping::default();
     emit_top_level(
         entry_file,
         &root_dir,
@@ -120,8 +178,9 @@ pub fn merge_included_sources_to_single_file(
         &index,
         &mut emitted,
         &mut out,
+        &mut mapping,
     )?;
-    Ok(out)
+    Ok((out, mapping))
 }
 
 fn emit_top_level(
@@ -131,9 +190,20 @@ fn emit_top_level(
     index: &HashMap<PathBuf, usize>,
     emitted: &mut HashSet<PathBuf>,
     out: &mut String,
+    mapping: &mut MergedSourceMapping,
 ) -> Result<(), MergeIncludesError> {
     let Some(root_node) = Root::cast(file.parsed.root().clone()) else {
+        let merged_start = out.len() as u32;
         out.push_str(file.parsed.source_str());
+        let merged_end = out.len() as u32;
+        if merged_end > merged_start {
+            mapping.spans.push(MergedSpanMap {
+                merged_start,
+                merged_end,
+                path: file.path.clone(),
+                file_offset: 0,
+            });
+        }
         return Ok(());
     };
 
@@ -143,13 +213,20 @@ fn emit_top_level(
         match &stmt {
             Stmt::Include(inc) => {
                 let Some(lit) = inc.path() else {
-                    emit_stmt_text(out, file, &stmt);
+                    emit_stmt_text(out, file, &stmt, mapping);
                     continue;
                 };
                 let arg = lit.value();
-                let resolved = resolve_include_path(root_dir, &current_dir, &arg).map_err(|e| {
-                    MergeIncludesError::Resolve(file.path.clone(), e)
-                })?;
+                let resolved = try_resolve_include_file(root_dir, &current_dir, &arg).map_err(
+                    |e| match e {
+                        ResolveError::EmptyPath => {
+                            MergeIncludesError::Resolve(file.path.clone(), e)
+                        }
+                        ResolveError::NoMatchingFile { logical } => {
+                            MergeIncludesError::MissingLoadedFile(logical)
+                        }
+                    },
+                )?;
                 let key = canonical_key(&resolved)?;
                 let rel = display_path_relative(root_dir, &key);
 
@@ -169,9 +246,9 @@ fn emit_top_level(
                 out.push_str("// leekscript-include: begin ");
                 out.push_str(&rel);
                 out.push('\n');
-                emit_top_level(included, root_dir, project, index, emitted, out)?;
+                emit_top_level(included, root_dir, project, index, emitted, out, mapping)?;
             }
-            _ => emit_stmt_text(out, file, &stmt),
+            _ => emit_stmt_text(out, file, &stmt, mapping),
         }
     }
 

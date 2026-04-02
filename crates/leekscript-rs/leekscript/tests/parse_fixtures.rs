@@ -48,8 +48,23 @@ fn v2_treats_let_as_identifier_before_v3() {
 }
 
 #[test]
-fn v4_let_declaration_uses_let_keyword() {
-    parse_doc("let x = 1", Version::V4).expect("v3+ keyword `let`");
+fn vnext_let_declaration_uses_let_keyword() {
+    parse_doc("let x = 1", Version::VNext).expect("vnext keyword `let`");
+}
+
+#[test]
+fn v4_rejects_let_decl() {
+    assert!(parse_doc("let x = 1", Version::V4).is_err());
+}
+
+#[test]
+fn v4_break_continue_without_level_vnext_allows_numeric_level() {
+    parse_doc("while (0) { break; }", Version::V4).expect("break;");
+    parse_doc("while (0) { continue; }", Version::V4).expect("continue;");
+    assert!(parse_doc("while (0) { break 2; }", Version::V4).is_err());
+    assert!(parse_doc("while (0) { continue 2; }", Version::V4).is_err());
+    parse_doc("while (0) { break 2; }", Version::VNext).expect("break 2");
+    parse_doc("while (0) { continue 2; }", Version::VNext).expect("continue 2");
 }
 
 #[test]
@@ -65,18 +80,18 @@ fn triple_less_lexes_as_single_token() {
 
 // Shapes using reserved keywords the reference `WordCompiler` does not implement yet.
 #[test]
-fn v4_parses_reserved_statement_shapes() {
+fn vnext_parses_reserved_statement_shapes() {
     parse_doc(
         "try { var x = 1 } catch (integer e) { } finally { }",
-        Version::V4,
+        Version::VNext,
     )
     .expect("try/catch/finally");
-    parse_doc("throw 1", Version::V4).expect("throw");
-    parse_doc(r#"import "m""#, Version::V4).expect("import string");
-    parse_doc("package a.b", Version::V4).expect("package");
-    parse_doc("goto lbl", Version::V4).expect("goto");
-    parse_doc("const x = 1", Version::V4).expect("const");
-    parse_doc("export { var x = 1 }", Version::V4).expect("export block");
+    parse_doc("throw 1", Version::VNext).expect("throw");
+    parse_doc(r#"import "m""#, Version::VNext).expect("import string");
+    parse_doc("package a.b", Version::VNext).expect("package");
+    parse_doc("goto lbl", Version::VNext).expect("goto");
+    parse_doc("const x = 1", Version::VNext).expect("const");
+    parse_doc("export { var x = 1 }", Version::VNext).expect("export block");
 }
 
 #[cfg(not(feature = "grammar-v4-only"))]
@@ -86,8 +101,13 @@ fn v3_allows_match_as_identifier() {
 }
 
 #[test]
-fn v4_match_statement_parses() {
-    parse_doc("match 1 { .. : return 0 }", Version::V4).expect("match is v4+ in this grammar");
+fn vnext_match_statement_parses() {
+    parse_doc("match 1 { .. : return 0 }", Version::VNext).expect("match is vnext in this grammar");
+}
+
+#[test]
+fn v4_allows_match_as_identifier_like_v3() {
+    parse_doc("var match = 1", Version::V4).expect("`match` is not reserved in v4 without vnext");
 }
 
 #[cfg(not(feature = "grammar-v4-only"))]

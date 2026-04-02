@@ -130,7 +130,7 @@ struct Printer<'a> {
     indent_level: u32,
     /// Visual column after the last character on the current line (0 right of newline).
     line_col: usize,
-    /// Nesting of [`K::TypeExpr`] / [`K::BuiltinTypeNameExpr`] for compact `|`, `<`, `>`.
+    /// Nesting of type-syntax nodes ([`K::TypeExpr`], unions, generics, …) for compact `|`, `<`, `>`.
     type_syntax_depth: u32,
 }
 
@@ -255,7 +255,13 @@ impl Printer<'_> {
         }
         let bump_type = matches!(
             node.kind_as::<K>(),
-            Some(K::TypeExpr | K::BuiltinTypeNameExpr)
+            Some(
+                K::TypeExpr
+                    | K::TypeUnionType
+                    | K::TypeNullableType
+                    | K::TypePrimaryType
+                    | K::BuiltinTypeNameExpr
+            )
         );
         if bump_type {
             self.type_syntax_depth += 1;

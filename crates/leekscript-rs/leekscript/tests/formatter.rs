@@ -3,7 +3,7 @@ use leekscript::Version;
 
 #[test]
 fn formats_let_with_spaces() {
-    let out = format_document("let x=1;", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document("let x=1;", Version::VNext, &FormatOptions::default()).unwrap();
     assert_eq!(out.trim(), "let x = 1;");
 }
 
@@ -13,7 +13,7 @@ fn semicolon_style_always_inserts_missing() {
         semicolon_style: SemicolonStyle::Always,
         ..Default::default()
     };
-    let out = format_document("function f() { let x = 1 }", Version::V4, &opts).unwrap();
+    let out = format_document("function f() { let x = 1 }", Version::VNext, &opts).unwrap();
     assert!(
         out.contains("let x = 1;"),
         "expected inserted semicolon, got:\n{out}"
@@ -26,7 +26,7 @@ fn semicolon_style_only_needed_drops_optional_semicolon() {
         semicolon_style: SemicolonStyle::OnlyNeeded,
         ..Default::default()
     };
-    let out = format_document("function f() { let x = 1; }", Version::V4, &opts).unwrap();
+    let out = format_document("function f() { let x = 1; }", Version::VNext, &opts).unwrap();
     assert!(
         !out.contains("let x = 1;"),
         "only-needed should omit var semicolon, got:\n{out}"
@@ -112,7 +112,7 @@ fn formats_space_after_nullable_type_question_before_name() {
 
 #[test]
 fn formats_arrow_lambda_without_duplicate_arrow() {
-    let out = format_document("let f = x -> x + 1;", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document("let f = x -> x + 1;", Version::VNext, &FormatOptions::default()).unwrap();
     assert_eq!(out.trim(), "let f = x -> x + 1;");
     assert!(
         !out.contains("-> x ->"),
@@ -124,7 +124,7 @@ fn formats_arrow_lambda_without_duplicate_arrow() {
 fn formats_lambda_block_return_with_space_before_paren() {
     let out = format_document(
         "let g = () -> { return(1); };",
-        Version::V4,
+        Version::VNext,
         &FormatOptions::default(),
     )
     .unwrap();
@@ -194,21 +194,21 @@ fn block_lines_share_indent_after_rparen_stmt() {
 #[test]
 fn indent_width_from_directive() {
     let src = "// leekfmt: indent-width=2\nfunction f() {\nlet x=1;\n}";
-    let out = format_document(src, Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(out.contains("  let x = 1;"), "expected 2-space indent, got:\n{out}");
 }
 
 #[test]
 fn file_wide_inner_directive_formats_lines_above() {
     let src = "function f() {\nlet x=1 + 2;\n}\n//! leekfmt: space-around-binary-ops=false\n";
-    let out = format_document(src, Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("1+2") && !out.contains("1 + 2"),
         "file-wide //! should apply to body above the directive, got:\n{out}"
     );
 
     let src_outer = "function f() {\nlet x=1 + 2;\n}\n// leekfmt: space-around-binary-ops=false\n";
-    let out_outer = format_document(src_outer, Version::V4, &FormatOptions::default()).unwrap();
+    let out_outer = format_document(src_outer, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out_outer.contains("1 + 2"),
         "ordinary // directive should not change lines above it, got:\n{out_outer}"
@@ -218,7 +218,7 @@ fn file_wide_inner_directive_formats_lines_above() {
 #[test]
 fn off_on_preserves_mangled() {
     let src = "a;\n// leekfmt: off\nlet x=1+  2;\n// leekfmt: on\nb;\n";
-    let out = format_document(src, Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(out.contains("let x=1+  2;"), "verbatim region should stay:\n{out}");
     assert!(out.contains("a;"), "formatted first stmt:\n{out}");
 }
@@ -236,7 +236,7 @@ fn space_around_binary_ops_false() {
 #[test]
 fn ignore_next_line() {
     let src = "// leekfmt: ignore-next-line\nlet   y=2;\nlet z=3;\n";
-    let out = format_document(src, Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(out.contains("let   y=2;"), "next line kept:\n{out}");
     assert!(out.contains("let z = 3;") || out.contains("let z=3"), "following line formatted:\n{out}");
 }
@@ -244,7 +244,7 @@ fn ignore_next_line() {
 #[test]
 fn block_comment_directive() {
     let src = "/* leekfmt: use-tabs=true */\nfunction f() {\nlet a=1;\n}\n";
-    let out = format_document(src, Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("\tlet a = 1;"),
         "expected tab-indented body:\n{out}"
@@ -272,7 +272,7 @@ fn spaces_around_keyword_binary_ops_before_paren() {
     );
 
     // `as` is a cast in this grammar: `expr as Type`
-    let out = format_document("let x=(a as integer);", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document("let x=(a as integer);", Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("a as integer"),
         "expected spaces around `as`, got:\n{out}"
@@ -281,7 +281,7 @@ fn spaces_around_keyword_binary_ops_before_paren() {
 
 #[test]
 fn spaces_after_assign_before_paren() {
-    let out = format_document("let x=(y);", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document("let x=(y);", Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.trim().contains("let x = (y);"),
         "expected space after `=` before `(`, got:\n{out}"
@@ -319,7 +319,7 @@ fn spaces_between_adjacent_keywords() {
 
 #[test]
 fn space_after_comma_default() {
-    let out = format_document("let x = f(1,2);", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document("let x = f(1,2);", Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("f(1, 2)"),
         "expected space after comma, got:\n{out}"
@@ -332,7 +332,7 @@ fn space_after_comma_false() {
         space_after_comma: false,
         ..Default::default()
     };
-    let out = format_document("let x = f(1, 2);", Version::V4, &o).unwrap();
+    let out = format_document("let x = f(1, 2);", Version::VNext, &o).unwrap();
     assert!(out.contains("f(1,2)"), "expected no space after comma, got:\n{out}");
     assert!(!out.contains("1, 2"), "unexpected space after comma:\n{out}");
 }
@@ -469,7 +469,7 @@ fn blank_lines_between_block_statements() {
         blank_lines_between_block_statements: 1,
         ..Default::default()
     };
-    let out = format_document("function f() {\nlet a=1;\nlet b=2;\n}", Version::V4, &o).unwrap();
+    let out = format_document("function f() {\nlet a=1;\nlet b=2;\n}", Version::VNext, &o).unwrap();
     assert!(
         out.contains("\n\n    let b"),
         "expected one extra blank line between block stmts, got:\n{out}"
@@ -483,7 +483,7 @@ fn max_consecutive_blank_lines_caps_block_extra() {
         max_consecutive_blank_lines_in_block: 1,
         ..Default::default()
     };
-    let out = format_document("function f() {\nlet a=1;\nlet b=2;\n}", Version::V4, &o).unwrap();
+    let out = format_document("function f() {\nlet a=1;\nlet b=2;\n}", Version::VNext, &o).unwrap();
     assert!(
         !out.contains("\n\n\n\n    let b"),
         "expected cap on extra blank lines, got:\n{out}"
@@ -497,7 +497,7 @@ fn max_consecutive_blank_lines_caps_block_extra() {
 #[test]
 fn space_after_comma_from_directive() {
     let src = "// leekfmt: space-after-comma=false\nlet x = f(1, 2);\n";
-    let out = format_document(src, Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("f(1,2)") && !out.contains("1, 2"),
         "directive should disable space after comma, got:\n{out}"
@@ -520,7 +520,7 @@ fn compact_type_union_and_angle_generics() {
 
 #[test]
 fn comparison_and_bitwise_still_spaced_outside_types() {
-    let out = format_document("let x = 1 | 2;", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document("let x = 1 | 2;", Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("1 | 2"),
         "bitwise `|` outside TypeExpr should stay spaced, got:\n{out}"

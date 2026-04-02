@@ -32,8 +32,14 @@ pub use sipha::tree::walk::{Visitor, WalkOptions, WalkResult, walk};
 /// Re-export for bounds on [`typed_at_offset`] without importing sipha separately.
 pub use sipha::tree::ast::AstNode as AstNodeTrait;
 
+/// Re-export for typed literal / token wrappers (e.g. [`crate::ast::LitStr`]).
+pub use sipha::tree::ast::AstToken as AstTokenTrait;
+
 /// Re-export for [`AstNodeExt::children`] and related helpers on [`SyntaxNode`].
 pub use sipha::tree::ast::AstNodeExt;
+
+/// Re-export for [`AstTokenExt::token_ast`] on [`SyntaxNode`].
+pub use sipha::tree::ast::AstTokenExt;
 
 /// Deepest node covering `offset`, then ancestors toward `root` until `N::cast` succeeds.
 #[must_use]

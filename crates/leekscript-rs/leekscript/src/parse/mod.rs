@@ -9,8 +9,8 @@ use sipha::prelude::*;
 
 /// Parse a full document.
 ///
-/// If the `grammar-v4-only` Cargo feature is enabled, only [`Version::V4`] is supported; older
-/// [`Version`] values will not match the lexer/parser graph correctly.
+/// If the `grammar-v4-only` Cargo feature is enabled, only [`Version::V4`] and [`Version::VNext`]
+/// are supported; older [`Version`] values will not match the lexer/parser graph correctly.
 pub fn parse_doc(src: &str, version: Version) -> Result<ParsedDoc, ParseError> {
     let built = grammar::built_graph();
     let graph = built.as_graph();

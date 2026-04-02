@@ -16,9 +16,10 @@ diff = ["sipha/diff"]
 
 # Performance / parsing modes
 #
-# Build lexer/parser graphs specialized for [`Version::V4`] only: omits `if_flag` / `if_not_flag`
-# branches for older dialects (smaller / faster bytecode when you never parse V1–V3).
-# Parsing with `Version::V1`..=`Version::V3` is then unsupported / incorrect.
+# Build lexer/parser graphs specialized for [`Version::V4`] / [`Version::VNext`]: omits `if_flag` /
+# `if_not_flag` branches for older dialects (smaller / faster bytecode when you never parse V1–V3).
+# `Version::VNext` remains selectable at runtime via `FLAG_VNEXT`. Parsing with `Version::V1`–`V3`
+# is then unsupported / incorrect.
 grammar-v4-only = []
 
 incremental = ["sipha/incremental"]

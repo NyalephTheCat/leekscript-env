@@ -63,30 +63,37 @@ pub fn define(g: &mut GrammarBuilder) {
             // `TokenType` (reserved words). We parse them here for token-stream / syntax-tree parity.
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
+                cfg_flags::vnext(g);
                 g.call("try_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
+                cfg_flags::vnext(g);
                 g.call("throw_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
+                cfg_flags::vnext(g);
                 g.call("import_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
+                cfg_flags::vnext(g);
                 g.call("export_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
+                cfg_flags::vnext(g);
                 g.call("goto_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
+                cfg_flags::vnext(g);
                 g.call("package_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
+                cfg_flags::vnext(g);
                 g.call("const_decl");
             }),
             Box::new(|g: &mut GrammarBuilder| {
@@ -95,6 +102,7 @@ pub fn define(g: &mut GrammarBuilder) {
             // `match` is not a Java lexer keyword; this is a leekscript-rs extension (v4+).
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v4(g);
+                cfg_flags::vnext(g);
                 g.call("match_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
@@ -385,10 +393,22 @@ pub fn define(g: &mut GrammarBuilder) {
     g.parser_rule("break_stmt", |g| {
         g.node(K::BreakStmt, |g| {
             g.call("kw_break");
-            // `break` can be followed by an optional numeric level: `break 2`
-            g.optional(|g| {
-                g.call("break_continue_level");
-            });
+            // `break 2` is VNext only; without it, reject a digit level so it is not parsed as
+            // `break;` + expression statement `2`.
+            g.choice(
+                |g| {
+                    cfg_flags::vnext(g);
+                    g.optional(|g| {
+                        g.call("break_continue_level");
+                    });
+                },
+                |g| {
+                    cfg_flags::not_vnext(g);
+                    g.neg_lookahead(|g| {
+                        g.call("break_continue_level");
+                    });
+                },
+            );
             g.optional(|g| {
                 g.call("semi");
             });
@@ -398,10 +418,20 @@ pub fn define(g: &mut GrammarBuilder) {
     g.parser_rule("continue_stmt", |g| {
         g.node(K::ContinueStmt, |g| {
             g.call("kw_continue");
-            // `continue` can be followed by an optional numeric level: `continue 2`
-            g.optional(|g| {
-                g.call("break_continue_level");
-            });
+            g.choice(
+                |g| {
+                    cfg_flags::vnext(g);
+                    g.optional(|g| {
+                        g.call("break_continue_level");
+                    });
+                },
+                |g| {
+                    cfg_flags::not_vnext(g);
+                    g.neg_lookahead(|g| {
+                        g.call("break_continue_level");
+                    });
+                },
+            );
             g.optional(|g| {
                 g.call("semi");
             });

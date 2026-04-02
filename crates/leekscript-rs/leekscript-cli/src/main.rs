@@ -8,14 +8,17 @@ use std::collections::VecDeque;
 use clap::{Parser, Subcommand, ValueEnum};
 use leekscript::format::{BraceStyle, FormatOptions, LineEnding, SemicolonStyle, format_document};
 use leekscript::include::{
-    IncludeLoadError, load_project_with_includes, merge_included_sources_to_single_file,
+    IncludeLoadError, LoadedProject, load_project_with_includes,
+    merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
 };
+use leekscript::MergedSourceMapping;
 use leekscript::syntax::kinds::K;
 use leekscript::Version;
 use serde::Deserialize;
+use sipha::diagnostics::line_index::LineIndex;
 use sipha::tree::tree_display::{TreeDisplayOptions, format_syntax_tree};
 use sipha::types::FromSyntaxKind;
-use sipha::types::SyntaxKind;
+use sipha::types::{Span, SyntaxKind};
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum Dialect {
@@ -23,6 +26,8 @@ enum Dialect {
     V2,
     V3,
     V4,
+    /// V4 plus upcoming syntax (`let`, `match`, `import`/`export`, `try`/`catch`, `break n`, …).
+    VNext,
 }
 
 impl From<Dialect> for Version {
@@ -32,6 +37,7 @@ impl From<Dialect> for Version {
             Dialect::V2 => Version::V2,
             Dialect::V3 => Version::V3,
             Dialect::V4 => Version::V4,
+            Dialect::VNext => Version::VNext,
         }
     }
 }
@@ -39,7 +45,7 @@ impl From<Dialect> for Version {
 #[derive(Parser)]
 #[command(name = "leekscript", version, about = "LeekScript parser, formatter, and include merger")]
 struct Cli {
-    /// Language dialect (v1–v4)
+    /// Language dialect (v1–v4, or v-next)
     #[arg(long, global = true, value_enum, default_value_t = Dialect::V4)]
     dialect: Dialect,
 
@@ -49,8 +55,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Parse inputs and print diagnostics; exits with failure if any parse fails
+    /// Parse inputs (with `include("…")` expanded like `merge`), then run scope/type analysis unless `--parse-only`
     Check {
+        /// Only run the parser (skip scope / type checks after a successful parse)
+        #[arg(long)]
+        parse_only: bool,
+
+        /// Project root for resolving `include("…")` (default: parent directory of each entry file)
+        #[arg(long, value_name = "DIR")]
+        root: Option<PathBuf>,
+
         /// Files to check, or omit to read stdin once
         #[arg(value_name = "FILE")]
         files: Vec<PathBuf>,
@@ -213,7 +227,7 @@ fn main() -> ExitCode {
     let version = Version::from(cli.dialect);
 
     match cli.command {
-        Command::Check { files } => cmd_check(version, &files),
+        Command::Check { parse_only, root, files } => cmd_check(version, parse_only, root.as_deref(), &files),
         Command::Format {
             stdout,
             out,
@@ -294,7 +308,33 @@ fn kind_to_name(k: SyntaxKind) -> Option<&'static str> {
     K::from_syntax_kind(k).map(K::as_str)
 }
 
-fn cmd_check(version: Version, files: &[PathBuf]) -> ExitCode {
+fn diagnostic_line(label: &str, src: &str, span: Span, message: &str) -> String {
+    let idx = LineIndex::new(src.as_bytes());
+    let (line, col) = idx.line_col_1based(span.start);
+    format!("{label}:{line}:{col}: {message}")
+}
+
+fn diagnostic_merged(
+    mapping: &MergedSourceMapping,
+    project: &LoadedProject,
+    merged_src: &str,
+    entry_label: &str,
+    span: Span,
+    message: &str,
+) -> String {
+    if let Some(sm) = mapping.span_at_merged_offset(span.start) {
+        let rel = span.start.saturating_sub(sm.merged_start);
+        let file_off = sm.file_offset.saturating_add(rel);
+        if let Some(f) = project.files.iter().find(|f| f.path == sm.path) {
+            let idx = LineIndex::new(f.source.as_bytes());
+            let (line, col) = idx.line_col_1based(file_off);
+            return format!("{}:{line}:{col}: {message}", f.path.display());
+        }
+    }
+    diagnostic_line(entry_label, merged_src, span, message)
+}
+
+fn cmd_check(version: Version, parse_only: bool, root_override: Option<&Path>, files: &[PathBuf]) -> ExitCode {
     let mut ok = true;
 
     if files.is_empty() {
@@ -303,26 +343,83 @@ fn cmd_check(version: Version, files: &[PathBuf]) -> ExitCode {
             let _ = writeln!(io::stderr(), "leekscript: stdin: {e}");
             return ExitCode::from(1);
         }
-        if let Err(e) = leekscript::parse_doc(&src, version) {
-            ok = false;
-            eprintln!("{}", e.format_with_source(&src));
+        let label = "<stdin>";
+        match leekscript::parse_doc(&src, version) {
+            Ok(doc) => {
+                if !parse_only {
+                    let analysis = leekscript::run_semantic_analysis(doc.root());
+                    for d in &analysis.diagnostics {
+                        ok = false;
+                        eprintln!("{}", diagnostic_line(label, &src, d.span, &d.message));
+                    }
+                }
+            }
+            Err(e) => {
+                ok = false;
+                eprintln!("{}", e.format_with_source(&src));
+            }
         }
         return if ok { ExitCode::SUCCESS } else { ExitCode::from(1) };
     }
 
     for path in files {
         let label = path.display().to_string();
-        let src = match std::fs::read_to_string(path) {
-            Ok(s) => s,
+        let entry = match std::fs::canonicalize(path) {
+            Ok(p) => p,
             Err(e) => {
                 ok = false;
                 let _ = writeln!(io::stderr(), "leekscript: {}: {e}", path.display());
                 continue;
             }
         };
-        if let Err(e) = leekscript::parse_doc(&src, version) {
-            ok = false;
-            eprintln!("{label}: {}", e.format_with_source(&src));
+        let root = if let Some(r) = root_override {
+            match std::fs::canonicalize(r) {
+                Ok(p) => p,
+                Err(e) => {
+                    ok = false;
+                    let _ = writeln!(io::stderr(), "leekscript: --root {}: {e}", r.display());
+                    continue;
+                }
+            }
+        } else {
+            entry
+                .parent()
+                .unwrap_or_else(|| Path::new("/"))
+                .to_path_buf()
+        };
+
+        let project = match load_project_with_includes(&root, &entry, version) {
+            Ok(p) => p,
+            Err(e) => {
+                ok = false;
+                let _ = writeln!(io::stderr(), "leekscript: {}: {e}", path.display());
+                continue;
+            }
+        };
+
+        let (merged, map) = match merge_included_sources_to_single_file_mapped(&root, &project) {
+            Ok(x) => x,
+            Err(e) => {
+                ok = false;
+                let _ = writeln!(io::stderr(), "leekscript: {}: merge: {e}", path.display());
+                continue;
+            }
+        };
+
+        match leekscript::parse_doc(&merged, version) {
+            Ok(doc) => {
+                if !parse_only {
+                    let analysis = leekscript::run_semantic_analysis(doc.root());
+                    for d in &analysis.diagnostics {
+                        ok = false;
+                        eprintln!("{}", diagnostic_merged(&map, &project, &merged, &label, d.span, &d.message));
+                    }
+                }
+            }
+            Err(e) => {
+                ok = false;
+                eprintln!("{label} (merged): {}", e.format_with_source(&merged));
+            }
         }
     }
 

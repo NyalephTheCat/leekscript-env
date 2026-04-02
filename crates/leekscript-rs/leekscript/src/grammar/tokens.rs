@@ -2,14 +2,28 @@ use super::cfg_flags;
 use super::lexer_rules;
 #[cfg(not(feature = "grammar-v4-only"))]
 use crate::parse::version::FLAG_V1;
-use crate::parse::version::{FLAG_V2, FLAG_V3, FLAG_V4};
+use crate::parse::version::{FLAG_V2, FLAG_V3, FLAG_V4, FLAG_VNEXT};
 use crate::syntax::kinds::K;
 use sipha::prelude::*;
 
 /// Java v3+ spellings that `LexicalParser` maps to dedicated tokens (not `STRING` identifiers).
 ///
 /// **Note:** leekscript-java `WordCompiler` does not treat most of these as real syntax yet; they
-/// are reserved at lex time only. Omits `match`, which is only reserved under [`FLAG_V4`] here.
+/// are reserved at lex time only. Omits `match` and `V3_LEX_RESERVED_VNEXT_ONLY`, which are only
+/// blocked as identifiers when `FLAG_VNEXT` is set (alongside `match`). `let` stays in this list so
+/// `let` is never an identifier under v3+; only `Version::VNext` enables the `let` keyword.
+const V3_LEX_RESERVED_VNEXT_ONLY: &[&[u8]] = &[
+    b"catch",
+    b"const",
+    b"export",
+    b"finally",
+    b"goto",
+    b"import",
+    b"package",
+    b"throw",
+    b"try",
+];
+
 const V3_LEX_RESERVED: &[&[u8]] = &[
     b"abstract",
     b"and",
@@ -21,11 +35,9 @@ const V3_LEX_RESERVED: &[&[u8]] = &[
     b"break",
     b"byte",
     b"case",
-    b"catch",
     b"char",
     b"class",
     b"Class",
-    b"const",
     b"constructor",
     b"continue",
     b"default",
@@ -34,20 +46,16 @@ const V3_LEX_RESERVED: &[&[u8]] = &[
     b"else",
     b"enum",
     b"eval",
-    b"export",
     b"extends",
     b"false",
     b"final",
-    b"finally",
     b"float",
     b"for",
     b"function",
     b"Function",
     b"global",
-    b"goto",
     b"if",
     b"implements",
-    b"import",
     b"include",
     b"in",
     b"instanceof",
@@ -64,7 +72,6 @@ const V3_LEX_RESERVED: &[&[u8]] = &[
     b"null",
     b"Object",
     b"or",
-    b"package",
     b"private",
     b"protected",
     b"public",
@@ -78,11 +85,9 @@ const V3_LEX_RESERVED: &[&[u8]] = &[
     b"switch",
     b"synchronized",
     b"this",
-    b"throw",
     b"throws",
     b"transient",
     b"true",
-    b"try",
     b"typeof",
     b"var",
     b"void",
@@ -189,7 +194,7 @@ pub fn define(g: &mut GrammarBuilder) {
     // `ident` is registered last so keywords win when both could match.
     lexer_rules::versioned_keyword_rule(g, "kw_return", K::ReturnKw, b"return");
     lexer_rules::versioned_keyword_rule(g, "kw_var", K::VarKw, b"var");
-    lexer_rules::keyword_rule_if(g, "kw_let", FLAG_V3, K::LetKw, b"let");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_let", FLAG_V3, K::LetKw, b"let");
     lexer_rules::versioned_keyword_rule(g, "kw_function", K::FunctionKw, b"function");
     lexer_rules::versioned_keyword_rule(g, "kw_if", K::IfKw, b"if");
     lexer_rules::versioned_keyword_rule(g, "kw_else", K::ElseKw, b"else");
@@ -200,7 +205,7 @@ pub fn define(g: &mut GrammarBuilder) {
     lexer_rules::versioned_keyword_rule(g, "kw_continue", K::ContinueKw, b"continue");
     lexer_rules::versioned_keyword_rule(g, "kw_include", K::IncludeKw, b"include");
     // Not in Java `LexicalParser`. Only a keyword for leekscript-rs v4+ sources.
-    lexer_rules::keyword_rule_if(g, "kw_match", FLAG_V4, K::MatchKw, b"match");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_match", FLAG_V4, K::MatchKw, b"match");
     lexer_rules::versioned_keyword_rule_if(g, "kw_class", FLAG_V2, K::ClassKw, b"class");
     lexer_rules::versioned_keyword_rule_if(g, "kw_new", FLAG_V2, K::NewKw, b"new");
     lexer_rules::versioned_keyword_rule(g, "kw_in", K::InKw, b"in");
@@ -263,6 +268,13 @@ pub fn define(g: &mut GrammarBuilder) {
         K::FunctionTypeKw,
         b"Function",
     );
+    lexer_rules::versioned_keyword_rule_if(
+        g,
+        "kw_interval_type",
+        FLAG_V2,
+        K::IntervalKw,
+        b"Interval",
+    );
 
     // Java `LexicalParser` v3-only reserved spellings (`TokenType` …). Most have no counterpart in
     // leekscript-java `WordCompiler` yet; they exist so the lexer matches Java and the CST can
@@ -270,23 +282,23 @@ pub fn define(g: &mut GrammarBuilder) {
     lexer_rules::keyword_rule_if(g, "kw_abstract", FLAG_V3, K::AbstractKw, b"abstract");
     lexer_rules::keyword_rule_if(g, "kw_await", FLAG_V3, K::AwaitKw, b"await");
     lexer_rules::keyword_rule_if(g, "kw_byte", FLAG_V3, K::ByteKw, b"byte");
-    lexer_rules::keyword_rule_if(g, "kw_catch", FLAG_V3, K::CatchKw, b"catch");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_catch", FLAG_V3, K::CatchKw, b"catch");
     lexer_rules::keyword_rule_if(g, "kw_char", FLAG_V3, K::CharKw, b"char");
-    lexer_rules::keyword_rule_if(g, "kw_const", FLAG_V3, K::ConstKw, b"const");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_const", FLAG_V3, K::ConstKw, b"const");
     lexer_rules::keyword_rule_if(g, "kw_double", FLAG_V3, K::DoubleKw, b"double");
     lexer_rules::keyword_rule_if(g, "kw_enum", FLAG_V3, K::EnumKw, b"enum");
     lexer_rules::keyword_rule_if(g, "kw_eval", FLAG_V3, K::EvalKw, b"eval");
-    lexer_rules::keyword_rule_if(g, "kw_export", FLAG_V3, K::ExportKw, b"export");
-    lexer_rules::keyword_rule_if(g, "kw_finally", FLAG_V3, K::FinallyKw, b"finally");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_export", FLAG_V3, K::ExportKw, b"export");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_finally", FLAG_V3, K::FinallyKw, b"finally");
     lexer_rules::keyword_rule_if(g, "kw_float", FLAG_V3, K::FloatKw, b"float");
-    lexer_rules::keyword_rule_if(g, "kw_goto", FLAG_V3, K::GotoKw, b"goto");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_goto", FLAG_V3, K::GotoKw, b"goto");
     lexer_rules::keyword_rule_if(g, "kw_implements", FLAG_V3, K::ImplementsKw, b"implements");
-    lexer_rules::keyword_rule_if(g, "kw_import", FLAG_V3, K::ImportKw, b"import");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_import", FLAG_V3, K::ImportKw, b"import");
     lexer_rules::keyword_rule_if(g, "kw_int", FLAG_V3, K::IntKw, b"int");
     lexer_rules::keyword_rule_if(g, "kw_interface", FLAG_V3, K::InterfaceKw, b"interface");
     lexer_rules::keyword_rule_if(g, "kw_long", FLAG_V3, K::LongKw, b"long");
     lexer_rules::keyword_rule_if(g, "kw_native", FLAG_V3, K::NativeKw, b"native");
-    lexer_rules::keyword_rule_if(g, "kw_package", FLAG_V3, K::PackageKw, b"package");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_package", FLAG_V3, K::PackageKw, b"package");
     lexer_rules::keyword_rule_if(g, "kw_short", FLAG_V3, K::ShortKw, b"short");
     lexer_rules::keyword_rule_if(
         g,
@@ -295,10 +307,10 @@ pub fn define(g: &mut GrammarBuilder) {
         K::SynchronizedKw,
         b"synchronized",
     );
-    lexer_rules::keyword_rule_if(g, "kw_throw", FLAG_V3, K::ThrowKw, b"throw");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_throw", FLAG_V3, K::ThrowKw, b"throw");
     lexer_rules::keyword_rule_if(g, "kw_throws", FLAG_V3, K::ThrowsKw, b"throws");
     lexer_rules::keyword_rule_if(g, "kw_transient", FLAG_V3, K::TransientKw, b"transient");
-    lexer_rules::keyword_rule_if(g, "kw_try", FLAG_V3, K::TryKw, b"try");
+    lexer_rules::keyword_rule_if_vnext(g, "kw_try", FLAG_V3, K::TryKw, b"try");
     lexer_rules::keyword_rule_if(g, "kw_typeof", FLAG_V3, K::TypeofKw, b"typeof");
     lexer_rules::keyword_rule_if(g, "kw_volatile", FLAG_V3, K::VolatileKw, b"volatile");
     lexer_rules::keyword_rule_if(g, "kw_with", FLAG_V3, K::WithKw, b"with");
@@ -574,7 +586,15 @@ fn ident_reserved_word_shape_v4(g: &mut GrammarBuilder) {
             g.choice_literals(V3_LEX_RESERVED);
         },
         |g| {
-            g.literal(b"match");
+            g.if_flag(FLAG_VNEXT);
+            g.choice(
+                |g| {
+                    g.choice_literals(V3_LEX_RESERVED_VNEXT_ONLY);
+                },
+                |g| {
+                    g.literal(b"match");
+                },
+            );
         },
     );
     g.neg_lookahead(|g| {
@@ -592,7 +612,15 @@ fn ident_reserved_word_shape_dyn(g: &mut GrammarBuilder) {
                     g.choice_literals(V3_LEX_RESERVED);
                 },
                 |g| {
-                    g.literal(b"match");
+                    g.if_flag(FLAG_VNEXT);
+                    g.choice(
+                        |g| {
+                            g.choice_literals(V3_LEX_RESERVED_VNEXT_ONLY);
+                        },
+                        |g| {
+                            g.literal(b"match");
+                        },
+                    );
                 },
             );
             g.neg_lookahead(|g| {

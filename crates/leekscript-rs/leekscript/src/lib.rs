@@ -12,6 +12,12 @@
 //! per-file metadata comments and skips duplicate includes (diamond graphs).
 //! Inclusion depth is capped by [`IncludeLimits`] in [`include`] (default matches the reference implementation).
 //!
+//! ## Scope extents
+//!
+//! [`scope`] assigns stable [`scope::ScopeId`] values, maps byte offsets to the innermost
+//! lexical scope, and records variables / functions / classes with source-level types and
+//! signatures (requires the `walk` feature, on by default).
+//!
 //! ## Formatting
 //!
 //! [`format`] is a configurable pretty-printer with `// leekfmt:`, `//! leekfmt:` (file-wide options),
@@ -19,9 +25,9 @@
 //!
 //! ## Cargo features
 //!
-//! - **`grammar-v4-only`**: Specializes lexer/parser bytecode for [`parse::Version::V4`] only by
-//!   stripping compile-time flag checks. Do not parse older [`parse::Version`] values with this
-//!   enabled.
+//! - **`grammar-v4-only`**: Specializes lexer/parser bytecode for [`parse::Version::V4`] /
+//!   [`parse::Version::VNext`] by stripping older-dialect flag checks. Do not parse
+//!   [`parse::Version::V1`]–[`parse::Version::V3`] with this enabled.
 
 pub mod ast;
 pub mod document;
@@ -29,17 +35,24 @@ pub mod format;
 pub mod grammar;
 pub mod include;
 pub mod parse;
+#[cfg(feature = "walk")]
+pub mod scope;
 pub mod syntax;
 pub mod visit;
 
 pub use document::{DocEditError, LeekDoc};
 pub use include::{
     IncludeLimits, IncludeLoadError, LoadedProject, LoadedSourceFile, MergeIncludesError,
-    ResolveError, load_project_with_includes, load_project_with_includes_limited,
-    merge_included_sources_to_single_file, resolve_include_path,
+    MergedSourceMapping, MergedSpanMap, ResolveError, load_project_with_includes,
+    load_project_with_includes_limited, merge_included_sources_to_single_file,
+    merge_included_sources_to_single_file_mapped, resolve_include_path,
+    try_resolve_include_file,
 };
 pub use parse::{ParseError, Version, parse_doc, parse_syntax_root};
 pub use sipha::types::{Pos, Span};
+
+#[cfg(feature = "walk")]
+pub use scope::{run_semantic_analysis, AnalysisResult, LeekTy, Reference, Scope, ScopeId};
 
 #[cfg(feature = "transform")]
 pub use document::{TransformResult, Transformer, transform};
