@@ -211,7 +211,14 @@ impl Printer<'_> {
                     self.prev_kind = None;
                 }
                 self.emit_verbatim_span(pv);
-                while i < stmts.len() && stmts[i].text_range().end <= pv.end {
+                // Skip every top-level node that intersects `pv`. Using only `end <= pv.end` can
+                // stall forever when a node's span overlaps the preserve region but extends past
+                // `pv.end` (e.g. leading line comment trivia on the first preserved statement).
+                while i < stmts.len() {
+                    let s = stmts[i].text_range();
+                    if s.start >= pv.end || s.end <= pv.start {
+                        break;
+                    }
                     i += 1;
                 }
                 self.prev_kind = None;

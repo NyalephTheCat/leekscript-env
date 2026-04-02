@@ -238,9 +238,9 @@ fn span_line_after_comment_line(source: &[u8], comment_start: u32) -> Option<Spa
     while i < source.len() && source[i] != b'\n' {
         i += 1;
     }
-    if i < source.len() && source[i] == b'\n' {
-        i += 1;
-    }
+    // Omit the line-ending `\n` from the preserve span: it is often the first byte of the next
+    // top-level node's range, which would make that node intersect the preserve region and
+    // either hang (skip loop never advances) or skip formatting the following statement entirely.
     Some(clamp_span(
         Span::new(start, i as u32),
         source.len() as Pos,
@@ -461,7 +461,6 @@ mod tests {
     use super::*;
     use crate::Version;
     use crate::format::options::SemicolonStyle;
-
     #[test]
     fn directive_patch_indent() {
         let doc = LeekDoc::parse("// leekfmt: indent-width=2\nlet x=1;", Version::V4).unwrap();
@@ -506,7 +505,7 @@ mod tests {
         assert_eq!(plan.preserve.len(), 1, "preserve={:?}", plan.preserve);
         let s = plan.preserve[0].start as usize;
         let e = plan.preserve[0].end as usize;
-        assert_eq!(&src.as_bytes()[s..e], b"let   y=2;\n");
+        assert_eq!(&src.as_bytes()[s..e], b"let   y=2;");
     }
 
     #[test]
