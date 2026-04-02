@@ -1,0 +1,976 @@
+//! CLI for parsing, formatting, and merging LeekScript sources (`leekscript` binary).
+
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::collections::VecDeque;
+
+use clap::{Parser, Subcommand, ValueEnum};
+use leekscript::format::{BraceStyle, FormatOptions, LineEnding, SemicolonStyle, format_document};
+use leekscript::include::{
+    IncludeLoadError, load_project_with_includes, merge_included_sources_to_single_file,
+};
+use leekscript::syntax::kinds::K;
+use leekscript::Version;
+use serde::Deserialize;
+use sipha::tree::tree_display::{TreeDisplayOptions, format_syntax_tree};
+use sipha::types::FromSyntaxKind;
+use sipha::types::SyntaxKind;
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Dialect {
+    V1,
+    V2,
+    V3,
+    V4,
+}
+
+impl From<Dialect> for Version {
+    fn from(d: Dialect) -> Self {
+        match d {
+            Dialect::V1 => Version::V1,
+            Dialect::V2 => Version::V2,
+            Dialect::V3 => Version::V3,
+            Dialect::V4 => Version::V4,
+        }
+    }
+}
+
+#[derive(Parser)]
+#[command(name = "leekscript", version, about = "LeekScript parser, formatter, and include merger")]
+struct Cli {
+    /// Language dialect (v1–v4)
+    #[arg(long, global = true, value_enum, default_value_t = Dialect::V4)]
+    dialect: Dialect,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Parse inputs and print diagnostics; exits with failure if any parse fails
+    Check {
+        /// Files to check, or omit to read stdin once
+        #[arg(value_name = "FILE")]
+        files: Vec<PathBuf>,
+    },
+    /// Pretty-print LeekScript (writes in-place by default when given paths)
+    Format {
+        /// Print formatted output to stdout (requires exactly one input file after directory expansion)
+        #[arg(long, conflicts_with = "out")]
+        stdout: bool,
+
+        /// Write formatted output to this file (requires exactly one input file after directory expansion)
+        #[arg(long, value_name = "FILE", conflicts_with = "stdout")]
+        out: Option<PathBuf>,
+
+        /// TOML config file with formatting options
+        #[arg(long, value_name = "FILE")]
+        config: Option<PathBuf>,
+
+        /// Indent width in spaces (ignored when `--use-tabs`)
+        #[arg(long, value_name = "N")]
+        indent_width: Option<usize>,
+        /// Use tab characters for indentation
+        #[arg(long)]
+        use_tabs: bool,
+        /// Logical tab width (display width for tabs; used when wrapping)
+        #[arg(long, value_name = "N")]
+        tab_width: Option<usize>,
+        /// Max line length (`0` = no comma wrapping)
+        #[arg(long, value_name = "N")]
+        line_width: Option<usize>,
+        /// Brace placement style
+        #[arg(long, value_enum, value_name = "STYLE")]
+        brace_style: Option<CliBraceStyle>,
+        /// Blank lines between top-level statements (`0` = single newline only)
+        #[arg(long, value_name = "N")]
+        blank_lines_between_top_level: Option<usize>,
+        /// Extra blank lines after a top-level class before the next item (`0` = none)
+        #[arg(long, value_name = "N")]
+        blank_lines_after_class: Option<usize>,
+
+        /// Insert space after keywords before `(` (e.g. `if (` vs `if(`)
+        #[arg(long, value_name = "BOOL")]
+        space_after_keyword_before_paren: Option<bool>,
+        /// Insert space before `(` in function declarations (e.g. `function f (` vs `function f(`)
+        #[arg(long, value_name = "BOOL")]
+        space_before_function_decl_paren: Option<bool>,
+        /// Insert spaces inside parentheses (e.g. `( x )` vs `(x)`)
+        #[arg(long, value_name = "BOOL")]
+        space_inside_parens: Option<bool>,
+        /// Insert spaces around assignment `=` (e.g. `x = 1` vs `x=1`)
+        #[arg(long, value_name = "BOOL")]
+        space_around_assign: Option<bool>,
+        /// Insert spaces around binary operators (e.g. `a + b` vs `a+b`)
+        #[arg(long, value_name = "BOOL")]
+        space_around_binary_ops: Option<bool>,
+        /// Insert spaces after commas in lists (e.g. `a, b` vs `a,b`)
+        #[arg(long, value_name = "BOOL")]
+        space_after_comma: Option<bool>,
+        /// Spaces around `|`, `<`, `>` in types (e.g. `integer | real`; omit for `integer|real`)
+        #[arg(long, value_name = "BOOL")]
+        space_around_type_operators: Option<bool>,
+        /// Put `else`/`catch`/`finally` on a new line after `}`
+        #[arg(long, value_name = "BOOL")]
+        newline_before_else_catch_finally: Option<bool>,
+
+        /// Force a trailing newline at end of output
+        #[arg(long, value_name = "BOOL")]
+        trailing_newline: Option<bool>,
+        /// Extra blank lines between statements inside `{ ... }` (`0` = single newline only)
+        #[arg(long, value_name = "N")]
+        blank_lines_between_block_statements: Option<usize>,
+        /// Extra blank lines between class members in the class body (`0` = single newline only)
+        #[arg(long, value_name = "N")]
+        blank_lines_between_class_members: Option<usize>,
+        /// Caps blank lines between block statements and class members when non-zero (`0` = no cap)
+        #[arg(long, value_name = "N")]
+        max_consecutive_blank_lines_in_block: Option<usize>,
+        /// Line ending for inserted breaks
+        #[arg(long, value_enum, value_name = "ENDING")]
+        line_ending: Option<CliLineEnding>,
+        /// Optional statement semicolons: preserve (default), always, or only-needed (`return;`, `break;`, …)
+        #[arg(long, value_enum, value_name = "STYLE")]
+        semicolon_style: Option<CliSemicolonStyle>,
+
+        /// Files to format, or omit to read stdin once
+        #[arg(value_name = "FILE")]
+        files: Vec<PathBuf>,
+    },
+    /// Load an entry file and all includes, then emit one merged source (metadata comments preserved)
+    Merge {
+        /// Project root directory (used for include resolution, same as the library loader)
+        #[arg(long, default_value = ".", value_name = "DIR")]
+        root: PathBuf,
+        /// Entry `.leek` file (relative to `--root` or absolute)
+        entry: PathBuf,
+    },
+    /// Parse inputs and print the syntax tree
+    Tree {
+        /// Include trivia tokens (whitespace/comments) in the tree
+        #[arg(long)]
+        trivia: bool,
+        /// Files to parse, or omit to read stdin once
+        #[arg(value_name = "FILE")]
+        files: Vec<PathBuf>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum CliBraceStyle {
+    SameLine,
+    NextLine,
+}
+
+impl From<CliBraceStyle> for BraceStyle {
+    fn from(v: CliBraceStyle) -> Self {
+        match v {
+            CliBraceStyle::SameLine => BraceStyle::SameLine,
+            CliBraceStyle::NextLine => BraceStyle::NextLine,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum CliLineEnding {
+    Lf,
+    Crlf,
+}
+
+impl From<CliLineEnding> for LineEnding {
+    fn from(v: CliLineEnding) -> Self {
+        match v {
+            CliLineEnding::Lf => LineEnding::Lf,
+            CliLineEnding::Crlf => LineEnding::Crlf,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum CliSemicolonStyle {
+    Preserve,
+    Always,
+    OnlyNeeded,
+}
+
+impl From<CliSemicolonStyle> for SemicolonStyle {
+    fn from(v: CliSemicolonStyle) -> Self {
+        match v {
+            CliSemicolonStyle::Preserve => SemicolonStyle::Preserve,
+            CliSemicolonStyle::Always => SemicolonStyle::Always,
+            CliSemicolonStyle::OnlyNeeded => SemicolonStyle::OnlyNeeded,
+        }
+    }
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let version = Version::from(cli.dialect);
+
+    match cli.command {
+        Command::Check { files } => cmd_check(version, &files),
+        Command::Format {
+            stdout,
+            out,
+            config,
+            indent_width,
+            use_tabs,
+            tab_width,
+            line_width,
+            brace_style,
+            blank_lines_between_top_level,
+            blank_lines_after_class,
+            space_after_keyword_before_paren,
+            space_before_function_decl_paren,
+            space_inside_parens,
+            space_around_assign,
+            space_around_binary_ops,
+            space_after_comma,
+            space_around_type_operators,
+            newline_before_else_catch_finally,
+            trailing_newline,
+            blank_lines_between_block_statements,
+            blank_lines_between_class_members,
+            max_consecutive_blank_lines_in_block,
+            line_ending,
+            semicolon_style,
+            files,
+        } => {
+            let base_from_config = match config {
+                Some(path) => match load_format_config(&path) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        let _ = writeln!(io::stderr(), "leekscript: config {}: {e}", path.display());
+                        return ExitCode::from(2);
+                    }
+                },
+                None => FormatOptions::default(),
+            };
+
+            let opts = build_format_options(
+                base_from_config,
+                indent_width,
+                use_tabs,
+                tab_width,
+                line_width,
+                brace_style,
+                blank_lines_between_top_level,
+                blank_lines_after_class,
+                space_after_keyword_before_paren,
+                space_before_function_decl_paren,
+                space_inside_parens,
+                space_around_assign,
+                space_around_binary_ops,
+                space_after_comma,
+                space_around_type_operators,
+                newline_before_else_catch_finally,
+                trailing_newline,
+                blank_lines_between_block_statements,
+                blank_lines_between_class_members,
+                max_consecutive_blank_lines_in_block,
+                line_ending,
+                semicolon_style,
+            );
+            let dest = if stdout {
+                FormatDest::Stdout
+            } else if let Some(p) = out {
+                FormatDest::File(p)
+            } else {
+                FormatDest::InPlace
+            };
+            cmd_format(version, dest, &files, &opts)
+        }
+        Command::Merge { root, entry } => cmd_merge(version, &root, &entry),
+        Command::Tree { trivia, files } => cmd_tree(version, trivia, &files),
+    }
+}
+
+fn kind_to_name(k: SyntaxKind) -> Option<&'static str> {
+    K::from_syntax_kind(k).map(K::as_str)
+}
+
+fn cmd_check(version: Version, files: &[PathBuf]) -> ExitCode {
+    let mut ok = true;
+
+    if files.is_empty() {
+        let mut src = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut src) {
+            let _ = writeln!(io::stderr(), "leekscript: stdin: {e}");
+            return ExitCode::from(1);
+        }
+        if let Err(e) = leekscript::parse_doc(&src, version) {
+            ok = false;
+            eprintln!("{}", e.format_with_source(&src));
+        }
+        return if ok { ExitCode::SUCCESS } else { ExitCode::from(1) };
+    }
+
+    for path in files {
+        let label = path.display().to_string();
+        let src = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                ok = false;
+                let _ = writeln!(io::stderr(), "leekscript: {}: {e}", path.display());
+                continue;
+            }
+        };
+        if let Err(e) = leekscript::parse_doc(&src, version) {
+            ok = false;
+            eprintln!("{label}: {}", e.format_with_source(&src));
+        }
+    }
+
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TomlFormatOptions {
+    #[serde(alias = "indent-width")]
+    indent_width: Option<usize>,
+    #[serde(alias = "use-tabs")]
+    use_tabs: Option<bool>,
+    #[serde(alias = "indent-style", alias = "indent_style")]
+    indent_style: Option<String>,
+    #[serde(alias = "tab-width")]
+    tab_width: Option<usize>,
+    #[serde(alias = "line-width")]
+    line_width: Option<usize>,
+    #[serde(alias = "brace-style")]
+    brace_style: Option<String>,
+    #[serde(alias = "blank-lines-between-top-level")]
+    blank_lines_between_top_level: Option<usize>,
+    #[serde(alias = "blank-lines-after-class")]
+    blank_lines_after_class: Option<usize>,
+
+    #[serde(alias = "space-after-keyword-before-paren")]
+    space_after_keyword_before_paren: Option<bool>,
+    #[serde(alias = "space-before-function-decl-paren")]
+    space_before_function_decl_paren: Option<bool>,
+    #[serde(alias = "space-inside-parens")]
+    space_inside_parens: Option<bool>,
+    #[serde(alias = "space-around-assign")]
+    space_around_assign: Option<bool>,
+    #[serde(alias = "space-around-binary-ops")]
+    space_around_binary_ops: Option<bool>,
+    #[serde(alias = "space-after-comma")]
+    space_after_comma: Option<bool>,
+    #[serde(alias = "space-around-type-operators")]
+    space_around_type_operators: Option<bool>,
+    #[serde(alias = "newline-before-else-catch-finally")]
+    newline_before_else_catch_finally: Option<bool>,
+
+    #[serde(alias = "trailing-newline")]
+    trailing_newline: Option<bool>,
+    #[serde(alias = "blank-lines-between-block-statements")]
+    blank_lines_between_block_statements: Option<usize>,
+    #[serde(alias = "blank-lines-between-class-members")]
+    blank_lines_between_class_members: Option<usize>,
+    #[serde(alias = "max-consecutive-blank-lines-in-block")]
+    max_consecutive_blank_lines_in_block: Option<usize>,
+    #[serde(alias = "line-ending")]
+    line_ending: Option<String>,
+    #[serde(alias = "semicolon-style", alias = "semicolons")]
+    semicolon_style: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct TomlConfig {
+    #[serde(default)]
+    format: Option<TomlFormatOptions>,
+    // Allow configs that put format keys at the root.
+    #[serde(flatten)]
+    root_format: TomlFormatOptions,
+}
+
+fn load_format_config(path: &Path) -> Result<FormatOptions, String> {
+    let src = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let cfg: TomlConfig = toml::from_str(&src).map_err(|e| e.to_string())?;
+
+    let mut o = FormatOptions::default();
+    if let Some(f) = cfg.format {
+        apply_toml_format_options(&mut o, &f);
+    }
+    apply_toml_format_options(&mut o, &cfg.root_format);
+    Ok(o)
+}
+
+fn apply_toml_format_options(into: &mut FormatOptions, f: &TomlFormatOptions) {
+    if let Some(v) = f.indent_width {
+        into.indent_width = v.clamp(1, 32);
+    }
+    if let Some(v) = f.use_tabs {
+        into.use_tabs = v;
+    }
+    if let Some(v) = f.indent_style.as_deref() {
+        let v = v.trim().to_ascii_lowercase();
+        if matches!(v.as_str(), "tabs" | "tab") {
+            into.use_tabs = true;
+        } else if matches!(v.as_str(), "spaces" | "space") {
+            into.use_tabs = false;
+        }
+    }
+    if let Some(v) = f.tab_width {
+        into.tab_width = v.clamp(1, 32);
+    }
+    if let Some(v) = f.line_width {
+        into.line_width = if v == 0 { 0 } else { v.clamp(20, 500) };
+    }
+    if let Some(v) = f.brace_style.as_deref() {
+        if let Some(bs) = parse_brace_style(v) {
+            into.brace_style = bs;
+        }
+    }
+    if let Some(v) = f.blank_lines_between_top_level {
+        into.blank_lines_between_top_level = v.min(10);
+    }
+    if let Some(v) = f.blank_lines_after_class {
+        into.blank_lines_after_class = v.min(10);
+    }
+    if let Some(v) = f.space_after_keyword_before_paren {
+        into.space_after_keyword_before_paren = v;
+    }
+    if let Some(v) = f.space_before_function_decl_paren {
+        into.space_before_function_decl_paren = v;
+    }
+    if let Some(v) = f.space_inside_parens {
+        into.space_inside_parens = v;
+    }
+    if let Some(v) = f.space_around_assign {
+        into.space_around_assign = v;
+    }
+    if let Some(v) = f.space_around_binary_ops {
+        into.space_around_binary_ops = v;
+    }
+    if let Some(v) = f.space_after_comma {
+        into.space_after_comma = v;
+    }
+    if let Some(v) = f.space_around_type_operators {
+        into.space_around_type_operators = v;
+    }
+    if let Some(v) = f.newline_before_else_catch_finally {
+        into.newline_before_else_catch_finally = v;
+    }
+    if let Some(v) = f.trailing_newline {
+        into.trailing_newline = v;
+    }
+    if let Some(v) = f.blank_lines_between_block_statements {
+        into.blank_lines_between_block_statements = v.min(10);
+    }
+    if let Some(v) = f.blank_lines_between_class_members {
+        into.blank_lines_between_class_members = v.min(10);
+    }
+    if let Some(v) = f.max_consecutive_blank_lines_in_block {
+        into.max_consecutive_blank_lines_in_block = v.min(10);
+    }
+    if let Some(v) = f.line_ending.as_deref() {
+        if let Some(le) = parse_line_ending(v) {
+            into.line_ending = le;
+        }
+    }
+    if let Some(v) = f.semicolon_style.as_deref() {
+        if let Some(s) = SemicolonStyle::parse(v) {
+            into.semicolon_style = s;
+        }
+    }
+}
+
+fn parse_brace_style(s: &str) -> Option<BraceStyle> {
+    let v = s.trim().to_ascii_lowercase().replace('_', "-");
+    match v.as_str() {
+        "same-line" | "sameline" | "kr" | "k&r" => Some(BraceStyle::SameLine),
+        "next-line" | "nextline" | "allman" => Some(BraceStyle::NextLine),
+        _ => None,
+    }
+}
+
+fn parse_line_ending(s: &str) -> Option<LineEnding> {
+    let v = s.trim().to_ascii_lowercase();
+    match v.as_str() {
+        "lf" | "unix" | "\\n" => Some(LineEnding::Lf),
+        "crlf" | "windows" | "\\r\\n" => Some(LineEnding::Crlf),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_format_options(
+    base: FormatOptions,
+    indent_width: Option<usize>,
+    use_tabs: bool,
+    tab_width: Option<usize>,
+    line_width: Option<usize>,
+    brace_style: Option<CliBraceStyle>,
+    blank_lines_between_top_level: Option<usize>,
+    blank_lines_after_class: Option<usize>,
+    space_after_keyword_before_paren: Option<bool>,
+    space_before_function_decl_paren: Option<bool>,
+    space_inside_parens: Option<bool>,
+    space_around_assign: Option<bool>,
+    space_around_binary_ops: Option<bool>,
+    space_after_comma: Option<bool>,
+    space_around_type_operators: Option<bool>,
+    newline_before_else_catch_finally: Option<bool>,
+    trailing_newline: Option<bool>,
+    blank_lines_between_block_statements: Option<usize>,
+    blank_lines_between_class_members: Option<usize>,
+    max_consecutive_blank_lines_in_block: Option<usize>,
+    line_ending: Option<CliLineEnding>,
+    semicolon_style: Option<CliSemicolonStyle>,
+) -> FormatOptions {
+    let mut o = base;
+
+    if let Some(v) = indent_width {
+        o.indent_width = v.clamp(1, 32);
+    }
+    if use_tabs {
+        o.use_tabs = true;
+    }
+    if let Some(v) = tab_width {
+        o.tab_width = v.clamp(1, 32);
+    }
+    if let Some(v) = line_width {
+        o.line_width = if v == 0 { 0 } else { v.clamp(20, 500) };
+    }
+    if let Some(v) = brace_style {
+        o.brace_style = v.into();
+    }
+    if let Some(v) = blank_lines_between_top_level {
+        o.blank_lines_between_top_level = v.min(10);
+    }
+    if let Some(v) = blank_lines_after_class {
+        o.blank_lines_after_class = v.min(10);
+    }
+    if let Some(v) = space_after_keyword_before_paren {
+        o.space_after_keyword_before_paren = v;
+    }
+    if let Some(v) = space_before_function_decl_paren {
+        o.space_before_function_decl_paren = v;
+    }
+    if let Some(v) = space_inside_parens {
+        o.space_inside_parens = v;
+    }
+    if let Some(v) = space_around_assign {
+        o.space_around_assign = v;
+    }
+    if let Some(v) = space_around_binary_ops {
+        o.space_around_binary_ops = v;
+    }
+    if let Some(v) = space_after_comma {
+        o.space_after_comma = v;
+    }
+    if let Some(v) = space_around_type_operators {
+        o.space_around_type_operators = v;
+    }
+    if let Some(v) = newline_before_else_catch_finally {
+        o.newline_before_else_catch_finally = v;
+    }
+    if let Some(v) = trailing_newline {
+        o.trailing_newline = v;
+    }
+    if let Some(v) = blank_lines_between_block_statements {
+        o.blank_lines_between_block_statements = v.min(10);
+    }
+    if let Some(v) = blank_lines_between_class_members {
+        o.blank_lines_between_class_members = v.min(10);
+    }
+    if let Some(v) = max_consecutive_blank_lines_in_block {
+        o.max_consecutive_blank_lines_in_block = v.min(10);
+    }
+    if let Some(v) = line_ending {
+        o.line_ending = v.into();
+    }
+    if let Some(v) = semicolon_style {
+        o.semicolon_style = v.into();
+    }
+
+    o
+}
+
+enum FormatDest {
+    InPlace,
+    Stdout,
+    File(PathBuf),
+}
+
+fn cmd_format(version: Version, dest: FormatDest, files: &[PathBuf], opts: &FormatOptions) -> ExitCode {
+
+    if files.is_empty() {
+        let mut src = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut src) {
+            let _ = writeln!(io::stderr(), "leekscript: stdin: {e}");
+            return ExitCode::from(1);
+        }
+        return match format_document(&src, version, opts) {
+            Ok(out) => {
+                match dest {
+                    FormatDest::InPlace => {
+                        let _ = writeln!(io::stderr(), "leekscript: format: cannot write in-place when reading stdin");
+                        return ExitCode::from(2);
+                    }
+                    FormatDest::Stdout => {
+                        print!("{out}");
+                    }
+                    FormatDest::File(path) => {
+                        if let Err(e) = std::fs::write(&path, out.as_bytes()) {
+                            let _ = writeln!(io::stderr(), "leekscript: {}: {e}", path.display());
+                            return ExitCode::from(1);
+                        }
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("{}", e.format_with_source(&src));
+                ExitCode::from(1)
+            }
+        };
+    }
+
+    let files = match expand_format_inputs(files) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = writeln!(io::stderr(), "leekscript: format: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
+    match &dest {
+        FormatDest::Stdout | FormatDest::File(_) if files.len() != 1 => {
+            let _ = writeln!(
+                io::stderr(),
+                "leekscript: format: --stdout/--out require exactly one input file (after directory expansion)"
+            );
+            return ExitCode::from(2);
+        }
+        _ => {}
+    }
+
+    let mut ok = true;
+    for path in files {
+        let src = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                ok = false;
+                let _ = writeln!(io::stderr(), "leekscript: {}: {e}", path.display());
+                continue;
+            }
+        };
+        let out = match format_document(&src, version, opts) {
+            Ok(o) => o,
+            Err(e) => {
+                ok = false;
+                eprintln!("{}: {}", path.display(), e.format_with_source(&src));
+                continue;
+            }
+        };
+        match &dest {
+            FormatDest::InPlace => {
+                if let Err(e) = std::fs::write(&path, out.as_bytes()) {
+                    ok = false;
+                    let _ = writeln!(io::stderr(), "leekscript: {}: {e}", path.display());
+                }
+            }
+            FormatDest::Stdout => {
+                print!("{out}");
+            }
+            FormatDest::File(to) => {
+                if let Err(e) = std::fs::write(to, out.as_bytes()) {
+                    ok = false;
+                    let _ = writeln!(io::stderr(), "leekscript: {}: {e}", to.display());
+                }
+            }
+        }
+    }
+
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+fn expand_format_inputs(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let mut out: Vec<PathBuf> = Vec::new();
+
+    for input in inputs {
+        if input.is_file() {
+            out.push(input.clone());
+            continue;
+        }
+        if input.is_dir() {
+            out.extend(collect_leek_files_recursively(input)?);
+            continue;
+        }
+        return Err(format!("{}: no such file or directory", input.display()));
+    }
+
+    // Stable ordering (useful for error output and deterministic runs).
+    out.sort();
+    out.dedup();
+
+    if out.is_empty() {
+        return Err("no input files found".to_string());
+    }
+    Ok(out)
+}
+
+fn collect_leek_files_recursively(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    let mut q: VecDeque<PathBuf> = VecDeque::new();
+    q.push_back(root.to_path_buf());
+
+    while let Some(dir) = q.pop_front() {
+        let rd = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        for entry in rd {
+            let entry = entry.map_err(|e| format!("{}: {e}", dir.display()))?;
+            let path = entry.path();
+            if path.is_dir() {
+                q.push_back(path);
+                continue;
+            }
+            if path.is_file() {
+                if path.extension().is_some_and(|e| e == "leek") {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toml_format_options_precedence_cli_over_config() {
+        let mut base = FormatOptions::default();
+        let cfg = TomlFormatOptions {
+            indent_width: Some(2),
+            space_around_binary_ops: Some(false),
+            ..Default::default()
+        };
+        apply_toml_format_options(&mut base, &cfg);
+
+        let out = build_format_options(
+            base,
+            Some(6),
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(true),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(out.indent_width, 6);
+        assert_eq!(out.space_around_binary_ops, true);
+    }
+
+    #[test]
+    fn parses_config_with_format_table_and_root_keys() {
+        let src = r#"
+indent-width = 2
+[format]
+space-around-binary-ops = false
+"#;
+        let cfg: TomlConfig = toml::from_str(src).unwrap();
+        let mut o = FormatOptions::default();
+        if let Some(f) = cfg.format {
+            apply_toml_format_options(&mut o, &f);
+        }
+        apply_toml_format_options(&mut o, &cfg.root_format);
+
+        assert_eq!(o.indent_width, 2);
+        assert_eq!(o.space_around_binary_ops, false);
+    }
+
+    #[test]
+    fn parses_brace_style_and_line_ending_synonyms() {
+        let src = r#"
+[format]
+brace-style = "allman"
+line-ending = "windows"
+"#;
+        let cfg: TomlConfig = toml::from_str(src).unwrap();
+        let mut o = FormatOptions::default();
+        if let Some(f) = cfg.format {
+            apply_toml_format_options(&mut o, &f);
+        }
+        assert_eq!(o.brace_style, BraceStyle::NextLine);
+        assert_eq!(o.line_ending, LineEnding::Crlf);
+    }
+
+    #[test]
+    fn parses_space_after_comma_and_block_blank_lines() {
+        let src = r#"
+[format]
+space-after-comma = false
+blank-lines-between-block-statements = 2
+"#;
+        let cfg: TomlConfig = toml::from_str(src).unwrap();
+        let mut o = FormatOptions::default();
+        if let Some(f) = cfg.format {
+            apply_toml_format_options(&mut o, &f);
+        }
+        assert!(!o.space_after_comma);
+        assert_eq!(o.blank_lines_between_block_statements, 2);
+    }
+
+    #[test]
+    fn parses_blank_lines_after_class_toml() {
+        let src = r#"
+[format]
+blank-lines-after-class = 0
+"#;
+        let cfg: TomlConfig = toml::from_str(src).unwrap();
+        let mut o = FormatOptions::default();
+        if let Some(f) = cfg.format {
+            apply_toml_format_options(&mut o, &f);
+        }
+        assert_eq!(o.blank_lines_after_class, 0);
+    }
+
+    #[test]
+    fn parses_space_around_type_operators_toml() {
+        let src = r#"
+[format]
+space-around-type-operators = true
+"#;
+        let cfg: TomlConfig = toml::from_str(src).unwrap();
+        let mut o = FormatOptions::default();
+        if let Some(f) = cfg.format {
+            apply_toml_format_options(&mut o, &f);
+        }
+        assert!(o.space_around_type_operators);
+    }
+}
+
+fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
+    let opts = TreeDisplayOptions {
+        show_trivia: trivia,
+        ..Default::default()
+    };
+
+    if files.is_empty() {
+        let mut src = String::new();
+        if let Err(e) = io::stdin().read_to_string(&mut src) {
+            let _ = writeln!(io::stderr(), "leekscript: stdin: {e}");
+            return ExitCode::from(1);
+        }
+        let doc = match leekscript::parse_doc(&src, version) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("{}", e.format_with_source(&src));
+                return ExitCode::from(1);
+            }
+        };
+        let out = format_syntax_tree(doc.root(), &opts, |k| {
+            kind_to_name(k).unwrap_or("<?>").to_string()
+        });
+        print!("{out}");
+        return ExitCode::SUCCESS;
+    }
+
+    let mut ok = true;
+    for path in files {
+        let label = path.display().to_string();
+        let src = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                ok = false;
+                let _ = writeln!(io::stderr(), "leekscript: {}: {e}", path.display());
+                continue;
+            }
+        };
+        let doc = match leekscript::parse_doc(&src, version) {
+            Ok(d) => d,
+            Err(e) => {
+                ok = false;
+                eprintln!("{label}: {}", e.format_with_source(&src));
+                continue;
+            }
+        };
+        if files.len() > 1 {
+            println!("== {} ==", path.display());
+        }
+        let out = format_syntax_tree(doc.root(), &opts, |k| {
+            kind_to_name(k).unwrap_or("<?>").to_string()
+        });
+        print!("{out}");
+        if files.len() > 1 {
+            println!();
+        }
+    }
+
+    if ok { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
+
+fn cmd_merge(version: Version, root: &Path, entry: &Path) -> ExitCode {
+    let project = match load_project_with_includes(root, entry, version) {
+        Ok(p) => p,
+        Err(e) => {
+            print_include_load_error(root, entry, &e);
+            return ExitCode::from(1);
+        }
+    };
+    match merge_included_sources_to_single_file(root, &project) {
+        Ok(out) => {
+            print!("{out}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            let _ = writeln!(io::stderr(), "leekscript: merge: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn print_include_load_error(root: &Path, entry: &Path, err: &IncludeLoadError) {
+    match err {
+        IncludeLoadError::Parse(path, e) => {
+            if let Ok(src) = std::fs::read_to_string(path) {
+                eprintln!("{}: {}", path.display(), e.format_with_source(&src));
+            } else {
+                let _ = writeln!(
+                    io::stderr(),
+                    "leekscript: {}: parse error: {e:?}",
+                    path.display()
+                );
+            }
+        }
+        _ => {
+            let _ = writeln!(
+                io::stderr(),
+                "leekscript: load {} (root {}): {err}",
+                entry.display(),
+                root.display()
+            );
+        }
+    }
+}

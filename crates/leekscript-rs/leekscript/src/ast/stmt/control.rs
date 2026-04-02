@@ -113,18 +113,52 @@ impl DoWhileStmt {
 #[ast(kind = K::ForStmt)]
 pub struct ForStmt(SyntaxNode);
 
+/// `for ( ; …` / `for (;;)` — header’s first clause is empty; CST expr children are `[cond, step]` not `[init, cond, step]`.
+fn for_paren_header_starts_with_semicolon(syntax: &SyntaxNode) -> bool {
+    let mut after_lparen = false;
+    for el in syntax.children() {
+        if crate::syntax::syntax_el_is_trivia(&el) {
+            continue;
+        }
+        if let Some(t) = el.as_token() {
+            let k = t.kind_as::<K>();
+            if k == Some(K::LParen) {
+                after_lparen = true;
+                continue;
+            }
+            if after_lparen {
+                return k == Some(K::Semi);
+            }
+        } else if after_lparen {
+            return false;
+        }
+    }
+    false
+}
+
 impl ForStmt {
-    /// `for ( … init ; cond ; step )` — first `expr` child (initializer rhs).
+    /// `for ( … init ; cond ; step )` initializer, if any (`None` for `for (; …` / `for (;;)`).
     pub fn init_expr(&self) -> Option<Expr> {
+        if for_paren_header_starts_with_semicolon(self.syntax()) {
+            return None;
+        }
         AstNodeExt::children::<Expr>(self.syntax()).next()
     }
 
     pub fn condition_expr(&self) -> Option<Expr> {
-        AstNodeExt::children::<Expr>(self.syntax()).nth(1)
+        let mut it = AstNodeExt::children::<Expr>(self.syntax());
+        if for_paren_header_starts_with_semicolon(self.syntax()) {
+            return it.next();
+        }
+        it.nth(1)
     }
 
     pub fn step_expr(&self) -> Option<Expr> {
-        AstNodeExt::children::<Expr>(self.syntax()).nth(2)
+        let mut it = AstNodeExt::children::<Expr>(self.syntax());
+        if for_paren_header_starts_with_semicolon(self.syntax()) {
+            return it.nth(1);
+        }
+        it.nth(2)
     }
 
     pub fn body(&self) -> Option<StmtBlock> {

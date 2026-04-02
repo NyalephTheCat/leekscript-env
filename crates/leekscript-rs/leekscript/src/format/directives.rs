@@ -1,15 +1,21 @@
-//! `// leekfmt: ...` and `/* leekfmt: ... */` directives.
+//! `// leekfmt: ...`, `//! leekfmt: ...`, and `/* leekfmt: ... */` directives.
 //!
 //! # Syntax
 //!
-//! - **File / scoped options** (from the directive through the rest of the file, superseded by later
+//! - **File-wide options** — `//! leekfmt: ...` (line comment) or `/*! leekfmt: ... */` (block).
+//!   Option patches apply from byte offset **0**, so they affect the **entire** file, including text
+//!   above the directive. `off` / `on` / `ignore-next-line` still use the comment’s end position.
+//!
+//! - **Line / block options** (from the directive through the rest of the file, superseded by later
 //!   directives at a later byte offset):  
 //!   `indent-width=4`, `indent-style=spaces`, `indent-style=tabs`, `brace-style=same-line`,
 //!   `brace-style=next-line`, `line-width=100`, `blank-lines-between-top-level=1`,
 //!   `space-after-keyword-before-paren=true`, `space-before-function-decl-paren=false`,
 //!   `space-inside-parens=false`, `space-around-assign=true`, `space-around-binary-ops=true`,
-//!   `newline-before-else-catch-finally=true`, `trailing-newline=true`,
-//!   `max-consecutive-blank-lines-in-block=2`, `tab-width=4`
+//!   `space-after-comma=true`, `space-around-type-operators=false`, `newline-before-else-catch-finally=true`, `trailing-newline=true`,
+//!   `blank-lines-between-block-statements=1`, `blank-lines-between-class-members=1`,
+//!   `max-consecutive-blank-lines-in-block=2`,
+//!   `tab-width=4`
 //!
 //! - **Verbatim regions**  
 //!   `off` … `on` — text between the end of the `off` comment and the start of the `on` comment is
@@ -20,7 +26,7 @@
 //! Several assignments can appear on one directive line, separated by `;` or `,`.
 
 use crate::document::LeekDoc;
-use crate::format::options::{BraceStyle, FormatPatch, LineEnding};
+use crate::format::options::{BraceStyle, FormatPatch, LineEnding, SemicolonStyle};
 use crate::syntax::kinds::K;
 use sipha::tree::red::SyntaxToken;
 use sipha::tree::walk::{Visitor, WalkOptions, walk};
@@ -124,6 +130,22 @@ fn block_comment_body(text: &str) -> Option<&str> {
     Some(t)
 }
 
+/// `rest` is the directive payload after the `leekfmt:` marker; `true` means use offset **0** for
+/// option patches (inner / file-wide `!` form).
+fn leekfmt_directive_rest(trimmed: &str) -> Option<(&str, bool)> {
+    if let Some(rest) = trimmed
+        .strip_prefix("leekfmt:")
+        .or_else(|| trimmed.strip_prefix("LEEKFMT:"))
+    {
+        return Some((rest, false));
+    }
+    let after_bang = trimmed.strip_prefix('!')?.trim_start();
+    let rest = after_bang
+        .strip_prefix("leekfmt:")
+        .or_else(|| after_bang.strip_prefix("LEEKFMT:"))?;
+    Some((rest, true))
+}
+
 fn apply_comment_body(
     body: &str,
     comment_range: Span,
@@ -134,11 +156,13 @@ fn apply_comment_body(
     let comment_start = comment_range.start;
     let comment_end = comment_range.end;
     let trimmed = body.trim();
-    let Some(rest) = trimmed
-        .strip_prefix("leekfmt:")
-        .or_else(|| trimmed.strip_prefix("LEEKFMT:"))
-    else {
+    let Some((rest, file_wide_options)) = leekfmt_directive_rest(trimmed) else {
         return;
+    };
+    let option_patch_offset = if file_wide_options {
+        0
+    } else {
+        comment_end
     };
 
     for part in split_directive_parts(rest) {
@@ -163,13 +187,13 @@ fn apply_comment_body(
                 }
             }
             "ignore-next-line" | "skip-next-line" | "ignore-next" | "skip-next" => {
-                if let Some(span) = span_next_line(source, comment_end) {
+                if let Some(span) = span_line_after_comment_line(source, comment_start) {
                     plan.preserve.push(clamp_span(span, source.len() as Pos));
                 }
             }
             _ => {
                 if let Some(patch) = parse_option_assignments(part) {
-                    plan.patches.push((comment_end, patch));
+                    plan.patches.push((option_patch_offset, patch));
                 }
             }
         }
@@ -188,21 +212,29 @@ fn clamp_span(span: Span, source_len: Pos) -> Span {
     Span::new(start, end)
 }
 
-fn span_next_line(source: &[u8], after_comment_end: u32) -> Option<Span> {
-    let mut i = after_comment_end as usize;
-    if i > source.len() {
+/// Full source line immediately **after** the newline that ends the line containing `comment_start`.
+///
+/// Uses the comment’s line in the file, not [`Span::end`]: a `LINE_COMMENT` token may include a
+/// trailing `\n`, so `comment_end` can already point at the first byte of the following line; the
+/// old `comment_end`-based scan would then treat that line as “still on the directive line” and
+/// skip forward again, preserving the wrong row.
+fn span_line_after_comment_line(source: &[u8], comment_start: u32) -> Option<Span> {
+    let mut p = comment_start as usize;
+    if p > source.len() {
         return None;
     }
-    while i < source.len() && source[i] != b'\n' {
-        i += 1;
+    while p < source.len() && source[p] != b'\n' {
+        p += 1;
     }
-    if i < source.len() && source[i] == b'\n' {
-        i += 1;
-    }
-    if i >= source.len() {
+    if p >= source.len() {
         return None;
     }
-    let start = i as u32;
+    p += 1; // past `\n` ending the directive’s line
+    if p >= source.len() {
+        return None;
+    }
+    let start = p as u32;
+    let mut i = p;
     while i < source.len() && source[i] != b'\n' {
         i += 1;
     }
@@ -255,7 +287,7 @@ fn apply_kv(patch: &mut FormatPatch, key: &str, value: &str) -> bool {
         }
         "line_width" => {
             if let Ok(n) = value.parse::<usize>() {
-                patch.line_width = Some(n.clamp(20, 500));
+                patch.line_width = Some(if n == 0 { 0 } else { n.clamp(20, 500) });
                 return true;
             }
         }
@@ -290,6 +322,24 @@ fn apply_kv(patch: &mut FormatPatch, key: &str, value: &str) -> bool {
         "blank_lines_between_top_level" => {
             if let Ok(n) = value.parse::<usize>() {
                 patch.blank_lines_between_top_level = Some(n.min(10));
+                return true;
+            }
+        }
+        "blank_lines_after_class" => {
+            if let Ok(n) = value.parse::<usize>() {
+                patch.blank_lines_after_class = Some(n.min(10));
+                return true;
+            }
+        }
+        "blank_lines_between_block_statements" => {
+            if let Ok(n) = value.parse::<usize>() {
+                patch.blank_lines_between_block_statements = Some(n.min(10));
+                return true;
+            }
+        }
+        "blank_lines_between_class_members" => {
+            if let Ok(n) = value.parse::<usize>() {
+                patch.blank_lines_between_class_members = Some(n.min(10));
                 return true;
             }
         }
@@ -329,6 +379,18 @@ fn apply_kv(patch: &mut FormatPatch, key: &str, value: &str) -> bool {
                 return true;
             }
         }
+        "space_after_comma" => {
+            if let Some(b) = parse_bool(value) {
+                patch.space_after_comma = Some(b);
+                return true;
+            }
+        }
+        "space_around_type_operators" => {
+            if let Some(b) = parse_bool(value) {
+                patch.space_around_type_operators = Some(b);
+                return true;
+            }
+        }
         "newline_before_else_catch_finally" => {
             if let Some(b) = parse_bool(value) {
                 patch.newline_before_else_catch_finally = Some(b);
@@ -349,6 +411,12 @@ fn apply_kv(patch: &mut FormatPatch, key: &str, value: &str) -> bool {
             }
             if matches!(v.as_str(), "crlf" | "windows" | "\r\n") {
                 patch.line_ending = Some(LineEnding::Crlf);
+                return true;
+            }
+        }
+        "semicolon_style" | "semicolons" => {
+            if let Some(s) = SemicolonStyle::parse(value) {
+                patch.semicolon_style = Some(s);
                 return true;
             }
         }
@@ -379,10 +447,20 @@ pub fn span_touches_preserve(span: Span, preserve: &[Span]) -> bool {
         .any(|p| p.start < span.end && p.end > span.start)
 }
 
+/// First verbatim region that intersects `span` (half-open ranges), for copying the **full** `off`…`on`
+/// slice when a single CST node only covers part of it.
+pub fn preserve_region_overlapping(span: Span, preserve: &[Span]) -> Option<Span> {
+    preserve
+        .iter()
+        .copied()
+        .find(|p| p.start < span.end && p.end > span.start)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Version;
+    use crate::format::options::SemicolonStyle;
 
     #[test]
     fn directive_patch_indent() {
@@ -393,11 +471,61 @@ mod tests {
     }
 
     #[test]
+    fn file_wide_directive_patch_at_zero() {
+        let src = "let x=1;\n//! leekfmt: indent-width=2\n";
+        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let plan = scan_directives(&doc);
+        assert_eq!(plan.patches.len(), 1);
+        assert_eq!(plan.patches[0].0, 0);
+        assert_eq!(plan.patches[0].1.indent_width, Some(2));
+    }
+
+    #[test]
+    fn block_file_wide_directive_patch_at_zero() {
+        let src = "let x=1;\n/*! leekfmt: indent-width=2 */\n";
+        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let plan = scan_directives(&doc);
+        assert_eq!(plan.patches.len(), 1);
+        assert_eq!(plan.patches[0].0, 0);
+    }
+
+    #[test]
     fn off_on_region() {
         let src = "a;\n// leekfmt: off\nmangled{}\n// leekfmt: on\nb;\n";
         let doc = LeekDoc::parse(src, Version::V4).unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.preserve.len(), 1);
         assert!(!plan.preserve[0].is_empty());
+    }
+
+    #[test]
+    fn ignore_next_line_scan_records_next_line_span() {
+        let src = "// leekfmt: ignore-next-line\nlet   y=2;\nlet z=3;\n";
+        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let plan = scan_directives(&doc);
+        assert_eq!(plan.preserve.len(), 1, "preserve={:?}", plan.preserve);
+        let s = plan.preserve[0].start as usize;
+        let e = plan.preserve[0].end as usize;
+        assert_eq!(&src.as_bytes()[s..e], b"let   y=2;\n");
+    }
+
+    #[test]
+    fn off_on_span_covers_mangled_let_like_formatter_fixture() {
+        let src = "a;\n// leekfmt: off\nlet x=1+  2;\n// leekfmt: on\nb;\n";
+        let doc = LeekDoc::parse(src, Version::V4).unwrap();
+        let plan = scan_directives(&doc);
+        assert_eq!(plan.preserve.len(), 1, "preserve={:?}", plan.preserve);
+        let s = plan.preserve[0].start as usize;
+        let e = plan.preserve[0].end as usize;
+        assert_eq!(&src.as_bytes()[s..e], b"let x=1+  2;\n");
+    }
+
+
+    #[test]
+    fn semicolons_directive_only_needed() {
+        let doc = LeekDoc::parse("// leekfmt: semicolons=only-needed\nlet x=1;", Version::V4).unwrap();
+        let plan = scan_directives(&doc);
+        assert_eq!(plan.patches.len(), 1);
+        assert_eq!(plan.patches[0].1.semicolon_style, Some(SemicolonStyle::OnlyNeeded));
     }
 }

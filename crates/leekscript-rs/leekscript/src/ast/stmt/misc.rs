@@ -8,6 +8,11 @@ use sipha::prelude::*;
 use sipha::tree::ast::AstNodeExt;
 use sipha::types::IntoSyntaxKind;
 
+/// Empty statement: a single `;`.
+#[derive(Debug, Clone, AstNode)]
+#[ast(kind = K::EmptyStmt)]
+pub struct EmptyStmt(SyntaxNode);
+
 #[derive(Debug, Clone, AstNode)]
 #[ast(kind = K::GlobalDecl)]
 pub struct GlobalDecl(SyntaxNode);

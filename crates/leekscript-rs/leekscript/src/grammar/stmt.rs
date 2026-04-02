@@ -98,6 +98,11 @@ pub fn define(g: &mut GrammarBuilder) {
                 g.call("match_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
+                g.node(K::EmptyStmt, |g| {
+                    g.call("semi");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
                 // Expression statement fallback.
                 g.node(K::Stmt, |g| {
                     g.call("expr");
@@ -153,6 +158,39 @@ pub fn define(g: &mut GrammarBuilder) {
         );
     });
 
+    // Some LeekScript code (including the AI fixtures) uses type-keywords as identifiers,
+    // e.g. `string string() { ... }`. Accept those keywords in identifier positions where
+    // the Java parser is permissive.
+    g.parser_rule("name", |g| {
+        g.choice(
+            |g| {
+                g.call("ident");
+            },
+            |g| {
+                g.choices(vec![
+                    Box::new(|g| {
+                        g.call("kw_string_type");
+                    }),
+                    Box::new(|g| {
+                        g.call("kw_integer");
+                    }),
+                    Box::new(|g| {
+                        g.call("kw_real");
+                    }),
+                    Box::new(|g| {
+                        g.call("kw_boolean");
+                    }),
+                    Box::new(|g| {
+                        g.call("kw_any");
+                    }),
+                    Box::new(|g| {
+                        g.call("kw_void");
+                    }),
+                ]);
+            },
+        );
+    });
+
     g.parser_rule("class_member", |g| {
         g.node(K::ClassMember, |g| {
             g.choices(vec![
@@ -185,10 +223,18 @@ pub fn define(g: &mut GrammarBuilder) {
                     g.optional(|g| {
                         g.call("kw_final");
                     });
-                    g.optional(|g| {
-                        g.call("ls_type");
-                    });
-                    g.call("ident");
+                    // Support both typed and untyped members:
+                    // - `boolean foo(...) {}` / `SomeType bar = ...`
+                    // - `foo(...) {}` (implicit return type)
+                    g.choice(
+                        |g| {
+                            g.call("ls_type");
+                            g.call("name");
+                        },
+                        |g| {
+                            g.call("name");
+                        },
+                    );
                     g.choices(vec![
                         Box::new(|g| {
                             g.call("eq");
@@ -211,6 +257,14 @@ pub fn define(g: &mut GrammarBuilder) {
                             });
                             g.call("rparen");
                             g.call("block");
+                        }),
+                        // Allow class fields without an initializer, e.g. `private Foo bar`
+                        // (common in the AI scripts). This must be last so `ident (...) {}` still
+                        // parses as a method and `ident = expr` parses as an assignment.
+                        Box::new(|g| {
+                            g.optional(|g| {
+                                g.call("semi");
+                            });
                         }),
                     ]);
                 }),
@@ -247,7 +301,12 @@ pub fn define(g: &mut GrammarBuilder) {
             g.optional(|g| {
                 g.call("op_question");
             });
+            // Do not parse `return for (…)` as `return` + expr: permissive `number` can lex
+            // `for` / `var` as NUMBER, yielding a bogus call parse and hiding the real `for` stmt.
             g.optional(|g| {
+                g.neg_lookahead(|g| {
+                    g.call("kw_for");
+                });
                 g.call("expr");
             });
             g.optional(|g| {
@@ -328,7 +387,7 @@ pub fn define(g: &mut GrammarBuilder) {
             g.call("kw_break");
             // `break` can be followed by an optional numeric level: `break 2`
             g.optional(|g| {
-                g.call("number");
+                g.call("break_continue_level");
             });
             g.optional(|g| {
                 g.call("semi");
@@ -341,7 +400,7 @@ pub fn define(g: &mut GrammarBuilder) {
             g.call("kw_continue");
             // `continue` can be followed by an optional numeric level: `continue 2`
             g.optional(|g| {
-                g.call("number");
+                g.call("break_continue_level");
             });
             g.optional(|g| {
                 g.call("semi");
@@ -363,15 +422,22 @@ pub fn define(g: &mut GrammarBuilder) {
 
     g.parser_rule("var_decl", |g| {
         g.node(K::VarDecl, |g| {
-            g.choice(
-                |g| {
+            g.choices(vec![
+                Box::new(|g| {
                     g.call("kw_var");
-                },
-                |g| {
+                    g.call("var_decl_items");
+                }),
+                Box::new(|g| {
                     g.call("kw_let");
-                },
-            );
-            g.call("var_decl_items");
+                    g.call("var_decl_items");
+                }),
+                Box::new(|g| {
+                    // Java / LeekScript v2+: `Map<K, V> m = [:]` without `var`/`let`.
+                    cfg_flags::v2(g);
+                    g.call("ls_type");
+                    g.call("typed_var_decl_items");
+                }),
+            ]);
             g.optional(|g| {
                 g.call("semi");
             });
@@ -395,10 +461,27 @@ pub fn define(g: &mut GrammarBuilder) {
         });
     });
 
+    // Same as `var_decl_items` but after a leading type (shared by all names).
+    g.parser_rule("typed_var_decl_items", |g| {
+        g.call("ident");
+        g.optional(|g| {
+            g.call("assign_op");
+            g.call("expr");
+        });
+        g.zero_or_more(|g| {
+            g.call("comma");
+            g.call("ident");
+            g.optional(|g| {
+                g.call("assign_op");
+                g.call("expr");
+            });
+        });
+    });
+
     g.parser_rule("function_decl", |g| {
         g.node(K::FunctionDecl, |g| {
             g.call("kw_function");
-            g.call("ident");
+            g.call("name");
             g.call("lparen");
             g.optional(|g| {
                 g.call("fn_param");
@@ -490,6 +573,23 @@ pub fn define(g: &mut GrammarBuilder) {
                     g.call("for_loop_var");
                     g.call("kw_in");
                     g.call("expr");
+                    g.call("rparen");
+                    g.call("stmt_or_block");
+                });
+            }),
+            // Classic `for ( ; cond ; step )` / `for (;;)` — init omitted (first `;` immediately).
+            Box::new(|g| {
+                g.node(K::ForStmt, |g| {
+                    g.call("kw_for");
+                    g.call("lparen");
+                    g.call("semi");
+                    g.optional(|g| {
+                        g.call("expr");
+                    });
+                    g.call("semi");
+                    g.optional(|g| {
+                        g.call("expr");
+                    });
                     g.call("rparen");
                     g.call("stmt_or_block");
                 });

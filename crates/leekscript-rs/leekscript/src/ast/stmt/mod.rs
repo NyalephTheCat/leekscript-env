@@ -13,8 +13,8 @@ pub use decl::{ExprStmt, FunctionDecl, VarDecl};
 pub use flow::{BreakStmt, ContinueStmt, ReturnStmt};
 pub use include::IncludeStmt;
 pub use misc::{
-    CatchClause, ClassDecl, ConstDecl, ElseStmt, ExportStmt, GlobalDecl, GotoStmt, ImportStmt,
-    MatchStmt, PackageStmt, ThrowStmt, TryStmt,
+    CatchClause, ClassDecl, ConstDecl, ElseStmt, EmptyStmt, ExportStmt, GlobalDecl, GotoStmt,
+    ImportStmt, MatchStmt, PackageStmt, ThrowStmt, TryStmt,
 };
 
 use crate::syntax::kinds::K;
@@ -70,6 +70,8 @@ pub enum Stmt {
     Const(ConstDecl),
     #[ast(kind = K::MatchStmt)]
     Match(MatchStmt),
+    #[ast(kind = K::EmptyStmt)]
+    Empty(EmptyStmt),
 }
 
 mod stmt_block;

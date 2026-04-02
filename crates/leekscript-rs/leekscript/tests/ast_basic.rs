@@ -78,6 +78,25 @@ fn break_and_continue_level() {
     assert_eq!(c[0].as_continue().expect("continue").level(), Some(3));
 }
 
+/// `break`/`continue`/`return` used to accept the permissive `number` rule for levels; letter
+/// sequences like `for`/`var` matched as NUMBER, so `continue for (var x in y)` mis-parsed.
+#[test]
+fn jump_then_foreach_with_var_after_keyword() {
+    let src = concat!(
+        "for (var a in xs) {\n",
+        "    if (true) continue\n",
+        "    for (var cell: var val in cov) { }\n",
+        "}\n",
+    );
+    parse_doc(src, Version::V4).expect("nested foreach after continue without semicolon");
+
+    parse_doc(
+        "function f() {\n    return\n    for (var b in ys) {}\n}\n",
+        Version::V4,
+    )
+    .expect("foreach after return without semicolon");
+}
+
 #[test]
 fn if_while_do_while_conditions() {
     let s = stmts_v4("if (true) { return 1; } else { return 2; }");
@@ -93,6 +112,30 @@ fn if_while_do_while_conditions() {
     let s = stmts_v4("do { } while (0);");
     let d = s[0].as_do_while().expect("do-while");
     assert!(d.condition().is_some());
+}
+
+/// `!=` must not be split into postfix `!` + assign `=` (v3+ postfix `!` would steal the first byte).
+#[test]
+fn if_condition_parses_noteq_operator() {
+    use leekscript::syntax::kinds::K;
+    use sipha::tree::tree_display::{TreeDisplayOptions, format_syntax_tree};
+    use sipha::types::FromSyntaxKind;
+
+    let doc = parse_doc("if (combo != null) {}", Version::V4).expect("parse");
+    let tree = format_syntax_tree(
+        doc.root(),
+        &TreeDisplayOptions::default(),
+        |k| {
+            K::from_syntax_kind(k)
+                .map(|k| k.as_str().to_string())
+                .unwrap_or_else(|| "?".to_string())
+        },
+    );
+    assert!(tree.contains("NOTEQ"), "expected != token; tree:\n{tree}");
+    assert!(
+        !tree.contains("BANG"),
+        "unexpected `!` token (postfix/unary); tree:\n{tree}"
+    );
 }
 
 #[test]
@@ -166,6 +209,36 @@ fn for_stmt_clause_exprs() {
 }
 
 #[test]
+fn empty_stmt_double_semicolon_and_after_var_decl() {
+    let s = stmts_v4("function f() { ;; let x = 1;; }");
+    let f = s[0].as_function().expect("function");
+    let body = f.body().expect("body");
+    assert_eq!(
+        AstNodeExt::children::<Stmt>(body.syntax()).count(),
+        4,
+        "empty, empty, var decl, empty"
+    );
+}
+
+#[test]
+fn for_stmt_infinite_loop_double_semicolon() {
+    let s = stmts_v4("for (;;) { }");
+    let fo = s[0].as_for().expect("for");
+    assert!(fo.init_expr().is_none());
+    assert!(fo.condition_expr().is_none());
+    assert!(fo.step_expr().is_none());
+}
+
+#[test]
+fn for_stmt_empty_init_with_cond_and_step() {
+    let s = stmts_v4("for (; i < n; i++) { }");
+    let fo = s[0].as_for().expect("for");
+    assert!(fo.init_expr().is_none());
+    assert!(fo.condition_expr().is_some());
+    assert!(fo.step_expr().is_some());
+}
+
+#[test]
 fn class_extends_and_body() {
     let s = stmts_v4("class D extends Base {}");
     let c = s[0].as_class().expect("class");
@@ -226,4 +299,16 @@ fn if_then_branch_wrapped_stmt() {
         leekscript::ast::StmtBlock::Wrapped(_) => {}
         leekscript::ast::StmtBlock::Block(_) => panic!("expected wrapped stmt"),
     }
+}
+
+#[test]
+fn lambda_optional_return_type_after_arrow() {
+    // `=> real expr` — return type; `=> dp[...]` — untyped (no bare-ident return type).
+    parse_doc("f(x => real x + 1);", Version::V4).expect("typed return");
+    parse_doc("f(dp => dp[\"avg\"] as real);", Version::V4).expect("untyped body");
+}
+
+#[test]
+fn lowercase_string_builtin_call() {
+    parse_doc("var s = string(x);", Version::V4).expect("string() stringify");
 }

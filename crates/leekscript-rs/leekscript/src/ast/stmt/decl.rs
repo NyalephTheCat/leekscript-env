@@ -38,7 +38,7 @@ impl FunctionDecl {
         let arrow = K::Arrow.into_syntax_kind();
         let mut after_arrow = false;
         for el in self.syntax().children() {
-            if el.is_trivia() {
+            if crate::syntax::syntax_el_is_trivia(&el) {
                 continue;
             }
             if let Some(t) = el.as_token() {

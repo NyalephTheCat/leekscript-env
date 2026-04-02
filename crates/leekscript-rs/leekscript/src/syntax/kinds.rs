@@ -26,6 +26,8 @@ pub enum K {
     BreakStmt,
     ContinueStmt,
     IncludeStmt,
+    /// Lone `;` (empty statement), e.g. `;;` or `for (;; )`.
+    EmptyStmt,
 
     // CST — declarations
     VarDecl,
@@ -82,6 +84,10 @@ pub enum K {
     ThisExpr,
     SuperExpr,
     ClassRefExpr,
+    /// `Class` / `Array` / `Array<T>` as expression operands (e.g. `instanceof Class`).
+    BuiltinTypeNameExpr,
+    /// Lowercase `string` as the built-in stringify callable (`string(x)`), distinct from type `string`.
+    BuiltinStringifyExpr,
     BinaryExpr,
     UnaryExpr,
 
@@ -263,6 +269,7 @@ impl K {
             Self::BreakStmt => "BREAK_STMT",
             Self::ContinueStmt => "CONTINUE_STMT",
             Self::IncludeStmt => "INCLUDE_STMT",
+            Self::EmptyStmt => "EMPTY_STMT",
             Self::VarDecl => "VAR_DECL",
             Self::FunctionDecl => "FUNCTION_DECL",
             Self::GlobalDecl => "GLOBAL_DECL",
@@ -303,6 +310,8 @@ impl K {
             Self::ThisExpr => "THIS_EXPR",
             Self::SuperExpr => "SUPER_EXPR",
             Self::ClassRefExpr => "CLASS_REF_EXPR",
+            Self::BuiltinTypeNameExpr => "BUILTIN_TYPE_NAME_EXPR",
+            Self::BuiltinStringifyExpr => "BUILTIN_STRINGIFY_EXPR",
             Self::BinaryExpr => "BINARY_EXPR",
             Self::UnaryExpr => "UNARY_EXPR",
             Self::Coalesce => "COALESCE",

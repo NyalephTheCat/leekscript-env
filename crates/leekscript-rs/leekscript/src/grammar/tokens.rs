@@ -94,20 +94,25 @@ const V3_LEX_RESERVED: &[&[u8]] = &[
 ];
 
 pub fn define(g: &mut GrammarBuilder) {
+    // One `TRIVIA` syntax node wrapping each skipped run; children are `WS` / `LINE_COMMENT` /
+    // `BLOCK_COMMENT` trivia tokens. (A plain `trivia(K::Trivia, …)` around `call("ws")` would
+    // emit overlapping trivia leaves: inner `WS` then outer `TRIVIA` for the same span.)
     g.lexer_rule("trivia", |g| {
-        g.trivia(K::Trivia, |g| {
-            g.zero_or_more(|g| {
-                g.choice3(
-                    |g| {
-                        g.call("ws");
-                    },
-                    |g| {
-                        g.call("line_comment");
-                    },
-                    |g| {
-                        g.call("block_comment");
-                    },
-                );
+        g.optional(|g| {
+            g.node(K::Trivia, |g| {
+                g.one_or_more(|g| {
+                    g.choice3(
+                        |g| {
+                            g.call("ws");
+                        },
+                        |g| {
+                            g.call("line_comment");
+                        },
+                        |g| {
+                            g.call("block_comment");
+                        },
+                    );
+                });
             });
         });
     });
@@ -313,21 +318,37 @@ pub fn define(g: &mut GrammarBuilder) {
 
     g.lexer_rule("number", |g| {
         g.token(K::Number, |g| {
-            // Keep this permissive: leekscript-java accepts a wide range of
-            // characters in numeric literals (radixes, suffixes, exponents).
-            // We still avoid eating `..` (interval / dotdot) by forbidding a
-            // '.' that is immediately followed by '.'.
-            g.one_or_more(|g| number_char(g));
-            g.zero_or_more(|g| {
-                g.choice(
-                    |g| {
-                        g.byte(b'.');
-                        g.neg_lookahead(|g| {
-                            g.byte(b'.');
-                        });
-                    },
-                    |g| number_char(g),
-                );
+            // Keep radix / suffix / exponent characters after a proper numeric
+            // prefix. Do **not** start with a letter: otherwise words like `new`,
+            // `null`, or `combo` are swallowed as NUMBER and keywords / `!=` /
+            // identifiers break (see formatter / `!=` lexing).
+            //
+            // Still avoid eating `..` (interval / dotdot) by forbidding a '.' that
+            // is immediately followed by '.'.
+            g.choice(
+                |g| {
+                    g.class(classes::DIGIT);
+                    g.zero_or_more(|g| number_char(g));
+                    number_literal_tail(g);
+                },
+                |g| {
+                    // `.5` style (leading dot, digit required after)
+                    g.byte(b'.');
+                    g.class(classes::DIGIT);
+                    g.zero_or_more(|g| number_char(g));
+                    number_literal_tail(g);
+                },
+            );
+        });
+    });
+
+    // `break` / `continue` optional numeric level only. The general `number` rule also
+    // accepts letters (radix/exponent), which would otherwise lex `for` as NUMBER after
+    // `break` / `continue`, breaking the next `for (var …)` statement.
+    g.lexer_rule("break_continue_level", |g| {
+        g.token(K::Number, |g| {
+            g.one_or_more(|g| {
+                g.class(classes::DIGIT);
             });
         });
     });
@@ -408,19 +429,10 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     lexer_rules::token_literal_rule(g, "op_ushr_eq", K::UShrEq, b">>>=");
-    lexer_rules::token_literal_rule(g, "op_ushr", K::UShr, b">>>");
     // Java `LexicalParser` operator table includes `<<<=` / `<<<` before `<<=` / `<<`.
     lexer_rules::token_literal_rule(g, "op_triple_shl_eq", K::TripleShlEq, b"<<<=");
     lexer_rules::token_literal_rule(g, "op_triple_shl", K::TripleShl, b"<<<");
     lexer_rules::token_literal_rule(g, "op_shr_eq", K::ShrEq, b">>=");
-    g.lexer_rule("op_shr", |g| {
-        g.token(K::Shr, |g| {
-            g.literal(b">>");
-            g.neg_lookahead(|g| {
-                g.byte(b'>');
-            });
-        });
-    });
     lexer_rules::token_literal_rule(g, "op_shl_eq", K::ShlEq, b"<<=");
     g.lexer_rule("op_shl", |g| {
         g.token(K::Shl, |g| {
@@ -493,9 +505,6 @@ pub fn define(g: &mut GrammarBuilder) {
     g.lexer_rule("op_gt", |g| {
         g.token(K::Gt, |g| {
             g.byte(b'>');
-            g.neg_lookahead(|g| {
-                g.byte(b'>');
-            });
         })
     });
     lexer_rules::token_literal_rule(g, "op_plus_eq", K::PlusEq, b"+=");
@@ -518,7 +527,15 @@ pub fn define(g: &mut GrammarBuilder) {
     lexer_rules::token_byte_rule(g, "op_star", K::Star, b'*');
     lexer_rules::token_byte_rule(g, "op_slash", K::Slash, b'/');
     lexer_rules::token_byte_rule(g, "op_percent", K::Percent, b'%');
-    lexer_rules::token_byte_rule(g, "op_bang", K::Bang, b'!');
+    g.lexer_rule("op_bang", |g| {
+        g.token(K::Bang, |g| {
+            g.byte(b'!');
+            // Don't steal `!=` / `!==` (see `op_noteq` / `op_noteqeq`).
+            g.neg_lookahead(|g| {
+                g.byte(b'=');
+            });
+        })
+    });
 
     g.lexer_rule("ident", |g| {
         g.token(K::Ident, |g| {
@@ -660,6 +677,21 @@ fn ident_reserved_word_shape_dyn(g: &mut GrammarBuilder) {
             );
         },
     );
+}
+
+/// Continuation after the initial digit / `.\d` prefix in the `number` lexer rule.
+fn number_literal_tail(g: &mut GrammarBuilder) {
+    g.zero_or_more(|g| {
+        g.choice(
+            |g| {
+                g.byte(b'.');
+                g.neg_lookahead(|g| {
+                    g.byte(b'.');
+                });
+            },
+            |g| number_char(g),
+        );
+    });
 }
 
 fn number_char(g: &mut GrammarBuilder) {

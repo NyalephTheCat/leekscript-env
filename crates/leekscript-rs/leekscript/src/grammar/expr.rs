@@ -4,6 +4,18 @@ use sipha::parse::expr as sipha_expr;
 use sipha::prelude::*;
 
 pub fn define(g: &mut GrammarBuilder) {
+    // `>>` / `>>>` are ambiguous with nested generic type closers (`Map<..., Map<...>>`).
+    // We lex `>` always, then parse shift ops as sequences so types can use `>>` naturally.
+    g.parser_rule("op_shr", |g| {
+        g.call("op_gt");
+        g.call("op_gt");
+    });
+    g.parser_rule("op_ushr", |g| {
+        g.call("op_gt");
+        g.call("op_gt");
+        g.call("op_gt");
+    });
+
     g.parser_rule("expr", |g| {
         g.node(K::Expr, |g| {
             g.call("assign");
@@ -454,11 +466,13 @@ pub fn define(g: &mut GrammarBuilder) {
         });
     });
 
-    // Arrow lambda: `ident -> expr` or `(ident, ident, ...) -> expr`
+    // Arrow lambda: `ident => expr`, `ident => real expr` (return type), or `(…) => block`.
     //
     // This overlaps with `ident`, so we use `lookahead` in `primary` to pick it
     // only when an `arrow` follows.
     // Untyped `x` must win over type named `x` (see `a.filter(x -> …)`).
+    // Typed body: `=> T expr` uses `lambda_return_type` (no bare `ident` as `T`) so
+    // `dp => dp["x"]` still parses as untyped lambda.
     g.parser_rule("lambda_param", |g| {
         g.choice(
             |g| {
@@ -499,10 +513,25 @@ pub fn define(g: &mut GrammarBuilder) {
             g.call("arrow");
             g.choice(
                 |g| {
-                    g.call("expr");
+                    g.call("lambda_return_type");
+                    g.choice(
+                        |g| {
+                            g.call("expr");
+                        },
+                        |g| {
+                            g.call("block");
+                        },
+                    );
                 },
                 |g| {
-                    g.call("block");
+                    g.choice(
+                        |g| {
+                            g.call("expr");
+                        },
+                        |g| {
+                            g.call("block");
+                        },
+                    );
                 },
             );
         });
@@ -715,6 +744,28 @@ pub fn define(g: &mut GrammarBuilder) {
                 cfg_flags::v2(g);
                 g.node(K::ClassRefExpr, |g| {
                     g.call("kw_class");
+                });
+            }),
+            // `instanceof Class` / `instanceof Array` — type keywords are not `ident`.
+            Box::new(|g| {
+                cfg_flags::v2(g);
+                g.node(K::BuiltinTypeNameExpr, |g| {
+                    g.call("kw_class_type");
+                });
+            }),
+            Box::new(|g| {
+                cfg_flags::v2(g);
+                g.node(K::BuiltinTypeNameExpr, |g| {
+                    g.call("kw_array");
+                    g.optional(|g| {
+                        g.call("generic_type_args");
+                    });
+                });
+            }),
+            Box::new(|g| {
+                cfg_flags::v3(g);
+                g.node(K::BuiltinStringifyExpr, |g| {
+                    g.call("kw_string_type");
                 });
             }),
             Box::new(|g| {

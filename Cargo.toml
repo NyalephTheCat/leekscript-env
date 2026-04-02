@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "crates/sipha/sipha",
   "crates/leekscript-rs/leekscript",
+  "crates/leekscript-rs/leekscript-cli",
 ]
 
 [workspace.lints]

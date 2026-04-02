@@ -26,7 +26,9 @@ pub fn define(g: &mut GrammarBuilder) {
         });
     });
 
-    g.parser_rule("type_primary", |g| {
+    // Like `type_primary` but without bare `ident`, so `x => x + 1` is not parsed as typed lambda
+    // `x` (type) `+ 1` (body). Used only after `=>` for explicit lambda return types (`=> real expr`).
+    g.parser_rule("lambda_type_primary_no_ident", |g| {
         g.choices(vec![
             Box::new(|g| {
                 g.call("kw_void");
@@ -46,8 +48,6 @@ pub fn define(g: &mut GrammarBuilder) {
             Box::new(|g| {
                 g.call("kw_string_type");
             }),
-            // Java-style primitive names are lexer tokens in v3; `eatPrimaryType` in leekscript-java
-            // still uses `integer` / `real` / … — not `int` / `float`. Parsed here for parity only.
             Box::new(|g| {
                 cfg_flags::v3(g);
                 g.call("kw_int");
@@ -113,13 +113,52 @@ pub fn define(g: &mut GrammarBuilder) {
                 });
             }),
             Box::new(|g| {
+                cfg_flags::v2(g);
+                g.call("kw_function");
+                g.call("lparen");
+                g.optional(|g| {
+                    g.call("fn_param");
+                    g.zero_or_more(|g| {
+                        g.call("comma");
+                        g.call("fn_param");
+                    });
+                    g.optional(|g| {
+                        g.call("comma");
+                    });
+                });
+                g.call("rparen");
+                g.optional(|g| {
+                    g.call("arrow");
+                    g.call("ls_type");
+                });
+            }),
+            Box::new(|g| {
                 cfg_flags::v3(g);
                 g.call("kw_null");
+            }),
+        ]);
+    });
+
+    g.parser_rule("type_primary", |g| {
+        g.choices(vec![
+            Box::new(|g| {
+                g.call("lambda_type_primary_no_ident");
             }),
             Box::new(|g| {
                 g.call("ident");
             }),
         ]);
+    });
+
+    // Return type after `=>` in arrow lambdas (`dp => real dp["avg"]`).
+    // Single primary only here; unions/nullable use full `ls_type` if needed later.
+    g.parser_rule("lambda_return_type", |g| {
+        g.node(K::TypeExpr, |g| {
+            g.call("lambda_type_primary_no_ident");
+            g.optional(|g| {
+                g.call("op_question");
+            });
+        });
     });
 
     // <T> or <K,V>

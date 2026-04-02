@@ -14,8 +14,8 @@
 //!
 //! ## Formatting
 //!
-//! [`format`] is a configurable pretty-printer with `// leekfmt:` / `/* leekfmt: */` directive comments
-//! for local options and verbatim regions.
+//! [`format`] is a configurable pretty-printer with `// leekfmt:`, `//! leekfmt:` (file-wide options),
+//! and `/* leekfmt: */` directive comments for options and verbatim regions.
 //!
 //! ## Cargo features
 //!

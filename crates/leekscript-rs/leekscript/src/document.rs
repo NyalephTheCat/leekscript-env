@@ -60,6 +60,7 @@ const STMT_BOUNDARY_KINDS: &[SyntaxKind] = &[
     K::WhileStmt as SyntaxKind,
     K::MatchStmt as SyntaxKind,
     K::Stmt as SyntaxKind,
+    K::EmptyStmt as SyntaxKind,
 ];
 
 /// Failure when splicing source or re-parsing after an edit.
