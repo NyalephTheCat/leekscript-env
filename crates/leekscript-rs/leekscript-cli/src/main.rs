@@ -2,10 +2,10 @@
 
 mod report;
 
+use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::collections::VecDeque;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use leekscript::format::{BraceStyle, FormatOptions, LineEnding, SemicolonStyle, format_document};
@@ -15,7 +15,9 @@ use leekscript::include::{
     prepend_signatures_to_merged,
 };
 use leekscript::syntax::kinds::K;
-use leekscript::{Version, is_signature_stub_path, parse_doc, parse_signature_doc};
+use leekscript::{
+    SemanticSeverity, Version, is_signature_stub_path, parse_doc, parse_signature_doc,
+};
 use serde::Deserialize;
 use sipha::tree::tree_display::{TreeDisplayOptions, format_syntax_tree};
 use sipha::types::FromSyntaxKind;
@@ -44,7 +46,11 @@ impl From<Dialect> for Version {
 }
 
 #[derive(Parser)]
-#[command(name = "leekscript", version, about = "LeekScript parser, formatter, and include merger")]
+#[command(
+    name = "leekscript",
+    version,
+    about = "LeekScript parser, formatter, and include merger"
+)]
 struct Cli {
     /// Language dialect (v1–v4, or v-next)
     #[arg(long, global = true, value_enum, default_value_t = Dialect::V4)]
@@ -246,7 +252,13 @@ fn main() -> ExitCode {
             root,
             signature_files,
             files,
-        } => cmd_check(version, parse_only, root.as_deref(), &signature_files, &files),
+        } => cmd_check(
+            version,
+            parse_only,
+            root.as_deref(),
+            &signature_files,
+            &files,
+        ),
         Command::Format {
             merge_includes,
             root: format_root,
@@ -369,9 +381,11 @@ fn cmd_check(
             match parse_signature_doc(&combined, version) {
                 Ok(doc) => {
                     if !parse_only {
-                        let analysis = leekscript::run_semantic_analysis(doc.root());
+                        let analysis = leekscript::run_semantic_analysis(doc.root(), version);
                         for d in &analysis.diagnostics {
-                            ok = false;
+                            if d.severity == SemanticSeverity::Error {
+                                ok = false;
+                            }
                             report::emit(report::check_diagnostic(
                                 &map,
                                 None,
@@ -381,6 +395,7 @@ fn cmd_check(
                                 &d.message,
                                 d.related_span,
                                 Some((&src, user_base)),
+                                d.severity,
                             ));
                         }
                     }
@@ -390,15 +405,21 @@ fn cmd_check(
                     report::emit(report::parse_diagnostic(label, &combined, &e));
                 }
             }
-            return if ok { ExitCode::SUCCESS } else { ExitCode::from(1) };
+            return if ok {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            };
         }
 
         match parse_doc(&src, version) {
             Ok(doc) => {
                 if !parse_only {
-                    let analysis = leekscript::run_semantic_analysis(doc.root());
+                    let analysis = leekscript::run_semantic_analysis(doc.root(), version);
                     for d in &analysis.diagnostics {
-                        ok = false;
+                        if d.severity == SemanticSeverity::Error {
+                            ok = false;
+                        }
                         report::emit(report::check_diagnostic(
                             &MergedSourceMapping::default(),
                             None,
@@ -408,6 +429,7 @@ fn cmd_check(
                             &d.message,
                             d.related_span,
                             None,
+                            d.severity,
                         ));
                     }
                 }
@@ -417,7 +439,11 @@ fn cmd_check(
                 report::emit(report::parse_diagnostic(label, &src, &e));
             }
         }
-        return if ok { ExitCode::SUCCESS } else { ExitCode::from(1) };
+        return if ok {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        };
     }
 
     for path in files {
@@ -464,7 +490,8 @@ fn cmd_check(
             }
         };
 
-        let (combined, full_map) = match prepend_signatures_to_merged(signature_files, &merged, map) {
+        let (combined, full_map) = match prepend_signatures_to_merged(signature_files, &merged, map)
+        {
             Ok(x) => x,
             Err(e) => {
                 ok = false;
@@ -477,8 +504,7 @@ fn cmd_check(
             }
         };
 
-        let use_sig_grammar =
-            !signature_files.is_empty() || is_signature_stub_path(&entry);
+        let use_sig_grammar = !signature_files.is_empty() || is_signature_stub_path(&entry);
         let parse_result = if use_sig_grammar {
             parse_signature_doc(&combined, version)
         } else {
@@ -487,9 +513,11 @@ fn cmd_check(
         match parse_result {
             Ok(doc) => {
                 if !parse_only {
-                    let analysis = leekscript::run_semantic_analysis(doc.root());
+                    let analysis = leekscript::run_semantic_analysis(doc.root(), version);
                     for d in &analysis.diagnostics {
-                        ok = false;
+                        if d.severity == SemanticSeverity::Error {
+                            ok = false;
+                        }
                         report::emit(report::check_diagnostic(
                             &full_map,
                             Some(&project),
@@ -499,13 +527,18 @@ fn cmd_check(
                             &d.message,
                             d.related_span,
                             None,
+                            d.severity,
                         ));
                     }
                 }
             }
             Err(e) => {
                 ok = false;
-                report::emit(report::parse_diagnostic(format!("{label} (merged)"), &combined, &e));
+                report::emit(report::parse_diagnostic(
+                    format!("{label} (merged)"),
+                    &combined,
+                    &e,
+                ));
             }
         }
     }
@@ -862,7 +895,11 @@ fn cmd_format(
         let out = match format_document(&merged, version, opts) {
             Ok(o) => o,
             Err(e) => {
-                report::emit(report::parse_diagnostic(format!("{label} (merged)"), &merged, &e));
+                report::emit(report::parse_diagnostic(
+                    format!("{label} (merged)"),
+                    &merged,
+                    &e,
+                ));
                 return ExitCode::from(1);
             }
         };
@@ -950,7 +987,11 @@ fn cmd_format(
             Ok(o) => o,
             Err(e) => {
                 ok = false;
-                report::emit(report::parse_diagnostic(path.display().to_string(), &src, &e));
+                report::emit(report::parse_diagnostic(
+                    path.display().to_string(),
+                    &src,
+                    &e,
+                ));
                 continue;
             }
         };
@@ -1214,7 +1255,11 @@ fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
         }
     }
 
-    if ok { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 fn cmd_merge(version: Version, root: &Path, entry: &Path) -> ExitCode {

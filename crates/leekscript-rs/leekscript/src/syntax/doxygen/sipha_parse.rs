@@ -5,10 +5,10 @@
 
 use std::sync::OnceLock;
 
+use sipha::SyntaxKinds;
 use sipha::diagnostics::parsed_doc::ParsedDoc;
 use sipha::parse::engine::Engine;
 use sipha::prelude::*;
-use sipha::SyntaxKinds;
 use sipha::tree::red::{SyntaxElement, SyntaxNode};
 
 use super::scan::Segment;

@@ -28,8 +28,7 @@ fn recovery_parses_valid_statements_around_garbage() {
 #[test]
 fn parse_rule_at_offset_stmt_fragment() {
     let src = "var x = 1;";
-    let (doc, consumed) =
-        parse_rule_at_offset(src, Version::V4, "stmt", 0).expect("fragment stmt");
+    let (doc, consumed) = parse_rule_at_offset(src, Version::V4, "stmt", 0).expect("fragment stmt");
     assert_eq!(consumed as usize, src.len());
     let root = doc.root();
     assert_eq!(

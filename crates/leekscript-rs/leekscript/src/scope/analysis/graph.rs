@@ -1,11 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::scope::leek_ty::LeekTy;
-use crate::scope::model::{
-    ExprTypeKey, Scope, ScopeId, ScopeKind, Symbol, SymbolId, SymbolKind,
-};
-use crate::syntax::ParsedDoxygen;
 use crate::Span;
+use crate::scope::leek_ty::LeekTy;
+use crate::scope::model::{ExprTypeKey, Scope, ScopeId, ScopeKind, Symbol, SymbolId, SymbolKind};
+use crate::syntax::ParsedDoxygen;
 
 use super::phase::AnalysisPhase;
 

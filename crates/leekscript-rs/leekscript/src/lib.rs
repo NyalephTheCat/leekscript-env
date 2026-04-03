@@ -43,24 +43,24 @@ pub mod visit;
 pub use document::{DocEditError, LeekDoc};
 pub use include::{
     IncludeLimits, IncludeLoadError, LoadedProject, LoadedSourceFile, MergeIncludesError,
-    MergedSourceMapping, MergedSpanMap, PreludeBuildError, ResolveError, load_project_with_includes,
-    load_project_with_includes_limited, merge_included_sources_to_single_file,
-    merge_included_sources_to_single_file_mapped, prepend_signatures_to_merged, resolve_include_path,
-    try_resolve_include_file,
-};
-pub use parse::{
-    ParseError, ParsedWithRecovery, Version, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, is_signature_stub_path,
-    parse_doc, parse_doc_or_recover, parse_doc_with_recovery, parse_doc_with_recovery_limited,
-    parse_signature_doc, parse_syntax_root,
+    MergedSourceMapping, MergedSpanMap, PreludeBuildError, ResolveError,
+    load_project_with_includes, load_project_with_includes_limited,
+    merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
+    prepend_signatures_to_merged, resolve_include_path, try_resolve_include_file,
 };
 #[cfg(feature = "partial-reparse")]
 pub use parse::parse_rule_at_offset;
+pub use parse::{
+    FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, ParseError, ParsedWithRecovery, Version,
+    is_signature_stub_path, parse_doc, parse_doc_or_recover, parse_doc_with_recovery,
+    parse_doc_with_recovery_limited, parse_signature_doc, parse_syntax_root,
+};
 pub use sipha::types::{Pos, Span};
 
 #[cfg(feature = "walk")]
 pub use scope::{
-    run_semantic_analysis, AnalysisResult, ExprTypeKey, LeekTy, Reference, Scope, ScopeId,
-    SemanticCode, SemanticDiagnostic,
+    AnalysisResult, ExprTypeKey, LeekTy, Reference, Scope, ScopeId, SemanticCode,
+    SemanticDiagnostic, SemanticSeverity, run_semantic_analysis,
 };
 
 #[cfg(feature = "transform")]

@@ -30,6 +30,7 @@ impl Visitor for Analyzer {
             self.infer_expr_node(node);
             self.apply_var_inits(node);
             self.apply_foreach_var_inference(node);
+            self.on_leave_node_deprecations(node);
             self.pop_narrowing_frame_if_needed(node);
         }
         self.sync_leave(node);

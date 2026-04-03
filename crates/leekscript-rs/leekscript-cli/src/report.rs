@@ -6,6 +6,7 @@ use std::io::{self, Write};
 use std::path::Path;
 
 use leekscript::ParseError;
+use leekscript::SemanticSeverity;
 use leekscript::include::{
     IncludeLoadError, LoadedProject, MergeIncludesError, MergedSourceMapping, PreludeBuildError,
 };
@@ -73,6 +74,19 @@ struct SemanticSnippet {
     related: Option<SourceSpan>,
 }
 
+#[derive(Debug, Error, Diagnostic)]
+#[error("{message}")]
+#[diagnostic(code(leekscript::semantic), severity(warning))]
+struct SemanticSnippetWarning {
+    message: String,
+    #[source_code]
+    src: NamedSource<String>,
+    #[label("here")]
+    span: SourceSpan,
+    #[label("type annotation")]
+    related: Option<SourceSpan>,
+}
+
 fn snippet(
     label: impl Into<String>,
     source: String,
@@ -80,6 +94,7 @@ fn snippet(
     len: u32,
     message: impl Into<String>,
     related: Option<(u32, u32)>,
+    severity: SemanticSeverity,
 ) -> Report {
     let start_u = (start as usize).min(source.len());
     let len_u = (len as usize).min(source.len().saturating_sub(start_u));
@@ -93,12 +108,22 @@ fn snippet(
             Some(SourceSpan::from((rs, rlen)))
         }
     });
-    Report::new(SemanticSnippet {
-        message: message.into(),
-        src: NamedSource::new(label.into(), source),
-        span,
-        related,
-    })
+    let label = label.into();
+    let message = message.into();
+    match severity {
+        SemanticSeverity::Error => Report::new(SemanticSnippet {
+            message,
+            src: NamedSource::new(label, source),
+            span,
+            related,
+        }),
+        SemanticSeverity::Warning => Report::new(SemanticSnippetWarning {
+            message,
+            src: NamedSource::new(label, source),
+            span,
+            related,
+        }),
+    }
 }
 
 /// Map a semantic diagnostic in a merged / signature-prefixed check buffer back to a source file.
@@ -111,6 +136,7 @@ pub fn check_diagnostic(
     message: &str,
     related_span: Option<Span>,
     stdin_user: Option<(&str, u32)>,
+    severity: SemanticSeverity,
 ) -> Report {
     if let Some((stdin_body, user_base)) = stdin_user {
         if span.start >= user_base {
@@ -118,15 +144,13 @@ pub fn check_diagnostic(
                 span.start.saturating_sub(user_base),
                 span.end.saturating_sub(user_base),
             );
-            let rel = related_span
-                .filter(|r| r.start >= user_base)
-                .map(|r| {
-                    let a = Span::new(
-                        r.start.saturating_sub(user_base),
-                        r.end.saturating_sub(user_base),
-                    );
-                    (a.start, a.end.saturating_sub(a.start))
-                });
+            let rel = related_span.filter(|r| r.start >= user_base).map(|r| {
+                let a = Span::new(
+                    r.start.saturating_sub(user_base),
+                    r.end.saturating_sub(user_base),
+                );
+                (a.start, a.end.saturating_sub(a.start))
+            });
             return snippet(
                 "<stdin>",
                 stdin_body.to_string(),
@@ -134,6 +158,7 @@ pub fn check_diagnostic(
                 s.end.saturating_sub(s.start),
                 message,
                 rel,
+                severity,
             );
         }
     }
@@ -161,6 +186,7 @@ pub fn check_diagnostic(
                     len,
                     message,
                     related_in_file,
+                    severity,
                 );
             }
         }
@@ -172,16 +198,12 @@ pub fn check_diagnostic(
                 len,
                 message,
                 related_in_file,
+                severity,
             );
         }
     }
 
-    let rel_combined = related_span.map(|r| {
-        (
-            r.start,
-            r.end.saturating_sub(r.start),
-        )
-    });
+    let rel_combined = related_span.map(|r| (r.start, r.end.saturating_sub(r.start)));
     snippet(
         fallback_label,
         combined_src.to_string(),
@@ -189,6 +211,7 @@ pub fn check_diagnostic(
         span.end.saturating_sub(span.start),
         message,
         rel_combined,
+        severity,
     )
 }
 
@@ -207,10 +230,7 @@ pub fn include_load(root: &Path, entry: &Path, err: &IncludeLoadError) -> Report
             if let Ok(src) = std::fs::read_to_string(path) {
                 parse_diagnostic(path.display().to_string(), &src, e)
             } else {
-                message(format!(
-                    "Parse error in {}: {e:?}",
-                    path.display()
-                ))
+                message(format!("Parse error in {}: {e:?}", path.display()))
             }
         }
         _ => message(format!(
@@ -222,10 +242,7 @@ pub fn include_load(root: &Path, entry: &Path, err: &IncludeLoadError) -> Report
 }
 
 pub fn merge_includes(path: &Path, err: MergeIncludesError) -> Report {
-    message(format!(
-        "Include merge from `{}`: {err}",
-        path.display()
-    ))
+    message(format!("Include merge from `{}`: {err}", path.display()))
 }
 
 pub fn merge_command(err: MergeIncludesError) -> Report {
@@ -234,10 +251,9 @@ pub fn merge_command(err: MergeIncludesError) -> Report {
 
 pub fn prelude_signatures(err: PreludeBuildError) -> Report {
     match err {
-        PreludeBuildError::Io(p, e) => message(format!(
-            "`--signatures` file `{}`: {e}",
-            p.display()
-        )),
+        PreludeBuildError::Io(p, e) => {
+            message(format!("`--signatures` file `{}`: {e}", p.display()))
+        }
     }
 }
 

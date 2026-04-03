@@ -1,8 +1,8 @@
 //! Name / binding span helpers for AST nodes used during scope construction.
 
+use crate::Span;
 use crate::ast::{CatchClause, ClassDecl, ForeachStmt, FunctionDecl, GlobalDecl, VarDecl};
 use crate::syntax::kinds::K;
-use crate::Span;
 use sipha::tree::ast::AstNode;
 
 pub(crate) fn function_name_span(fd: &FunctionDecl) -> Option<Span> {

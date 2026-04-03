@@ -3,9 +3,9 @@
 //! With that feature, the built graph assumes [`Version::V4`](crate::parse::Version::V4); these
 //! become no-ops so lexer/parser bytecode avoids runtime flag branches.
 
+use crate::parse::version::FLAG_VNEXT;
 #[cfg(not(feature = "grammar-v4-only"))]
 use crate::parse::version::{FLAG_V1, FLAG_V2, FLAG_V3, FLAG_V4};
-use crate::parse::version::FLAG_VNEXT;
 use sipha::prelude::*;
 
 pub(crate) fn v2(

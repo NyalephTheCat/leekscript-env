@@ -3,12 +3,13 @@ mod recovery;
 pub(crate) mod version;
 
 pub use error::ParseError;
-pub use recovery::{
-    ParsedWithRecovery, parse_doc_or_recover, parse_doc_with_recovery, parse_doc_with_recovery_limited,
-};
 #[cfg(feature = "partial-reparse")]
 pub use recovery::parse_rule_at_offset;
-pub use version::{Version, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE};
+pub use recovery::{
+    ParsedWithRecovery, parse_doc_or_recover, parse_doc_with_recovery,
+    parse_doc_with_recovery_limited,
+};
+pub use version::{FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, Version};
 
 use crate::grammar;
 use sipha::prelude::*;

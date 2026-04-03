@@ -19,6 +19,7 @@
 
 mod analyzer;
 mod condition;
+mod deprecations;
 mod enter_leave;
 mod graph;
 mod infer;
@@ -32,11 +33,12 @@ use std::collections::HashMap;
 
 use sipha::tree::red::SyntaxNode;
 
+use crate::Span;
+use crate::parse::Version;
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::{
     ExprTypeKey, Reference, Scope, ScopeId, SemanticDiagnostic, Symbol, SymbolId,
 };
-use crate::Span;
 
 use analyzer::Analyzer;
 
@@ -76,9 +78,11 @@ impl AnalysisResult {
 }
 
 /// Run scope construction, resolve identifiers, and infer simple expression types.
+///
+/// `version` controls deprecation rules (e.g. `===` / `!==` warnings apply for LS 4+).
 #[must_use]
-pub fn run_semantic_analysis(root: &SyntaxNode) -> AnalysisResult {
-    let a = Analyzer::run_two_phase(root);
+pub fn run_semantic_analysis(root: &SyntaxNode, version: Version) -> AnalysisResult {
+    let a = Analyzer::run_two_phase(root, version);
     AnalysisResult {
         scopes: a.graph.scopes,
         symbols: a.graph.symbols,
@@ -91,11 +95,11 @@ pub fn run_semantic_analysis(root: &SyntaxNode) -> AnalysisResult {
 #[cfg(test)]
 mod narrowing_smoke {
     use super::run_semantic_analysis;
+    use crate::LeekTy;
+    use crate::Version;
     use crate::parse_doc;
     use crate::scope::model::ExprTypeKey;
     use crate::syntax::kinds::K;
-    use crate::LeekTy;
-    use crate::Version;
     use sipha::types::IntoSyntaxKind;
 
     #[test]
@@ -105,7 +109,7 @@ mod narrowing_smoke {
             Version::V4,
         )
         .unwrap();
-        let a = run_semantic_analysis(doc.root());
+        let a = run_semantic_analysis(doc.root(), Version::V4);
         let str_ty = LeekTy::Class("String".to_string());
         let narrowed = a
             .references
@@ -139,25 +143,21 @@ mod narrowing_smoke {
 #[cfg(test)]
 mod analysis_smoke {
     use super::run_semantic_analysis;
+    use crate::Version;
     use crate::parse_doc;
     use crate::scope::model::{SemanticCode, SemanticDiagnostic};
-    use crate::Version;
 
     #[test]
     fn undefined_diagnostic_snapshot() {
         let doc = parse_doc("function f() { return z; }", Version::V4).unwrap();
-        let a = run_semantic_analysis(doc.root());
+        let a = run_semantic_analysis(doc.root(), Version::V4);
         let d: Vec<&SemanticDiagnostic> = a
             .diagnostics
             .iter()
             .filter(|d| d.code == SemanticCode::UndefinedName)
             .collect();
         assert_eq!(d.len(), 1, "{:?}", a.diagnostics);
-        assert!(
-            d[0].message.contains("z"),
-            "message={:?}",
-            d[0].message
-        );
+        assert!(d[0].message.contains("z"), "message={:?}", d[0].message);
     }
 
     #[test]
@@ -171,7 +171,7 @@ mod analysis_smoke {
             "function g() { var a; if (a) { } }",
         ] {
             if let Ok(doc) = parse_doc(src, Version::V4) {
-                let _ = run_semantic_analysis(doc.root());
+                let _ = run_semantic_analysis(doc.root(), Version::V4);
             }
         }
     }

@@ -10,12 +10,10 @@ mod extract;
 mod leek_ty;
 mod model;
 
-pub use analysis::{run_semantic_analysis, AnalysisResult};
+pub use crate::syntax::{DoxygenParam, DoxygenRetval, DoxygenThrows, ParsedDoxygen, parse_doxygen};
+pub use analysis::{AnalysisResult, run_semantic_analysis};
 pub use leek_ty::LeekTy;
 pub use model::{
-    ExprTypeKey, Reference, Scope, ScopeId, ScopeKind, SemanticCode, SemanticDiagnostic, Symbol,
-    SymbolId, SymbolKind,
-};
-pub use crate::syntax::{
-    parse_doxygen, DoxygenParam, DoxygenRetval, DoxygenThrows, ParsedDoxygen,
+    ExprTypeKey, Reference, Scope, ScopeId, ScopeKind, SemanticCode, SemanticDiagnostic,
+    SemanticSeverity, Symbol, SymbolId, SymbolKind,
 };

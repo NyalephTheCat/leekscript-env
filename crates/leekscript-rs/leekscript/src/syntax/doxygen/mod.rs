@@ -9,9 +9,7 @@ mod model;
 mod scan;
 mod sipha_parse;
 
-pub use model::{
-    DoxygenParam, DoxygenRetval, DoxygenThrows, ParsedDoxygen,
-};
+pub use model::{DoxygenParam, DoxygenRetval, DoxygenThrows, ParsedDoxygen};
 
 use commands::apply_segments;
 use scan::split_command_segments;
@@ -91,9 +89,6 @@ mod tests {
         assert_eq!(p.template_params[0].name, "T");
         assert_eq!(p.retvals.len(), 2);
         assert_eq!(p.retvals[0].value, "0");
-        assert!(p
-            .unknown
-            .iter()
-            .any(|(n, _)| n == "fn" || n == "file"));
+        assert!(p.unknown.iter().any(|(n, _)| n == "fn" || n == "file"));
     }
 }

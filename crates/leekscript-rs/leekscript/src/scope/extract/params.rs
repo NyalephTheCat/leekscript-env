@@ -1,6 +1,6 @@
-use crate::ast::types::TypeExpr;
-use crate::ast::FunctionDecl;
 use crate::Span;
+use crate::ast::FunctionDecl;
+use crate::ast::types::TypeExpr;
 
 /// Parameter list for a top-level [`FunctionDecl`] (uses AST [`FnParam`](crate::ast::FnParam) nodes).
 #[must_use]

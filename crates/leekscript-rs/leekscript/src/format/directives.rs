@@ -159,11 +159,7 @@ fn apply_comment_body(
     let Some((rest, file_wide_options)) = leekfmt_directive_rest(trimmed) else {
         return;
     };
-    let option_patch_offset = if file_wide_options {
-        0
-    } else {
-        comment_end
-    };
+    let option_patch_offset = if file_wide_options { 0 } else { comment_end };
 
     for part in split_directive_parts(rest) {
         let part = part.trim();
@@ -241,10 +237,7 @@ fn span_line_after_comment_line(source: &[u8], comment_start: u32) -> Option<Spa
     // Omit the line-ending `\n` from the preserve span: it is often the first byte of the next
     // top-level node's range, which would make that node intersect the preserve region and
     // either hang (skip loop never advances) or skip formatting the following statement entirely.
-    Some(clamp_span(
-        Span::new(start, i as u32),
-        source.len() as Pos,
-    ))
+    Some(clamp_span(Span::new(start, i as u32), source.len() as Pos))
 }
 
 fn parse_option_assignments(part: &str) -> Option<FormatPatch> {
@@ -519,12 +512,18 @@ mod tests {
         assert_eq!(&src.as_bytes()[s..e], b"let x=1+  2;\n");
     }
 
-
     #[test]
     fn semicolons_directive_only_needed() {
-        let doc = LeekDoc::parse("// leekfmt: semicolons=only-needed\nlet x=1;", Version::VNext).unwrap();
+        let doc = LeekDoc::parse(
+            "// leekfmt: semicolons=only-needed\nlet x=1;",
+            Version::VNext,
+        )
+        .unwrap();
         let plan = scan_directives(&doc);
         assert_eq!(plan.patches.len(), 1);
-        assert_eq!(plan.patches[0].1.semicolon_style, Some(SemicolonStyle::OnlyNeeded));
+        assert_eq!(
+            plan.patches[0].1.semicolon_style,
+            Some(SemicolonStyle::OnlyNeeded)
+        );
     }
 }

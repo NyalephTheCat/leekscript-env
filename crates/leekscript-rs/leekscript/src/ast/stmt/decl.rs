@@ -1,8 +1,8 @@
-use super::params::{fn_param_children, FnParam};
 use super::Block;
+use super::params::{FnParam, fn_param_children};
 use crate::ast::expr::Expr;
 use crate::ast::types::TypeExpr;
-use crate::syntax::{attached_docstring, attached_parsed_doxygen, kinds::K, ParsedDoxygen};
+use crate::syntax::{ParsedDoxygen, attached_docstring, attached_parsed_doxygen, kinds::K};
 use sipha::prelude::*;
 use sipha::tree::ast::AstNode;
 use sipha::tree::ast::AstNodeExt;

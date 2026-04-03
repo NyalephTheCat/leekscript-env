@@ -84,9 +84,7 @@ pub(crate) fn find_next_command(s: &str, from: usize) -> Option<(usize, String, 
                 continue;
             }
             let mut j = i + 1;
-            while j < bytes.len()
-                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_')
-            {
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
                 j += 1;
             }
             if j == i + 1 {

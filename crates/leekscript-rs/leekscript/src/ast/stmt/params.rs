@@ -1,8 +1,8 @@
 //! Formal parameter nodes (`K::FnParam`) shared by function and method headers.
 
+use crate::Span;
 use crate::ast::types::TypeExpr;
 use crate::syntax::kinds::K;
-use crate::Span;
 use sipha::prelude::*;
 use sipha::tree::ast::{AstNode, AstNodeExt};
 use sipha::types::IntoSyntaxKind;

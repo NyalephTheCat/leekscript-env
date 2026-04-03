@@ -1,9 +1,9 @@
 //! Recovering and partial-rule parsing on top of sipha.
 
-use sipha::prelude::ParsedDoc;
-use sipha::prelude::*;
 use crate::grammar;
 use crate::syntax::kinds::K;
+use sipha::prelude::ParsedDoc;
+use sipha::prelude::*;
 
 use super::{ParseError, Version};
 
@@ -29,7 +29,10 @@ const DEFAULT_MAX_RECOVERY_ERRORS: usize = 64;
 /// in the `Err` path. If the parser recovers and reaches end-of-input successfully, `errors` may
 /// be empty even though recovery ran.
 #[must_use]
-pub fn parse_doc_with_recovery(src: &str, version: Version) -> Result<ParsedWithRecovery, ParseError> {
+pub fn parse_doc_with_recovery(
+    src: &str,
+    version: Version,
+) -> Result<ParsedWithRecovery, ParseError> {
     parse_doc_with_recovery_limited(src, version, DEFAULT_MAX_RECOVERY_ERRORS)
 }
 
@@ -57,7 +60,8 @@ pub fn parse_doc_with_recovery_limited(
             })
         }
         Err(multi) => {
-            let doc = ParsedDoc::from_slice(bytes, &multi.partial).ok_or(ParseError::NoSyntaxRoot)?;
+            let doc =
+                ParsedDoc::from_slice(bytes, &multi.partial).ok_or(ParseError::NoSyntaxRoot)?;
             Ok(ParsedWithRecovery {
                 doc,
                 errors: multi.errors.into_iter().map(ParseError::from).collect(),
@@ -81,11 +85,11 @@ pub fn parse_rule_at_offset(
 ) -> Result<(ParsedDoc, u32), ParseError> {
     let built = grammar::built_graph();
     let graph = built.as_graph();
-    let rule = graph
-        .rule_id(rule_name)
-        .ok_or_else(|| ParseError::from(sipha::parse::engine::ParseError::UnknownRuleName(
+    let rule = graph.rule_id(rule_name).ok_or_else(|| {
+        ParseError::from(sipha::parse::engine::ParseError::UnknownRuleName(
             rule_name.to_string(),
-        )))?;
+        ))
+    })?;
 
     let mut engine = Engine::new();
     let ctx = version.to_parse_context();

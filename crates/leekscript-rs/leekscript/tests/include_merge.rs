@@ -7,7 +7,10 @@ use leekscript::{
 use std::path::Path;
 
 fn tmp_merge_root(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("leekscript_merge_test_{name}_{}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "leekscript_merge_test_{name}_{}",
+        std::process::id()
+    ))
 }
 
 #[test]
@@ -78,7 +81,9 @@ fn merge_source_mapping_points_at_original_file() {
     let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
     let (merged, map) = merge_included_sources_to_single_file_mapped(&root, &p).unwrap();
     let pos = merged.find("class").expect("class keyword in merged") as u32;
-    let sm = map.span_at_merged_offset(pos).expect("mapping for lib body");
+    let sm = map
+        .span_at_merged_offset(pos)
+        .expect("mapping for lib body");
     assert!(
         sm.path.ends_with("lib.leek"),
         "expected lib.leek, got {:?}",
@@ -98,8 +103,7 @@ fn prepend_signatures_shifts_mapping_and_inserts_prelude() {
 
     let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
     let (merged, map) = merge_included_sources_to_single_file_mapped(&root, &p).unwrap();
-    let (combined, full_map) =
-        prepend_signatures_to_merged(&[sig.clone()], &merged, map).unwrap();
+    let (combined, full_map) = prepend_signatures_to_merged(&[sig.clone()], &merged, map).unwrap();
 
     assert!(combined.starts_with("function abs"));
     assert!(combined.contains("var y = abs"));
@@ -115,7 +119,9 @@ fn prepend_signatures_shifts_mapping_and_inserts_prelude() {
     );
 
     let pos_main = combined.find("var y").expect("main") as u32;
-    let sm2 = full_map.span_at_merged_offset(pos_main).expect("main mapping");
+    let sm2 = full_map
+        .span_at_merged_offset(pos_main)
+        .expect("main mapping");
     assert!(
         sm2.path.ends_with("main.leek"),
         "expected main.leek, got {:?}",

@@ -34,7 +34,9 @@ impl MergedSourceMapping {
     /// Returns the span map entry containing `merged_offset`, if any.
     #[must_use]
     pub fn span_at_merged_offset(&self, merged_offset: u32) -> Option<&MergedSpanMap> {
-        let i = self.spans.partition_point(|s| s.merged_start <= merged_offset);
+        let i = self
+            .spans
+            .partition_point(|s| s.merged_start <= merged_offset);
         let idx = i.checked_sub(1)?;
         let s = self.spans.get(idx)?;
         if merged_offset < s.merged_end {
@@ -178,7 +180,9 @@ fn display_path_relative(project_root: &Path, path: &Path) -> String {
         .unwrap_or_else(|_| path.display().to_string())
 }
 
-fn build_file_index(project: &LoadedProject) -> Result<HashMap<PathBuf, usize>, MergeIncludesError> {
+fn build_file_index(
+    project: &LoadedProject,
+) -> Result<HashMap<PathBuf, usize>, MergeIncludesError> {
     let mut map = HashMap::new();
     for (i, file) in project.files.iter().enumerate() {
         let key = canonical_key(&file.path)?;

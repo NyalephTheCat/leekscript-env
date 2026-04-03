@@ -11,13 +11,13 @@ mod params;
 pub use block::Block;
 pub use control::{DoWhileStmt, ForStmt, ForeachStmt, IfStmt, SwitchArm, SwitchStmt, WhileStmt};
 pub use decl::{ExprStmt, FunctionDecl, VarDecl};
-pub use params::{fn_param_children, FnParam};
 pub use flow::{BreakStmt, ContinueStmt, ReturnStmt};
 pub use include::IncludeStmt;
 pub use misc::{
     CatchClause, ClassDecl, ClassMember, ConstDecl, ElseStmt, EmptyStmt, ErrorStmt, ExportStmt,
     GlobalDecl, GotoStmt, ImportStmt, MatchStmt, PackageStmt, ThrowStmt, TryStmt,
 };
+pub use params::{FnParam, fn_param_children};
 
 use crate::syntax::kinds::K;
 use sipha::AstEnum;

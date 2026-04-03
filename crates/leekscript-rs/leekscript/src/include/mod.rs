@@ -17,12 +17,12 @@ pub use merge::{
     prepend_signatures_to_merged,
 };
 
+use sipha::prelude::ParsedDoc;
+use sipha::tree::ast::{AstNode, AstNodeExt};
 use std::collections::HashSet;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use sipha::prelude::ParsedDoc;
-use sipha::tree::ast::{AstNode, AstNodeExt};
 
 use crate::ast::{Root, Stmt};
 use crate::parse::{ParseError, Version, is_signature_stub_path, parse_doc, parse_signature_doc};

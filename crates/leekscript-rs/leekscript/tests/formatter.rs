@@ -1,5 +1,5 @@
-use leekscript::format::{FormatOptions, SemicolonStyle, format_document};
 use leekscript::Version;
+use leekscript::format::{FormatOptions, SemicolonStyle, format_document};
 
 #[test]
 fn formats_let_with_spaces() {
@@ -42,11 +42,20 @@ fn semicolon_style_only_needed_keeps_bare_return_break_continue() {
     let out = format_document("function f() { return; }", Version::V4, &opts).unwrap();
     assert!(out.contains("return;"), "got:\n{out}");
 
-    let out = format_document("function f() { while (true) { break; } }", Version::V4, &opts).unwrap();
+    let out = format_document(
+        "function f() { while (true) { break; } }",
+        Version::V4,
+        &opts,
+    )
+    .unwrap();
     assert!(out.contains("break;"), "got:\n{out}");
 
-    let out =
-        format_document("function f() { while (true) { continue; } }", Version::V4, &opts).unwrap();
+    let out = format_document(
+        "function f() { while (true) { continue; } }",
+        Version::V4,
+        &opts,
+    )
+    .unwrap();
     assert!(out.contains("continue;"), "got:\n{out}");
 }
 
@@ -66,7 +75,12 @@ fn semicolon_style_only_needed_omits_after_return_value() {
 
 #[test]
 fn formats_double_semicolon_empty_stmts() {
-    let out = format_document("function f() { ;; }", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(
+        "function f() { ;; }",
+        Version::V4,
+        &FormatOptions::default(),
+    )
+    .unwrap();
     assert!(
         out.matches(';').count() >= 2,
         "expected two empty statements, got:\n{out}"
@@ -112,7 +126,12 @@ fn formats_space_after_nullable_type_question_before_name() {
 
 #[test]
 fn formats_arrow_lambda_without_duplicate_arrow() {
-    let out = format_document("let f = x -> x + 1;", Version::VNext, &FormatOptions::default()).unwrap();
+    let out = format_document(
+        "let f = x -> x + 1;",
+        Version::VNext,
+        &FormatOptions::default(),
+    )
+    .unwrap();
     assert_eq!(out.trim(), "let f = x -> x + 1;");
     assert!(
         !out.contains("-> x ->"),
@@ -154,20 +173,24 @@ fn formats_new_expression_on_one_line() {
 
 #[test]
 fn formats_noteq_without_splitting_operator() {
-    let out = format_document("if (combo != null) {}", Version::V4, &FormatOptions::default()).unwrap();
-    assert!(
-        out.contains("!="),
-        "expected `!=` preserved, got:\n{out}"
-    );
-    assert!(
-        !out.contains("! ="),
-        "should not split `!=`, got:\n{out}"
-    );
+    let out = format_document(
+        "if (combo != null) {}",
+        Version::V4,
+        &FormatOptions::default(),
+    )
+    .unwrap();
+    assert!(out.contains("!="), "expected `!=` preserved, got:\n{out}");
+    assert!(!out.contains("! ="), "should not split `!=`, got:\n{out}");
 }
 
 #[test]
 fn formats_space_after_paren_before_continue() {
-    let out = format_document("if (geo == null) continue", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(
+        "if (geo == null) continue",
+        Version::V4,
+        &FormatOptions::default(),
+    )
+    .unwrap();
     assert!(
         out.contains(") continue") || out.contains(")\ncontinue"),
         "expected space or newline before continue, got:\n{out}"
@@ -195,7 +218,10 @@ fn block_lines_share_indent_after_rparen_stmt() {
 fn indent_width_from_directive() {
     let src = "// leekfmt: indent-width=2\nfunction f() {\nlet x=1;\n}";
     let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
-    assert!(out.contains("  let x = 1;"), "expected 2-space indent, got:\n{out}");
+    assert!(
+        out.contains("  let x = 1;"),
+        "expected 2-space indent, got:\n{out}"
+    );
 }
 
 #[test]
@@ -219,7 +245,10 @@ fn file_wide_inner_directive_formats_lines_above() {
 fn off_on_preserves_mangled() {
     let src = "a;\n// leekfmt: off\nlet x=1+  2;\n// leekfmt: on\nb;\n";
     let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
-    assert!(out.contains("let x=1+  2;"), "verbatim region should stay:\n{out}");
+    assert!(
+        out.contains("let x=1+  2;"),
+        "verbatim region should stay:\n{out}"
+    );
     assert!(out.contains("a;"), "formatted first stmt:\n{out}");
 }
 
@@ -238,7 +267,10 @@ fn ignore_next_line() {
     let src = "// leekfmt: ignore-next-line\nlet   y=2;\nlet z=3;\n";
     let out = format_document(src, Version::VNext, &FormatOptions::default()).unwrap();
     assert!(out.contains("let   y=2;"), "next line kept:\n{out}");
-    assert!(out.contains("let z = 3;") || out.contains("let z=3"), "following line formatted:\n{out}");
+    assert!(
+        out.contains("let z = 3;") || out.contains("let z=3"),
+        "following line formatted:\n{out}"
+    );
 }
 
 #[test]
@@ -272,7 +304,12 @@ fn spaces_around_keyword_binary_ops_before_paren() {
     );
 
     // `as` is a cast in this grammar: `expr as Type`
-    let out = format_document("let x=(a as integer);", Version::VNext, &FormatOptions::default()).unwrap();
+    let out = format_document(
+        "let x=(a as integer);",
+        Version::VNext,
+        &FormatOptions::default(),
+    )
+    .unwrap();
     assert!(
         out.contains("a as integer"),
         "expected spaces around `as`, got:\n{out}"
@@ -304,7 +341,12 @@ fn spaces_between_class_member_modifiers() {
 
 #[test]
 fn spaces_between_adjacent_keywords() {
-    let out = format_document("if (a) {} else if(b) {}", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(
+        "if (a) {} else if(b) {}",
+        Version::V4,
+        &FormatOptions::default(),
+    )
+    .unwrap();
     assert!(
         out.contains("else if"),
         "expected `else if` to keep a space, got:\n{out}"
@@ -319,7 +361,8 @@ fn spaces_between_adjacent_keywords() {
 
 #[test]
 fn space_after_comma_default() {
-    let out = format_document("let x = f(1,2);", Version::VNext, &FormatOptions::default()).unwrap();
+    let out =
+        format_document("let x = f(1,2);", Version::VNext, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("f(1, 2)"),
         "expected space after comma, got:\n{out}"
@@ -333,13 +376,24 @@ fn space_after_comma_false() {
         ..Default::default()
     };
     let out = format_document("let x = f(1, 2);", Version::VNext, &o).unwrap();
-    assert!(out.contains("f(1,2)"), "expected no space after comma, got:\n{out}");
-    assert!(!out.contains("1, 2"), "unexpected space after comma:\n{out}");
+    assert!(
+        out.contains("f(1,2)"),
+        "expected no space after comma, got:\n{out}"
+    );
+    assert!(
+        !out.contains("1, 2"),
+        "unexpected space after comma:\n{out}"
+    );
 }
 
 #[test]
 fn space_before_brace_after_rparen_and_class_name() {
-    let out = format_document("function f(){return 1;}", Version::V4, &FormatOptions::default()).unwrap();
+    let out = format_document(
+        "function f(){return 1;}",
+        Version::V4,
+        &FormatOptions::default(),
+    )
+    .unwrap();
     assert!(
         out.contains("() {") || out.contains("(){\n"),
         "expected space before `{{` after `)`, got:\n{out}"
@@ -398,7 +452,9 @@ fn line_width_zero_disables_comma_wrap() {
         &o,
     )
     .unwrap();
-    let one_line_return = out.lines().any(|l| l.contains("return g") && l.contains("\"bbbb\""));
+    let one_line_return = out
+        .lines()
+        .any(|l| l.contains("return g") && l.contains("\"bbbb\""));
     assert!(
         one_line_return,
         "expected single-line return when line_width=0, got:\n{out}"
@@ -549,7 +605,8 @@ fn space_around_type_operators_true() {
 
 #[test]
 fn space_around_type_operators_from_directive() {
-    let src = "// leekfmt: space-around-type-operators=true\nclass T {\nstatic integer|real f() {}\n}\n";
+    let src =
+        "// leekfmt: space-around-type-operators=true\nclass T {\nstatic integer|real f() {}\n}\n";
     let out = format_document(src, Version::V4, &FormatOptions::default()).unwrap();
     assert!(
         out.contains("integer | real"),

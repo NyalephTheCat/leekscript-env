@@ -7,14 +7,7 @@ use crate::syntax::kinds::K;
 fn is_ident_or_literal(k: K) -> bool {
     matches!(
         k,
-        K::Ident
-            | K::Number
-            | K::String
-            | K::Pi
-            | K::Infinity
-            | K::TrueKw
-            | K::FalseKw
-            | K::NullKw
+        K::Ident | K::Number | K::String | K::Pi | K::Infinity | K::TrueKw | K::FalseKw | K::NullKw
     )
 }
 
@@ -134,29 +127,35 @@ fn is_keyword_word(k: K) -> bool {
 
 #[inline]
 fn is_wordish(k: K) -> bool {
-    k == K::Ident || k == K::Number || k == K::String || k == K::Pi || k == K::Infinity || is_keyword_word(k)
+    k == K::Ident
+        || k == K::Number
+        || k == K::String
+        || k == K::Pi
+        || k == K::Infinity
+        || is_keyword_word(k)
 }
 
 #[inline]
 fn is_unary_prefix(k: K) -> bool {
-    matches!(k, K::Bang | K::Tilde | K::Plus | K::Minus | K::PlusPlus | K::MinusMinus)
+    matches!(
+        k,
+        K::Bang | K::Tilde | K::Plus | K::Minus | K::PlusPlus | K::MinusMinus
+    )
 }
 
 #[inline]
 fn closes_expr_atom(p: K) -> bool {
-    matches!(p, K::RParen | K::RBracket | K::RBrace | K::String | K::Number | K::Ident)
+    matches!(
+        p,
+        K::RParen | K::RBracket | K::RBrace | K::String | K::Number | K::Ident
+    )
 }
 
 #[inline]
 fn keyword_before_paren(p: K) -> bool {
     matches!(
         p,
-        K::IfKw
-            | K::WhileKw
-            | K::ForKw
-            | K::SwitchKw
-            | K::CatchKw
-            | K::FunctionTypeKw
+        K::IfKw | K::WhileKw | K::ForKw | K::SwitchKw | K::CatchKw | K::FunctionTypeKw
     )
 }
 
@@ -237,7 +236,14 @@ pub fn needs_space_between(
     // No space before closers and separators (prefix `++`/`--` falls through — e.g. `for (;; ++i)`).
     if matches!(
         next,
-        K::Semi | K::Comma | K::RParen | K::RBracket | K::RBrace | K::Dot | K::PlusPlus | K::MinusMinus
+        K::Semi
+            | K::Comma
+            | K::RParen
+            | K::RBracket
+            | K::RBrace
+            | K::Dot
+            | K::PlusPlus
+            | K::MinusMinus
     ) {
         if matches!(next, K::PlusPlus | K::MinusMinus) {
             if closes_expr_atom(p) {
@@ -317,10 +323,7 @@ pub fn needs_space_between(
         if next == K::LBrace {
             return true;
         }
-        if matches!(
-            next,
-            K::ContinueKw | K::BreakKw | K::ReturnKw | K::ThrowKw
-        ) {
+        if matches!(next, K::ContinueKw | K::BreakKw | K::ReturnKw | K::ThrowKw) {
             return true;
         }
         if is_ident_or_literal(next) || matches!(next, K::ThisKw | K::SuperKw) {
@@ -360,7 +363,12 @@ pub fn needs_space_between(
     }
 
     // Keyword + `{` spacing (e.g. `do {}`, `else {}`, `try {}`).
-    if next == K::LBrace && matches!(p, K::DoKw | K::ElseKw | K::TryKw | K::CatchKw | K::FinallyKw) {
+    if next == K::LBrace
+        && matches!(
+            p,
+            K::DoKw | K::ElseKw | K::TryKw | K::CatchKw | K::FinallyKw
+        )
+    {
         return true;
     }
 

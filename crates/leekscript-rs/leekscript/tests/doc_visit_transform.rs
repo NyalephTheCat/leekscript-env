@@ -57,8 +57,12 @@ fn replace_span_reparses() {
     let src = doc.source_str();
     let start = src.find("old").expect("old") as u32;
     let end = start + "old".len() as u32;
-    doc.replace_span(leekscript::Span::new(start, end), "new_name", Version::VNext)
-        .expect("replace");
+    doc.replace_span(
+        leekscript::Span::new(start, end),
+        "new_name",
+        Version::VNext,
+    )
+    .expect("replace");
     assert!(doc.source_str().contains("new_name"));
     let root = doc.root_ast().expect("root");
     let stmts: Vec<Stmt> = AstNodeExt::children::<Stmt>(root.syntax()).collect();

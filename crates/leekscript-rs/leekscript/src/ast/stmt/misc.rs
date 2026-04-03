@@ -1,12 +1,12 @@
-use super::params::{fn_param_children, FnParam};
 use super::Block;
+use super::params::{FnParam, fn_param_children};
+use crate::Span;
 use crate::ast::expr::Expr;
 use crate::ast::literal::LitStr;
 use crate::ast::types::TypeExpr;
-use crate::syntax::{attached_docstring, attached_parsed_doxygen, ParsedDoxygen};
 use crate::syntax::kinds::K;
 use crate::syntax::syntax_el_is_trivia;
-use crate::Span;
+use crate::syntax::{ParsedDoxygen, attached_docstring, attached_parsed_doxygen};
 use sipha::AstNode;
 use sipha::prelude::*;
 use sipha::tree::ast::{AstNodeExt, AstTokenExt};
@@ -107,7 +107,9 @@ impl ClassMember {
     }
 }
 
-fn method_name_ident_before_params(syntax: &sipha::tree::red::SyntaxNode) -> Option<(String, Span)> {
+fn method_name_ident_before_params(
+    syntax: &sipha::tree::red::SyntaxNode,
+) -> Option<(String, Span)> {
     let children: Vec<SyntaxElement> = syntax
         .children()
         .filter(|e| !syntax_el_is_trivia(e))

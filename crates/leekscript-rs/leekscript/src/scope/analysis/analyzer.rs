@@ -4,19 +4,22 @@ use sipha::tree::ast::{AstNode, AstNodeExt};
 use sipha::tree::red::{SyntaxNode, SyntaxToken};
 use sipha::tree::walk::WalkOptions;
 
+use crate::Span;
 use crate::ast::types::TypeExpr;
 use crate::ast::{ForeachStmt, VarDecl};
+use crate::parse::Version;
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::{
-    ExprTypeKey, Reference, ScopeId, ScopeKind, SemanticCode, SemanticDiagnostic, SymbolId,
-    SymbolKind,
+    ExprTypeKey, Reference, ScopeId, ScopeKind, SemanticCode, SemanticDiagnostic, SemanticSeverity,
+    SymbolId, SymbolKind,
 };
 use crate::syntax::kinds::K;
-use crate::Span;
 
 use super::enter_leave::{sync_enter, sync_leave};
 use super::graph::ScopeGraph;
-use super::infer::{expr_span_ty, infer_binary, infer_interval_ty, set_var_inferred_if_unannotated};
+use super::infer::{
+    expr_span_ty, infer_binary, infer_interval_ty, set_var_inferred_if_unannotated,
+};
 use super::narrowing::{accumulated_narrowing_maps, should_track_narrowing};
 use super::narrowing_env::NarrowingEnv;
 use super::phase::AnalysisPhase;
@@ -39,10 +42,11 @@ pub(crate) struct Analyzer {
     pub instanceof_type_ctx_depth: u32,
     pub narrowing: NarrowingEnv,
     pub syntax_node_stack: Vec<SyntaxNode>,
+    pub(crate) version: Version,
 }
 
 impl Analyzer {
-    pub(crate) fn new(phase: AnalysisPhase) -> Self {
+    pub(crate) fn new(phase: AnalysisPhase, version: Version) -> Self {
         let mut graph = ScopeGraph::new();
         let root = graph.alloc_scope(None, ScopeKind::Module);
         let mut s = Self {
@@ -61,13 +65,14 @@ impl Analyzer {
             instanceof_type_ctx_depth: 0,
             narrowing: NarrowingEnv::default(),
             syntax_node_stack: Vec::new(),
+            version,
         };
         s.scope_stack.push(root);
         s
     }
 
-    pub(crate) fn run_two_phase(root: &SyntaxNode) -> Self {
-        let mut a = Analyzer::new(AnalysisPhase::BuildScopes);
+    pub(crate) fn run_two_phase(root: &SyntaxNode, version: Version) -> Self {
+        let mut a = Analyzer::new(AnalysisPhase::BuildScopes, version);
         let _ = root.walk(&mut a, &WalkOptions::nodes_only());
         let bindings = std::mem::take(&mut a.graph.binding_spans);
         a.phase = AnalysisPhase::ResolveAndInfer;
@@ -151,6 +156,7 @@ impl Analyzer {
         });
         if self.phase == AnalysisPhase::ResolveAndInfer && resolved.is_none() {
             self.diagnostics.push(SemanticDiagnostic {
+                severity: SemanticSeverity::Error,
                 code: SemanticCode::UndefinedName,
                 message: format!("undefined name `{name}`"),
                 span,
@@ -221,12 +227,16 @@ impl Analyzer {
             return;
         };
         let sym = &mut self.graph.symbols[sym_id.0 as usize];
-        let type_annotation_span = vd.syntax().child::<TypeExpr>().map(|t| t.syntax().text_range());
+        let type_annotation_span = vd
+            .syntax()
+            .child::<TypeExpr>()
+            .map(|t| t.syntax().text_range());
         if sym.declared_ty.is_none() {
             sym.inferred_ty = Some(rhs_ty);
         } else if let Some(dt) = &sym.declared_ty {
             if !LeekTy::is_assignable_to(&rhs_ty, dt) {
                 self.diagnostics.push(SemanticDiagnostic {
+                    severity: SemanticSeverity::Error,
                     code: SemanticCode::IncompatibleInitializer,
                     message: format!("initializer type incompatible with `{name}` annotation"),
                     span: vd.syntax().text_range(),

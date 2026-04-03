@@ -44,7 +44,9 @@ fn lit_str_is_ast_token() {
 
     let doc = parse_doc("include(\"z.leek\");", Version::V4).expect("parse");
     let root = Root::cast(doc.root().clone()).expect("root");
-    let stmt = AstNodeExt::children::<Stmt>(root.syntax()).next().expect("stmt");
+    let stmt = AstNodeExt::children::<Stmt>(root.syntax())
+        .next()
+        .expect("stmt");
     let lit = stmt.as_include().expect("inc").path().expect("lit");
     let t = lit.syntax();
     assert!(LitStr::can_cast(t.kind()));
@@ -105,7 +107,9 @@ fn expr_stmt_wraps_expr() {
 fn expr_enum_casts_root_and_binary_descendants() {
     let doc = parse_doc("1 + 2;", Version::V4).expect("parse");
     let root = Root::cast(doc.root().clone()).expect("root");
-    let stmt = AstNodeExt::children::<Stmt>(root.syntax()).next().expect("stmt");
+    let stmt = AstNodeExt::children::<Stmt>(root.syntax())
+        .next()
+        .expect("stmt");
     let est = stmt.as_expr().expect("expr stmt");
     let Expr::Root(er) = est.expr().expect("root expr") else {
         panic!("expected Expr::Root");
@@ -171,15 +175,11 @@ fn if_condition_parses_noteq_operator() {
     use sipha::types::FromSyntaxKind;
 
     let doc = parse_doc("if (combo != null) {}", Version::V4).expect("parse");
-    let tree = format_syntax_tree(
-        doc.root(),
-        &TreeDisplayOptions::default(),
-        |k| {
-            K::from_syntax_kind(k)
-                .map(|k| k.as_str().to_string())
-                .unwrap_or_else(|| "?".to_string())
-        },
-    );
+    let tree = format_syntax_tree(doc.root(), &TreeDisplayOptions::default(), |k| {
+        K::from_syntax_kind(k)
+            .map(|k| k.as_str().to_string())
+            .unwrap_or_else(|| "?".to_string())
+    });
     assert!(tree.contains("NOTEQ"), "expected != token; tree:\n{tree}");
     assert!(
         !tree.contains("BANG"),
@@ -339,7 +339,9 @@ fn type_cst_union_and_type_node() {
     )
     .expect("parse");
     let root = Root::cast(doc.root().clone()).expect("root");
-    let stmt = AstNodeExt::children::<Stmt>(root.syntax()).next().expect("stmt");
+    let stmt = AstNodeExt::children::<Stmt>(root.syntax())
+        .next()
+        .expect("stmt");
     let c = stmt.as_class().expect("class");
     let ty = first_class_member_result_type(c.syntax()).expect("method result type");
     assert!(matches!(
@@ -371,7 +373,9 @@ fn type_cst_union_and_type_node() {
     )
     .expect("parse");
     let root2 = Root::cast(doc2.root().clone()).expect("root");
-    let stmt2 = AstNodeExt::children::<Stmt>(root2.syntax()).next().expect("stmt");
+    let stmt2 = AstNodeExt::children::<Stmt>(root2.syntax())
+        .next()
+        .expect("stmt");
     let d = stmt2.as_class().expect("class");
     let ty2 = first_class_member_result_type(d.syntax()).expect("return type");
     let prim = ty2
@@ -385,7 +389,10 @@ fn type_cst_union_and_type_node() {
         .expect("primary");
     let args = prim.generic_argument_roots();
     assert_eq!(args.len(), 1, "Array<integer>");
-    let inner = args[0].union_type().expect("inner union").nullable_members();
+    let inner = args[0]
+        .union_type()
+        .expect("inner union")
+        .nullable_members();
     assert_eq!(inner.len(), 1);
 }
 
@@ -399,7 +406,9 @@ fn first_type_expr_descendant(syntax: &sipha::tree::red::SyntaxNode) -> Option<T
     use sipha::types::IntoSyntaxKind;
 
     syntax.descendant_nodes().find_map(|n| {
-        (n.kind() == K::TypeExpr.into_syntax_kind()).then(|| TypeExpr::cast(n)).flatten()
+        (n.kind() == K::TypeExpr.into_syntax_kind())
+            .then(|| TypeExpr::cast(n))
+            .flatten()
     })
 }
 
@@ -455,8 +464,7 @@ fn interval_literals_parse_like_java() {
         let doc = parse_doc(src, Version::V4).unwrap_or_else(|e| panic!("parse {src:?}: {e:?}"));
         let root = Root::cast(doc.root().clone()).expect("root");
         assert!(
-            root
-                .syntax()
+            root.syntax()
                 .descendant_nodes()
                 .any(|n| n.kind_as::<K>() == Some(K::IntervalExpr)),
             "expected IntervalExpr in {src:?}"

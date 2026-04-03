@@ -13,15 +13,7 @@ use sipha::prelude::*;
 /// blocked as identifiers when `FLAG_VNEXT` is set (alongside `match`). `let` stays in this list so
 /// `let` is never an identifier under v3+; only `Version::VNext` enables the `let` keyword.
 const V3_LEX_RESERVED_VNEXT_ONLY: &[&[u8]] = &[
-    b"catch",
-    b"const",
-    b"export",
-    b"finally",
-    b"goto",
-    b"import",
-    b"package",
-    b"throw",
-    b"try",
+    b"catch", b"const", b"export", b"finally", b"goto", b"import", b"package", b"throw", b"try",
 ];
 
 const V3_LEX_RESERVED: &[&[u8]] = &[

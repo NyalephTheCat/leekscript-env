@@ -1,9 +1,7 @@
 pub mod doxygen;
 pub mod kinds;
 
-pub use doxygen::{
-    parse_doxygen, DoxygenParam, DoxygenRetval, DoxygenThrows, ParsedDoxygen,
-};
+pub use doxygen::{DoxygenParam, DoxygenRetval, DoxygenThrows, ParsedDoxygen, parse_doxygen};
 
 use crate::syntax::kinds::K;
 use sipha::tree::red::{SyntaxElement, SyntaxNode, SyntaxToken};

@@ -2,7 +2,9 @@
 
 use crate::ast::ReturnStmt;
 use crate::document::LeekDoc;
-use crate::format::directives::{preserve_region_overlapping, span_touches_preserve, DirectivePlan};
+use crate::format::directives::{
+    DirectivePlan, preserve_region_overlapping, span_touches_preserve,
+};
 use crate::format::options::{BraceStyle, FormatOptions, SemicolonStyle};
 use crate::format::spacing::needs_space_between;
 use crate::parse::{ParseError, Version};
@@ -28,9 +30,7 @@ fn prev_child_node(children: &[SyntaxElement], i: usize) -> Option<&SyntaxNode> 
 /// constructors do.
 fn class_member_is_field_like(cm: &SyntaxNode) -> bool {
     cm.kind_as::<K>() == Some(K::ClassMember)
-        && !cm
-            .child_nodes()
-            .any(|c| c.kind_as::<K>() == Some(K::Block))
+        && !cm.child_nodes().any(|c| c.kind_as::<K>() == Some(K::Block))
 }
 
 #[inline]
@@ -65,8 +65,7 @@ fn node_has_optional_trailing_semicolon_policy(node: &SyntaxNode) -> bool {
 /// `return;` / `break;` / `continue;` — keep or insert `;` in [`SemicolonStyle::OnlyNeeded`].
 fn only_needed_requires_trailing_semicolon(node: &SyntaxNode) -> bool {
     match node.kind_as::<K>() {
-        Some(K::ReturnStmt) => ReturnStmt::cast(node.clone())
-            .is_some_and(|r| r.expr().is_none()),
+        Some(K::ReturnStmt) => ReturnStmt::cast(node.clone()).is_some_and(|r| r.expr().is_none()),
         Some(K::BreakStmt) | Some(K::ContinueStmt) => true,
         _ => false,
     }
@@ -94,7 +93,11 @@ fn str_display_width(s: &str, tab_width: usize) -> usize {
 }
 
 /// Parse and format a LeekScript document.
-pub fn format_document(src: &str, version: Version, base: &FormatOptions) -> Result<String, ParseError> {
+pub fn format_document(
+    src: &str,
+    version: Version,
+    base: &FormatOptions,
+) -> Result<String, ParseError> {
     let doc = LeekDoc::parse(src, version)?;
     Ok(format_leek_doc(&doc, base))
 }
@@ -428,7 +431,10 @@ impl Printer<'_> {
             return;
         };
 
-        if k == K::ElseKw && o.newline_before_else_catch_finally && self.prev_kind == Some(K::RBrace) {
+        if k == K::ElseKw
+            && o.newline_before_else_catch_finally
+            && self.prev_kind == Some(K::RBrace)
+        {
             self.emit_newline(off);
             self.emit_indent(off);
         }
@@ -457,7 +463,10 @@ impl Printer<'_> {
             self.push_str_no_nl(" ", tab_w);
         }
 
-        if k == K::LBrace && o.brace_style == BraceStyle::NextLine && self.prev_kind == Some(K::RParen) {
+        if k == K::LBrace
+            && o.brace_style == BraceStyle::NextLine
+            && self.prev_kind == Some(K::RParen)
+        {
             self.emit_newline(off);
             self.emit_indent(off);
         }

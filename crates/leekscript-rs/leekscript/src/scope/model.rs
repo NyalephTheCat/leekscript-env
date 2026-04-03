@@ -1,6 +1,6 @@
 use super::leek_ty::LeekTy;
-use crate::syntax::ParsedDoxygen;
 use crate::Span;
+use crate::syntax::ParsedDoxygen;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ScopeId(pub u32);
@@ -109,10 +109,23 @@ pub struct Reference {
 pub enum SemanticCode {
     UndefinedName,
     IncompatibleInitializer,
+    /// `===` / `!==` (deprecated since LeekScript 4 in the reference compiler).
+    DeprecatedStrictEquality,
+    /// Call to a function / global / method whose doc marks `@deprecated`.
+    DeprecatedCallable,
+}
+
+/// Whether a diagnostic should fail `leekscript check` or only warn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SemanticSeverity {
+    #[default]
+    Error,
+    Warning,
 }
 
 #[derive(Clone, Debug)]
 pub struct SemanticDiagnostic {
+    pub severity: SemanticSeverity,
     pub code: SemanticCode,
     pub message: String,
     pub span: Span,

@@ -2,9 +2,7 @@ use sipha::tree::ast::{AstNode, AstNodeExt};
 use sipha::tree::red::SyntaxNode;
 
 use crate::ast::types::TypeExpr;
-use crate::ast::{
-    CatchClause, ClassDecl, ForeachStmt, FunctionDecl, GlobalDecl, VarDecl,
-};
+use crate::ast::{CatchClause, ClassDecl, ForeachStmt, FunctionDecl, GlobalDecl, VarDecl};
 use crate::scope::extract::{
     extract_function_params, leek_ty_from_type_expr, try_extract_class_field,
     try_extract_class_method,
@@ -75,8 +73,15 @@ fn enter_function_decl(a: &mut Analyzer, node: &SyntaxNode) {
     if a.phase.is_build_scopes() {
         for (ty, pname, pspan) in extract_function_params(&fd) {
             let dt = ty.as_ref().map(leek_ty_from_type_expr);
-            a.graph
-                .declare(a.phase, fn_sc, pname, pspan, SymbolKind::Parameter, dt, None);
+            a.graph.declare(
+                a.phase,
+                fn_sc,
+                pname,
+                pspan,
+                SymbolKind::Parameter,
+                dt,
+                None,
+            );
         }
     }
 }
@@ -124,29 +129,15 @@ fn enter_class_member(a: &mut Analyzer, node: &SyntaxNode) {
                 SymbolKind::Method
             };
             let doc = attached_parsed_doxygen(node);
-            a.graph.declare(
-                a.phase,
-                class_sc,
-                m.name,
-                m.name_span,
-                sk,
-                None,
-                doc,
-            );
+            a.graph
+                .declare(a.phase, class_sc, m.name, m.name_span, sk, None, doc);
         }
         let msc = a.push_child_scope(Some(class_sc), ScopeKind::Method);
         if a.phase.is_build_scopes() {
             for (ty, pname, pspan) in m.params {
                 let dt = ty.as_ref().map(leek_ty_from_type_expr);
-                a.graph.declare(
-                    a.phase,
-                    msc,
-                    pname,
-                    pspan,
-                    SymbolKind::Parameter,
-                    dt,
-                    None,
-                );
+                a.graph
+                    .declare(a.phase, msc, pname, pspan, SymbolKind::Parameter, dt, None);
             }
         }
     } else if a.phase.is_build_scopes() {
@@ -192,7 +183,8 @@ fn enter_global_decl(a: &mut Analyzer, node: &SyntaxNode) {
     if let (Some(n), Some(sp)) = (g.first_name(), global_name_span(&g)) {
         let dt = g.type_expr().map(|t| leek_ty_from_type_expr(&t));
         let doc = attached_parsed_doxygen(node);
-        a.graph.declare(a.phase, module, n, sp, SymbolKind::Global, dt, doc);
+        a.graph
+            .declare(a.phase, module, n, sp, SymbolKind::Global, dt, doc);
     }
 }
 
@@ -203,7 +195,8 @@ fn enter_foreach(a: &mut Analyzer, node: &SyntaxNode) {
     let fe = ForeachStmt::cast(node.clone()).expect("fe");
     let sc = a.current_scope();
     for (n, sp) in foreach_bind_spans(&fe) {
-        a.graph.declare(a.phase, sc, n, sp, SymbolKind::Variable, None, None);
+        a.graph
+            .declare(a.phase, sc, n, sp, SymbolKind::Variable, None, None);
     }
 }
 

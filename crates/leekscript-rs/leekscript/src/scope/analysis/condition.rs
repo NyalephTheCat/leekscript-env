@@ -14,7 +14,10 @@ use crate::syntax::kinds::K;
 use super::analyzer::Analyzer;
 
 /// Positive narrowing facts implied when a condition is true (`instanceof`, `!= null`, `&&`).
-pub(crate) fn facts_from_condition_syntax(a: &Analyzer, cond: &SyntaxNode) -> HashMap<SymbolId, LeekTy> {
+pub(crate) fn facts_from_condition_syntax(
+    a: &Analyzer,
+    cond: &SyntaxNode,
+) -> HashMap<SymbolId, LeekTy> {
     let mut out = HashMap::new();
     collect_positive_narrowing(a, cond, &mut out);
     out

@@ -78,7 +78,10 @@ fn stmt_block_covers_node(sb: &StmtBlock, node: &SyntaxNode) -> bool {
     nr.start >= rr.start && nr.end <= rr.end
 }
 
-pub(crate) fn accumulated_narrowing_maps(a: &Analyzer, node: &SyntaxNode) -> HashMap<SymbolId, LeekTy> {
+pub(crate) fn accumulated_narrowing_maps(
+    a: &Analyzer,
+    node: &SyntaxNode,
+) -> HashMap<SymbolId, LeekTy> {
     let mut acc = HashMap::new();
     for anc in
         a.syntax_node_stack.iter().rev().skip(1).filter(|n| {

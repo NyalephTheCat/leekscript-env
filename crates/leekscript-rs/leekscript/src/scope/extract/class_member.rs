@@ -1,7 +1,7 @@
-use crate::ast::types::TypeExpr;
-use crate::ast::ClassMember;
-use crate::syntax::kinds::K;
 use crate::Span;
+use crate::ast::ClassMember;
+use crate::ast::types::TypeExpr;
+use crate::syntax::kinds::K;
 use sipha::tree::ast::AstNode;
 use sipha::tree::red::SyntaxNode;
 
