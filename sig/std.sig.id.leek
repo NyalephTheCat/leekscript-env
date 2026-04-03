@@ -4,9 +4,9 @@
 //       leek-wars/src/model/constants.ts (constant values),
 //       leek-wars/src/lang/doc.id.lang (funcs + optional const_* constant docs, id).
 //
-// Stub generated: 2026-04-03T18:31:17Z
-// Git HEAD: a4d475e (dirty working tree) (a4d475e05fce5dfa47a119b2eee6d3d79620b511)
-// Commit date: 2026-04-03T16:57:59+02:00
+// Stub generated: 2026-04-03T19:34:34Z
+// Git HEAD: 2ec9e13 (dirty working tree) (2ec9e136c2d58eaa855020a09d8c954beac7100c)
+// Commit date: 2026-04-03T21:23:12+02:00
 
 // --- Constants ---
 
@@ -7748,7 +7748,7 @@ function arrayFoldRight(Array array, Function f, any v0) => any;
  * @param[in] array
  * @return frequencies
  */
-function arrayFrequencies(Array array) => Map<any, Integer>;
+function arrayFrequencies(Array array) => Map<any, integer>;
 
 /**
  * @brief Mengembalikan elemen daftar larik pada posisi indeks.

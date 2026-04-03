@@ -138,7 +138,7 @@ TS_ARG_TYPE: dict[str, str] = {
     "46": "Array<integer>",
     "47": "Array<real>",  # doc.en.lang typo: "arary<real>"
     "96": "Set<integer>",  # e.g. getStates return (arg_type_96)
-    "806": "Map<any, Integer>",  # e.g. arrayFrequencies (arg_type_806)
+    "806": "Map<any, integer>",  # e.g. arrayFrequencies (arg_type_806)
 }
 
 TS_RETURN_TYPE: dict[int, str] = {
@@ -161,7 +161,7 @@ TS_RETURN_TYPE: dict[int, str] = {
     46: "Array<integer>",
     47: "Array<real>",  # doc.en.lang typo: "arary<real>"
     96: "Set<integer>",  # e.g. getStates return (arg_type_96)
-    806: "Map<any, Integer>",  # e.g. arrayFrequencies (arg_type_806)
+    806: "Map<any, integer>",  # e.g. arrayFrequencies (arg_type_806)
 }
 
 
