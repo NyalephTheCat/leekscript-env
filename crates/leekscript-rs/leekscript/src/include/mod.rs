@@ -12,8 +12,9 @@ pub mod merge;
 
 pub use limits::IncludeLimits;
 pub use merge::{
-    MergeIncludesError, MergedSourceMapping, MergedSpanMap,
+    MergeIncludesError, MergedSourceMapping, MergedSpanMap, PreludeBuildError,
     merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
+    prepend_signatures_to_merged,
 };
 
 use std::collections::HashSet;

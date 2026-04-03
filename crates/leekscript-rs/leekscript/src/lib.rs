@@ -43,9 +43,9 @@ pub mod visit;
 pub use document::{DocEditError, LeekDoc};
 pub use include::{
     IncludeLimits, IncludeLoadError, LoadedProject, LoadedSourceFile, MergeIncludesError,
-    MergedSourceMapping, MergedSpanMap, ResolveError, load_project_with_includes,
+    MergedSourceMapping, MergedSpanMap, PreludeBuildError, ResolveError, load_project_with_includes,
     load_project_with_includes_limited, merge_included_sources_to_single_file,
-    merge_included_sources_to_single_file_mapped, resolve_include_path,
+    merge_included_sources_to_single_file_mapped, prepend_signatures_to_merged, resolve_include_path,
     try_resolve_include_file,
 };
 pub use parse::{ParseError, Version, parse_doc, parse_syntax_root};

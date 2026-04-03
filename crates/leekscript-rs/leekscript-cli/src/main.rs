@@ -8,10 +8,10 @@ use std::collections::VecDeque;
 use clap::{Parser, Subcommand, ValueEnum};
 use leekscript::format::{BraceStyle, FormatOptions, LineEnding, SemicolonStyle, format_document};
 use leekscript::include::{
-    IncludeLoadError, LoadedProject, load_project_with_includes,
+    IncludeLoadError, LoadedProject, MergedSourceMapping, PreludeBuildError, load_project_with_includes,
     merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
+    prepend_signatures_to_merged,
 };
-use leekscript::MergedSourceMapping;
 use leekscript::syntax::kinds::K;
 use leekscript::Version;
 use serde::Deserialize;
@@ -65,12 +65,24 @@ enum Command {
         #[arg(long, value_name = "DIR")]
         root: Option<PathBuf>,
 
+        /// Prepend signature / stub `.leek` files (stdlib declarations) before the check unit; repeatable, order matters
+        #[arg(long = "signatures", value_name = "FILE")]
+        signature_files: Vec<PathBuf>,
+
         /// Files to check, or omit to read stdin once
         #[arg(value_name = "FILE")]
         files: Vec<PathBuf>,
     },
     /// Pretty-print LeekScript (writes in-place by default when given paths)
     Format {
+        /// Expand top-level `include("…")` like `merge`, then format one buffer (requires `--stdout` or `--out`)
+        #[arg(long)]
+        merge_includes: bool,
+
+        /// Project root for resolving includes when using `--merge-includes` (default: parent of the entry file)
+        #[arg(long, value_name = "DIR", requires = "merge_includes")]
+        root: Option<PathBuf>,
+
         /// Print formatted output to stdout (requires exactly one input file after directory expansion)
         #[arg(long, conflicts_with = "out")]
         stdout: bool,
@@ -227,8 +239,15 @@ fn main() -> ExitCode {
     let version = Version::from(cli.dialect);
 
     match cli.command {
-        Command::Check { parse_only, root, files } => cmd_check(version, parse_only, root.as_deref(), &files),
+        Command::Check {
+            parse_only,
+            root,
+            signature_files,
+            files,
+        } => cmd_check(version, parse_only, root.as_deref(), &signature_files, &files),
         Command::Format {
+            merge_includes,
+            root: format_root,
             stdout,
             out,
             config,
@@ -297,7 +316,14 @@ fn main() -> ExitCode {
             } else {
                 FormatDest::InPlace
             };
-            cmd_format(version, dest, &files, &opts)
+            cmd_format(
+                version,
+                dest,
+                &files,
+                &opts,
+                merge_includes,
+                format_root.as_deref(),
+            )
         }
         Command::Merge { root, entry } => cmd_merge(version, &root, &entry),
         Command::Tree { trivia, files } => cmd_tree(version, trivia, &files),
@@ -314,27 +340,54 @@ fn diagnostic_line(label: &str, src: &str, span: Span, message: &str) -> String 
     format!("{label}:{line}:{col}: {message}")
 }
 
-fn diagnostic_merged(
+/// Map a diagnostic span in a combined check buffer back to a file (project include, `--signatures`
+/// file, or stdin body).
+fn diagnostic_check(
     mapping: &MergedSourceMapping,
-    project: &LoadedProject,
-    merged_src: &str,
-    entry_label: &str,
+    project: Option<&LoadedProject>,
+    combined_src: &str,
+    fallback_label: &str,
     span: Span,
     message: &str,
+    // Stdin + `--signatures`: offsets >= `.1` are reported against `.0` (the raw stdin buffer).
+    stdin_user: Option<(&str, u32)>,
 ) -> String {
+    if let Some((stdin_body, user_base)) = stdin_user {
+        if span.start >= user_base {
+            let s = Span::new(
+                span.start.saturating_sub(user_base),
+                span.end.saturating_sub(user_base),
+            );
+            return diagnostic_line(fallback_label, stdin_body, s, message);
+        }
+    }
+
     if let Some(sm) = mapping.span_at_merged_offset(span.start) {
         let rel = span.start.saturating_sub(sm.merged_start);
         let file_off = sm.file_offset.saturating_add(rel);
-        if let Some(f) = project.files.iter().find(|f| f.path == sm.path) {
-            let idx = LineIndex::new(f.source.as_bytes());
+        if let Some(proj) = project {
+            if let Some(f) = proj.files.iter().find(|f| f.path == sm.path) {
+                let idx = LineIndex::new(f.source.as_bytes());
+                let (line, col) = idx.line_col_1based(file_off);
+                return format!("{}:{line}:{col}: {message}", f.path.display());
+            }
+        }
+        if let Ok(src) = std::fs::read_to_string(&sm.path) {
+            let idx = LineIndex::new(src.as_bytes());
             let (line, col) = idx.line_col_1based(file_off);
-            return format!("{}:{line}:{col}: {message}", f.path.display());
+            return format!("{}:{line}:{col}: {message}", sm.path.display());
         }
     }
-    diagnostic_line(entry_label, merged_src, span, message)
+    diagnostic_line(fallback_label, combined_src, span, message)
 }
 
-fn cmd_check(version: Version, parse_only: bool, root_override: Option<&Path>, files: &[PathBuf]) -> ExitCode {
+fn cmd_check(
+    version: Version,
+    parse_only: bool,
+    root_override: Option<&Path>,
+    signature_files: &[PathBuf],
+    files: &[PathBuf],
+) -> ExitCode {
     let mut ok = true;
 
     if files.is_empty() {
@@ -344,6 +397,49 @@ fn cmd_check(version: Version, parse_only: bool, root_override: Option<&Path>, f
             return ExitCode::from(1);
         }
         let label = "<stdin>";
+
+        if !signature_files.is_empty() {
+            let (combined, map) = match prepend_signatures_to_merged(
+                signature_files,
+                &src,
+                MergedSourceMapping::default(),
+            ) {
+                Ok(x) => x,
+                Err(PreludeBuildError::Io(p, e)) => {
+                    let _ = writeln!(io::stderr(), "leekscript: --signatures {}: {e}", p.display());
+                    return ExitCode::from(1);
+                }
+            };
+            let user_base = (combined.len() - src.len()) as u32;
+            match leekscript::parse_doc(&combined, version) {
+                Ok(doc) => {
+                    if !parse_only {
+                        let analysis = leekscript::run_semantic_analysis(doc.root());
+                        for d in &analysis.diagnostics {
+                            ok = false;
+                            eprintln!(
+                                "{}",
+                                diagnostic_check(
+                                    &map,
+                                    None,
+                                    &combined,
+                                    label,
+                                    d.span,
+                                    &d.message,
+                                    Some((&src, user_base)),
+                                )
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    ok = false;
+                    eprintln!("{}", e.format_with_source(&combined));
+                }
+            }
+            return if ok { ExitCode::SUCCESS } else { ExitCode::from(1) };
+        }
+
         match leekscript::parse_doc(&src, version) {
             Ok(doc) => {
                 if !parse_only {
@@ -406,19 +502,44 @@ fn cmd_check(version: Version, parse_only: bool, root_override: Option<&Path>, f
             }
         };
 
-        match leekscript::parse_doc(&merged, version) {
+        let (combined, full_map) = match prepend_signatures_to_merged(signature_files, &merged, map) {
+            Ok(x) => x,
+            Err(PreludeBuildError::Io(p, e)) => {
+                ok = false;
+                let _ = writeln!(
+                    io::stderr(),
+                    "leekscript: {}: --signatures {}: {e}",
+                    path.display(),
+                    p.display()
+                );
+                continue;
+            }
+        };
+
+        match leekscript::parse_doc(&combined, version) {
             Ok(doc) => {
                 if !parse_only {
                     let analysis = leekscript::run_semantic_analysis(doc.root());
                     for d in &analysis.diagnostics {
                         ok = false;
-                        eprintln!("{}", diagnostic_merged(&map, &project, &merged, &label, d.span, &d.message));
+                        eprintln!(
+                            "{}",
+                            diagnostic_check(
+                                &full_map,
+                                Some(&project),
+                                &combined,
+                                &label,
+                                d.span,
+                                &d.message,
+                                None,
+                            )
+                        );
                     }
                 }
             }
             Err(e) => {
                 ok = false;
-                eprintln!("{label} (merged): {}", e.format_with_source(&merged));
+                eprintln!("{label} (merged): {}", e.format_with_source(&combined));
             }
         }
     }
@@ -699,7 +820,108 @@ enum FormatDest {
     File(PathBuf),
 }
 
-fn cmd_format(version: Version, dest: FormatDest, files: &[PathBuf], opts: &FormatOptions) -> ExitCode {
+fn cmd_format(
+    version: Version,
+    dest: FormatDest,
+    files: &[PathBuf],
+    opts: &FormatOptions,
+    merge_includes: bool,
+    merge_root: Option<&Path>,
+) -> ExitCode {
+    if merge_includes {
+        if files.is_empty() {
+            let _ = writeln!(
+                io::stderr(),
+                "leekscript: format: --merge-includes requires a single entry file argument (not stdin)"
+            );
+            return ExitCode::from(2);
+        }
+        if files.len() != 1 {
+            let _ = writeln!(
+                io::stderr(),
+                "leekscript: format: --merge-includes requires exactly one entry file"
+            );
+            return ExitCode::from(2);
+        }
+        let entry_path = &files[0];
+        if !entry_path.is_file() {
+            let _ = writeln!(
+                io::stderr(),
+                "leekscript: format: --merge-includes needs a single file path, not a directory"
+            );
+            return ExitCode::from(2);
+        }
+        if matches!(dest, FormatDest::InPlace) {
+            let _ = writeln!(
+                io::stderr(),
+                "leekscript: format: --merge-includes requires --stdout or --out (merged output is not written back to individual files)"
+            );
+            return ExitCode::from(2);
+        }
+
+        let entry = match std::fs::canonicalize(entry_path) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = writeln!(io::stderr(), "leekscript: {}: {e}", entry_path.display());
+                return ExitCode::from(1);
+            }
+        };
+        let root = if let Some(r) = merge_root {
+            match std::fs::canonicalize(r) {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = writeln!(io::stderr(), "leekscript: --root {}: {e}", r.display());
+                    return ExitCode::from(1);
+                }
+            }
+        } else {
+            entry
+                .parent()
+                .unwrap_or_else(|| Path::new("/"))
+                .to_path_buf()
+        };
+
+        let label = entry.display().to_string();
+        let project = match load_project_with_includes(&root, &entry, version) {
+            Ok(p) => p,
+            Err(e) => {
+                print_include_load_error(&root, entry_path, &e);
+                return ExitCode::from(1);
+            }
+        };
+        let merged = match merge_included_sources_to_single_file(&root, &project) {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = writeln!(io::stderr(), "leekscript: {}: merge: {e}", entry_path.display());
+                return ExitCode::from(1);
+            }
+        };
+
+        let out = match format_document(&merged, version, opts) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("{label} (merged): {}", e.format_with_source(&merged));
+                return ExitCode::from(1);
+            }
+        };
+        match dest {
+            FormatDest::Stdout => print!("{out}"),
+            FormatDest::File(to) => {
+                if let Err(e) = std::fs::write(&to, out.as_bytes()) {
+                    let _ = writeln!(io::stderr(), "leekscript: {}: {e}", to.display());
+                    return ExitCode::from(1);
+                }
+            }
+            FormatDest::InPlace => {
+                let _ = writeln!(
+                    io::stderr(),
+                    "leekscript: format: internal error: in-place dest after --merge-includes validation"
+                );
+                return ExitCode::from(2);
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
 
     if files.is_empty() {
         let mut src = String::new();

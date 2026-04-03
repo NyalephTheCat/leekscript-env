@@ -2,7 +2,7 @@
 
 use leekscript::{
     Version, load_project_with_includes, merge_included_sources_to_single_file,
-    merge_included_sources_to_single_file_mapped,
+    merge_included_sources_to_single_file_mapped, prepend_signatures_to_merged,
 };
 use std::path::Path;
 
@@ -83,6 +83,43 @@ fn merge_source_mapping_points_at_original_file() {
         sm.path.ends_with("lib.leek"),
         "expected lib.leek, got {:?}",
         sm.path
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn prepend_signatures_shifts_mapping_and_inserts_prelude() {
+    let root = tmp_merge_root("sig_prepend");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let sig = root.join("stdlib.leek");
+    std::fs::write(&sig, "function abs(integer x) {}\n").unwrap();
+    std::fs::write(root.join("main.leek"), "var y = abs(1);\n").unwrap();
+
+    let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
+    let (merged, map) = merge_included_sources_to_single_file_mapped(&root, &p).unwrap();
+    let (combined, full_map) =
+        prepend_signatures_to_merged(&[sig.clone()], &merged, map).unwrap();
+
+    assert!(combined.starts_with("function abs"));
+    assert!(combined.contains("var y = abs"));
+
+    let pos_stdlib = combined.find("function abs").expect("stdlib") as u32;
+    let sm = full_map
+        .span_at_merged_offset(pos_stdlib)
+        .expect("stdlib mapping");
+    assert!(
+        sm.path.ends_with("stdlib.leek"),
+        "expected stdlib.leek, got {:?}",
+        sm.path
+    );
+
+    let pos_main = combined.find("var y").expect("main") as u32;
+    let sm2 = full_map.span_at_merged_offset(pos_main).expect("main mapping");
+    assert!(
+        sm2.path.ends_with("main.leek"),
+        "expected main.leek, got {:?}",
+        sm2.path
     );
     let _ = std::fs::remove_dir_all(&root);
 }

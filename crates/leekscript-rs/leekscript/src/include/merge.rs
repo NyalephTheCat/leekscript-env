@@ -85,6 +85,89 @@ impl std::error::Error for MergeIncludesError {
     }
 }
 
+/// I/O failure while reading or canonicalizing a `--signatures` file.
+#[derive(Debug)]
+pub enum PreludeBuildError {
+    Io(PathBuf, std::io::Error),
+}
+
+impl fmt::Display for PreludeBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PreludeBuildError::Io(p, e) => write!(f, "{}: {e}", p.display()),
+        }
+    }
+}
+
+impl std::error::Error for PreludeBuildError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PreludeBuildError::Io(_, e) => Some(e),
+        }
+    }
+}
+
+/// Prepend one or more “header” sources (stdlib / API signatures) before merged check input.
+///
+/// Each file is concatenated in order, separated by a single `\n`. If the result is non-empty, one
+/// more `\n` is inserted before `merged` so the prelude and project source stay separate top-level
+/// regions. [`MergedSourceMapping`] spans for the merged body are shifted by the prelude length;
+/// new spans map each signature file’s text to its canonical path (byte offsets start at 0 in that
+/// file).
+///
+/// With an empty `signature_paths` slice, returns `(merged.to_string(), merged_mapping)` without
+/// copying the mapping.
+pub fn prepend_signatures_to_merged(
+    signature_paths: &[PathBuf],
+    merged: &str,
+    merged_mapping: MergedSourceMapping,
+) -> Result<(String, MergedSourceMapping), PreludeBuildError> {
+    if signature_paths.is_empty() {
+        return Ok((merged.to_string(), merged_mapping));
+    }
+
+    let mut prelude = String::new();
+    let mut prelude_spans: Vec<MergedSpanMap> = Vec::new();
+
+    for (i, path) in signature_paths.iter().enumerate() {
+        if i > 0 {
+            prelude.push('\n');
+        }
+        let merged_start = prelude.len() as u32;
+        let text = fs::read_to_string(path).map_err(|e| PreludeBuildError::Io(path.clone(), e))?;
+        let canon = fs::canonicalize(path).map_err(|e| PreludeBuildError::Io(path.clone(), e))?;
+        prelude.push_str(&text);
+        let merged_end = prelude.len() as u32;
+        if merged_end > merged_start {
+            prelude_spans.push(MergedSpanMap {
+                merged_start,
+                merged_end,
+                path: canon,
+                file_offset: 0,
+            });
+        }
+    }
+
+    let shift = if prelude.is_empty() {
+        0u32
+    } else {
+        prelude.push('\n');
+        prelude.len() as u32
+    };
+
+    let mut full = prelude;
+    full.push_str(merged);
+
+    let mut spans = prelude_spans;
+    for mut s in merged_mapping.spans {
+        s.merged_start = s.merged_start.saturating_add(shift);
+        s.merged_end = s.merged_end.saturating_add(shift);
+        spans.push(s);
+    }
+
+    Ok((full, MergedSourceMapping { spans }))
+}
+
 fn canonical_key(path: &Path) -> Result<PathBuf, MergeIncludesError> {
     fs::canonicalize(path).map_err(|e| MergeIncludesError::Io(path.to_path_buf(), e))
 }
