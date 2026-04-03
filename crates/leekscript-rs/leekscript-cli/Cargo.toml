@@ -15,6 +15,8 @@ workspace = true
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 leekscript = { path = "../leekscript" }
+miette = { version = "7.6", features = ["fancy"] }
 sipha = { path = "../../sipha/sipha", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
+thiserror = "2"
 toml = "0.8"
