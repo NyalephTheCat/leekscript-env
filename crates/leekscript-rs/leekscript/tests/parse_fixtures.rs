@@ -1,5 +1,7 @@
 use leekscript::syntax::kinds::K;
-use leekscript::{Version, parse_doc};
+use std::path::Path;
+
+use leekscript::{Version, is_signature_stub_path, parse_doc, parse_signature_doc};
 use sipha::prelude::*;
 
 fn kind_to_name(k: SyntaxKind) -> Option<&'static str> {
@@ -106,6 +108,22 @@ fn vnext_match_statement_parses() {
 }
 
 #[test]
+fn doxygen_doc_comments_before_decls_parse() {
+    parse_doc(
+        "/** Module fn */\nfunction f() { }\n/** class */\nclass C {\n/** field */\ninteger n;\n/** method */\nm() { }\n}",
+        Version::V4,
+    )
+    .expect("doxygen before decls");
+    parse_doc("/// one\n/// two\nfunction g() { }", Version::V4).expect("slash-slash-slash lines");
+    parse_doc("/** g */\nglobal integer x;", Version::VNext).expect("doc on global");
+    parse_doc("/** c */\nconst y = 1;", Version::VNext).expect("doc on const");
+    parse_doc("/** v */\nvar z = 2;", Version::V4).expect("doc on var");
+    parse_doc("/** l */\nlet w = 3;", Version::VNext).expect("doc on let");
+    /* plain block comment must not break parsing */
+    parse_doc("/* not doc */\nfunction h() {}", Version::V4).expect("plain comment before fn");
+}
+
+#[test]
 fn v4_allows_match_as_identifier_like_v3() {
     parse_doc("var match = 1", Version::V4).expect("`match` is not reserved in v4 without vnext");
 }
@@ -120,4 +138,22 @@ fn parses_v1_block_comment_short_form_only_in_v1() {
 
     // v4: `/*/` is not a valid closed block comment; should fail.
     assert!(parse_doc(src, Version::V4).is_err());
+}
+
+#[test]
+fn v4_rejects_function_stub_without_signature_mode() {
+    assert!(parse_doc("function f(integer x) => integer;", Version::V4).is_err());
+}
+
+#[test]
+fn signature_mode_accepts_function_stub_and_block() {
+    parse_signature_doc("function f(integer x) => integer;", Version::V4).expect("stub");
+    parse_signature_doc("function g() { return 1; }", Version::V4).expect("block");
+}
+
+#[test]
+fn signature_stub_path_heuristic() {
+    assert!(is_signature_stub_path(Path::new("sig/std.sig.leek")));
+    assert!(is_signature_stub_path(Path::new("std.sig.en.leek")));
+    assert!(!is_signature_stub_path(Path::new("main.leek")));
 }

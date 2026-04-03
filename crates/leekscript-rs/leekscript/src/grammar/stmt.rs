@@ -1,5 +1,5 @@
 use super::cfg_flags;
-use crate::parse::version::FLAG_PARSE_RECOVERY;
+use crate::parse::version::{FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE};
 use crate::syntax::kinds::K;
 use sipha::prelude::parse::GrammarChoiceFn;
 use sipha::prelude::*;
@@ -352,6 +352,13 @@ pub fn define(g: &mut GrammarBuilder) {
                     Box::new(|g| {
                         g.call("kw_void");
                     }),
+                    Box::new(|g| {
+                        cfg_flags::v3(g);
+                        g.call("kw_default");
+                    }),
+                    Box::new(|g| {
+                        g.call("kw_include");
+                    }),
                 ]);
             },
         );
@@ -686,27 +693,46 @@ pub fn define(g: &mut GrammarBuilder) {
                 g.call("arrow");
                 g.call("ls_type");
             });
-            g.call("block");
+            g.choice(
+                |g| {
+                    g.if_flag(FLAG_SIGNATURE_MODE);
+                    g.choice(
+                        |g| {
+                            g.call("semi");
+                        },
+                        |g| {
+                            g.call("block");
+                        },
+                    );
+                },
+                |g| {
+                    g.if_not_flag(FLAG_SIGNATURE_MODE);
+                    g.call("block");
+                },
+            );
         });
     });
 
     // Typed params before bare names so `(n)` is not parsed as type `n`.
     g.parser_rule("fn_param", |g| {
-        g.choice(
-            |g| {
-                g.call("ls_type");
-                g.optional(|g| {
-                    g.call("op_at");
-                });
-                g.call("ident");
-            },
-            |g| {
-                g.optional(|g| {
-                    g.call("op_at");
-                });
-                g.call("ident");
-            },
-        );
+        g.node(K::FnParam, |g| {
+            g.choice(
+                |g| {
+                    g.call("ls_type");
+                    g.optional(|g| {
+                        g.call("op_at");
+                    });
+                    // Match `name` / class members: `string string` parameter names use type keywords.
+                    g.call("name");
+                },
+                |g| {
+                    g.optional(|g| {
+                        g.call("op_at");
+                    });
+                    g.call("ident");
+                },
+            );
+        });
     });
 
     g.parser_rule("param", |g| {

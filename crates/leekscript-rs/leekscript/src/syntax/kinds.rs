@@ -45,6 +45,8 @@ pub enum K {
     ExportStmt,
     ClassDecl,
     ClassMember,
+    /// One formal parameter: `T name`, `@name`, or `name` (see grammar `fn_param`).
+    FnParam,
 
     // CST — control flow
     IfStmt,
@@ -290,6 +292,7 @@ impl K {
             Self::ExportStmt => "EXPORT_STMT",
             Self::ClassDecl => "CLASS_DECL",
             Self::ClassMember => "CLASS_MEMBER",
+            Self::FnParam => "FN_PARAM",
             Self::IfStmt => "IF_STMT",
             Self::IfExpr => "IF_EXPR",
             Self::ElseStmt => "ELSE_STMT",

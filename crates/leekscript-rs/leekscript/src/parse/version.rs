@@ -7,6 +7,8 @@ pub const FLAG_V4: FlagId = 4;
 pub const FLAG_VNEXT: FlagId = 5;
 /// When set, module scope uses `recover_until` around each top-level statement (multi-error / IDE-style parse).
 pub const FLAG_PARSE_RECOVERY: FlagId = 6;
+/// When set, top-level `function` declarations may end with `;` instead of a `{ … }` block (API / stdlib stubs).
+pub const FLAG_SIGNATURE_MODE: FlagId = 7;
 
 /// Language dialect for parsing.
 ///
@@ -44,5 +46,11 @@ impl Version {
                 .with_set(FLAG_V4)
                 .with_set(FLAG_VNEXT),
         }
+    }
+
+    /// Same dialect as [`to_parse_context`](Self::to_parse_context), plus stub-style `function … => T;` declarations.
+    #[must_use]
+    pub fn to_signature_parse_context(self) -> ParseContext {
+        self.to_parse_context().with_set(FLAG_SIGNATURE_MODE)
     }
 }

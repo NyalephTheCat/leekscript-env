@@ -1,7 +1,76 @@
 //! Scope, resolution, and basic inference (`crate::scope`).
 
-use leekscript::scope::{run_semantic_analysis, LeekTy, SymbolKind};
+use leekscript::scope::{run_semantic_analysis, ExprTypeKey, LeekTy, SemanticCode, SymbolKind};
 use leekscript::{parse_doc, Version};
+
+#[test]
+fn doxygen_docs_on_symbols() {
+    let src = "/** adds */\nfunction add(integer a, integer b) { return a + b; }\n/** Point */\nclass Point {\n/** x coord */\nreal x;\n/** distance */\ndistance() { return 0; }\n}\n/** main global */\nglobal integer G;\n/** entry */\nvar entry = 1;\n";
+    let doc = parse_doc(src, Version::VNext).expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let add = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "add" && s.kind == SymbolKind::Function)
+        .expect("add");
+    assert_eq!(add.doc_raw(), Some("adds"));
+    assert_eq!(add.doc.as_ref().and_then(|d| d.brief.as_deref()), Some("adds"));
+    let pt = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "Point" && s.kind == SymbolKind::Class)
+        .expect("Point");
+    assert_eq!(pt.doc_raw(), Some("Point"));
+    let x_field = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "x" && s.kind == SymbolKind::Field)
+        .expect("x");
+    assert_eq!(x_field.doc_raw(), Some("x coord"));
+    let dist = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "distance" && s.kind == SymbolKind::Method)
+        .expect("distance");
+    assert_eq!(dist.doc_raw(), Some("distance"));
+    let g = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "G" && s.kind == SymbolKind::Global)
+        .expect("G");
+    assert_eq!(g.doc_raw(), Some("main global"));
+    let entry = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "entry" && s.kind == SymbolKind::Variable)
+        .expect("entry");
+    assert_eq!(entry.doc_raw(), Some("entry"));
+}
+
+#[test]
+fn doxygen_commands_on_function_symbol() {
+    let src = r"/** \brief Sum two values.
+ * \param a left
+ * \param b right
+ * \return a + b
+ */
+function add(integer a, integer b) { return a + b; }
+";
+    let doc = parse_doc(src, Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let add = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "add" && s.kind == SymbolKind::Function)
+        .expect("add");
+    let d = add.doc.as_ref().expect("doc");
+    assert_eq!(d.brief.as_deref(), Some("Sum two values."));
+    assert_eq!(d.params.len(), 2);
+    assert_eq!(d.params[0].name, "a");
+    assert_eq!(d.params[0].description, "left");
+    assert_eq!(d.params[1].name, "b");
+    assert_eq!(d.returns.as_deref(), Some("a + b"));
+}
 
 #[test]
 fn resolves_function_and_param() {
@@ -34,15 +103,20 @@ fn infers_var_from_initializer() {
 
 #[test]
 fn class_field_and_method_in_scope() {
-    let doc = parse_doc(
-        "class C { integer n; m() { return n; } }",
-        Version::V4,
-    )
-    .expect("parse");
+    let doc = parse_doc("class C { integer n; m() { return n; } }", Version::V4).expect("parse");
     let a = run_semantic_analysis(doc.root());
-    assert!(a.symbols.iter().any(|s| s.name == "C" && s.kind == SymbolKind::Class));
-    assert!(a.symbols.iter().any(|s| s.name == "n" && s.kind == SymbolKind::Field));
-    assert!(a.symbols.iter().any(|s| s.name == "m" && s.kind == SymbolKind::Method));
+    assert!(a
+        .symbols
+        .iter()
+        .any(|s| s.name == "C" && s.kind == SymbolKind::Class));
+    assert!(a
+        .symbols
+        .iter()
+        .any(|s| s.name == "n" && s.kind == SymbolKind::Field));
+    assert!(a
+        .symbols
+        .iter()
+        .any(|s| s.name == "m" && s.kind == SymbolKind::Method));
 }
 
 #[test]
@@ -76,11 +150,33 @@ fn coercion_integer_real_binary() {
 }
 
 #[test]
+fn incompatible_initializer_has_code_and_related_span() {
+    let doc = parse_doc("function f() { integer x = true; }", Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let bad: Vec<_> = a
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == SemanticCode::IncompatibleInitializer)
+        .collect();
+    assert_eq!(bad.len(), 1, "{:?}", a.diagnostics);
+    assert!(
+        bad[0].related_span.is_some(),
+        "expected type annotation span: {:?}",
+        bad[0]
+    );
+}
+
+#[test]
 fn undefined_name_diagnostic() {
     let doc = parse_doc("function f() { return UnknownName; }", Version::V4).expect("parse");
     let a = run_semantic_analysis(doc.root());
+    let undef: Vec<_> = a
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == SemanticCode::UndefinedName)
+        .collect();
     assert!(
-        a.diagnostics.iter().any(|d| d.message.contains("UnknownName")),
+        undef.iter().any(|d| d.message.contains("UnknownName")),
         "{:?}",
         a.diagnostics
     );
@@ -131,7 +227,11 @@ fn instanceof_uppercase_type_registers_as_class_symbol() {
     );
     let s = str_sym.expect("String");
     assert_eq!(s.declared_ty, Some(LeekTy::Class("String".to_string())));
-    let rf = a.references.iter().find(|r| r.name == "String").expect("String ref");
+    let rf = a
+        .references
+        .iter()
+        .find(|r| r.name == "String")
+        .expect("String ref");
     assert!(
         rf.resolved.is_some(),
         "instanceof String should resolve to the class symbol: {:?}",
@@ -139,4 +239,108 @@ fn instanceof_uppercase_type_registers_as_class_symbol() {
     );
     let sym = a.symbol(rf.resolved.expect("resolved")).expect("symbol");
     assert_eq!(sym.kind, SymbolKind::Class);
+}
+
+#[test]
+fn instanceof_narrows_identifier_in_then_block() {
+    let doc = parse_doc(
+        "function f(any x) { if (x instanceof String) { return x; } return x; }",
+        Version::V4,
+    )
+    .expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let str_ty = LeekTy::Class("String".to_string());
+    let mut x_tys = Vec::new();
+    for r in a.references.iter().filter(|r| r.name == "x") {
+        let key = ExprTypeKey::from_span(r.span);
+        x_tys.push(a.expr_types.get(&key).cloned().unwrap_or(LeekTy::Unknown));
+    }
+    assert!(
+        x_tys.iter().any(|t| *t == str_ty),
+        "expected at least one narrowed `x` to String, got {x_tys:?}"
+    );
+    assert!(
+        x_tys.iter().any(|t| *t == LeekTy::Any),
+        "expected un-narrowed `x` (e.g. condition or outer return), got {x_tys:?}"
+    );
+}
+
+#[test]
+fn while_condition_instanceof_narrows_body() {
+    let doc = parse_doc(
+        "function f(any x) { while (x instanceof String) { x; } }",
+        Version::V4,
+    )
+    .expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let str_ty = LeekTy::Class("String".to_string());
+    let narrowed = a.references.iter().filter(|r| r.name == "x").any(|r| {
+        a.expr_type_at(r.span) == Some(&str_ty)
+    });
+    assert!(narrowed, "body reference should narrow: {:?}", a.expr_types);
+}
+
+#[test]
+fn ne_null_narrows_nullable_declared_type() {
+    let doc = parse_doc(
+        "function f() { string? s; if (s != null) { return s; } }",
+        Version::V4,
+    )
+    .expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let string_only = LeekTy::String;
+    let in_then = a
+        .references
+        .iter()
+        .filter(|r| r.name == "s")
+        .any(|r| a.expr_type_at(r.span) == Some(&string_only));
+    assert!(
+        in_then,
+        "expected narrowed `s` to string in then, got {:?}",
+        a.expr_types
+    );
+}
+
+#[test]
+fn foreach_infers_element_type_from_array_typed_var() {
+    let doc = parse_doc(
+        "function f() { Array<integer> a; for (x in a) { return x; } }",
+        Version::V4,
+    )
+    .expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let x_sym = a.symbols.iter().find(|s| s.name == "x").expect("x");
+    assert_eq!(x_sym.inferred_ty, Some(LeekTy::Integer));
+}
+
+#[test]
+fn comparison_expression_infers_boolean() {
+    let doc = parse_doc("function f() { return 1 < 2; }", Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    assert!(
+        a.expr_types.values().any(|t| *t == LeekTy::Boolean),
+        "expected boolean from `<`, {:?}",
+        a.expr_types
+    );
+}
+
+#[test]
+fn and_chain_narrows_both_instanceof_facts() {
+    let doc = parse_doc(
+        "function f(any a, any b) { if (a instanceof String && b instanceof String) { return a; } }",
+        Version::V4,
+    )
+    .expect("parse");
+    let a = run_semantic_analysis(doc.root());
+    let str_ty = LeekTy::Class("String".to_string());
+    let a_narrowed = a
+        .references
+        .iter()
+        .filter(|r| r.name == "a")
+        .any(|r| a.expr_type_at(r.span) == Some(&str_ty));
+    assert!(
+        a_narrowed,
+        "expected `a` narrowed in then, {:?}",
+        a.expr_types
+    );
 }

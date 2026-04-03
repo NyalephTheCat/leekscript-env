@@ -25,7 +25,7 @@ use sipha::prelude::ParsedDoc;
 use sipha::tree::ast::{AstNode, AstNodeExt};
 
 use crate::ast::{Root, Stmt};
-use crate::parse::{ParseError, Version, parse_doc};
+use crate::parse::{ParseError, Version, is_signature_stub_path, parse_doc, parse_signature_doc};
 
 /// Resolved project: entry file and all transitively included sources, in **depth-first preorder**
 /// (same order as the reference compiler’s first include pass).
@@ -315,8 +315,12 @@ fn load_file_recursive(
     seen.insert(key);
 
     let source = fs::read_to_string(file_path).map_err(IncludeLoadError::Io)?;
-    let parsed = parse_doc(&source, version)
-        .map_err(|e| IncludeLoadError::Parse(file_path.to_path_buf(), e))?;
+    let parsed = if is_signature_stub_path(file_path) {
+        parse_signature_doc(&source, version)
+    } else {
+        parse_doc(&source, version)
+    }
+    .map_err(|e| IncludeLoadError::Parse(file_path.to_path_buf(), e))?;
 
     let root_for_walk = parsed.root().clone();
     out.push(LoadedSourceFile {

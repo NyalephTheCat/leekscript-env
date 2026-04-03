@@ -18,10 +18,11 @@ pub use expr::{
 pub use literal::LitStr;
 pub use root::Root;
 pub use stmt::{
-    Block, BreakStmt, CatchClause, ClassDecl, ConstDecl, ContinueStmt, DoWhileStmt, ElseStmt,
-    EmptyStmt, ExportStmt, ExprStmt, ForStmt, ForeachStmt, FunctionDecl, GlobalDecl, GotoStmt,
-    IfStmt, ImportStmt, IncludeStmt, MatchStmt, PackageStmt, ReturnStmt, Stmt, StmtBlock,
-    SwitchArm, SwitchStmt, ThrowStmt, TryStmt, VarDecl, WhileStmt,
+    fn_param_children, Block, BreakStmt, CatchClause, ClassDecl, ClassMember, ConstDecl,
+    ContinueStmt, DoWhileStmt, ElseStmt, EmptyStmt, ExportStmt, ExprStmt, FnParam, ForStmt,
+    ForeachStmt, FunctionDecl, GlobalDecl, GotoStmt, IfStmt, ImportStmt, IncludeStmt, MatchStmt,
+    PackageStmt, ReturnStmt, Stmt, StmtBlock, SwitchArm, SwitchStmt, ThrowStmt, TryStmt, VarDecl,
+    WhileStmt,
 };
 pub use types::{
     TypeExpr, TypeNode, TypeNullableType, TypePrimaryType, TypeUnionType,

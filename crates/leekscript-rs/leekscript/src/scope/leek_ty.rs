@@ -96,7 +96,8 @@ impl LeekTy {
             (Self::Union(parts), exp) => parts.iter().any(|p| Self::is_assignable_to(p, exp)),
             (val, Self::Union(parts)) => parts.iter().any(|p| Self::is_assignable_to(val, p)),
             (Self::Nullable(inner), exp) => {
-                Self::is_assignable_to(inner, exp) || matches!(exp, Self::Nullable(e) if Self::is_assignable_to(inner, e))
+                Self::is_assignable_to(inner, exp)
+                    || matches!(exp, Self::Nullable(e) if Self::is_assignable_to(inner, e))
             }
             (val, Self::Nullable(inner)) => {
                 matches!(val, Self::Null) || Self::is_assignable_to(val, inner)
@@ -143,6 +144,28 @@ impl LeekTy {
             return Self::String;
         }
         Self::Unknown
+    }
+
+    /// For `x != null` style narrowing: `T?` → `T`, `T | null` → `T`, plain `T` unchanged as `Some(T)`.
+    #[must_use]
+    pub fn non_null_variant(&self) -> Option<Self> {
+        match self {
+            Self::Nullable(inner) => Some((**inner).clone()),
+            Self::Union(parts) => {
+                let filtered: Vec<Self> = parts
+                    .iter()
+                    .filter(|p| !matches!(p, Self::Null))
+                    .cloned()
+                    .collect();
+                match filtered.len() {
+                    0 => None,
+                    1 => Some(filtered[0].clone()),
+                    _ => Some(Self::Union(filtered)),
+                }
+            }
+            Self::Null => None,
+            other => Some(other.clone()),
+        }
     }
 }
 
@@ -194,5 +217,18 @@ mod tests {
 
         let bad = LeekTy::Interval(Box::new(LeekTy::Unknown));
         assert!(!LeekTy::is_assignable_to(&i, &bad));
+    }
+
+    #[test]
+    fn non_null_variant_strips_nullable_and_union_null() {
+        assert_eq!(
+            LeekTy::Nullable(Box::new(LeekTy::String)).non_null_variant(),
+            Some(LeekTy::String)
+        );
+        assert_eq!(
+            LeekTy::Union(vec![LeekTy::Integer, LeekTy::Null]).non_null_variant(),
+            Some(LeekTy::Integer)
+        );
+        assert_eq!(LeekTy::Null.non_null_variant(), None);
     }
 }

@@ -2,3 +2,5 @@ target/
 Cargo.lock
 ai/
 out
+*.pyc
+tools/.leek_encyclopedia_cache.json

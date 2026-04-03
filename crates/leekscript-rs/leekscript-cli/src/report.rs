@@ -67,8 +67,10 @@ struct SemanticSnippet {
     message: String,
     #[source_code]
     src: NamedSource<String>,
-    #[label]
+    #[label("here")]
     span: SourceSpan,
+    #[label("type annotation")]
+    related: Option<SourceSpan>,
 }
 
 fn snippet(
@@ -77,14 +79,25 @@ fn snippet(
     start: u32,
     len: u32,
     message: impl Into<String>,
+    related: Option<(u32, u32)>,
 ) -> Report {
-    let start = (start as usize).min(source.len());
-    let len = (len as usize).min(source.len().saturating_sub(start));
-    let span: SourceSpan = (start, len).into();
+    let start_u = (start as usize).min(source.len());
+    let len_u = (len as usize).min(source.len().saturating_sub(start_u));
+    let span: SourceSpan = (start_u, len_u).into();
+    let related = related.and_then(|(rs, rlen)| {
+        let rs = (rs as usize).min(source.len());
+        let rlen = (rlen as usize).min(source.len().saturating_sub(rs));
+        if rlen == 0 {
+            None
+        } else {
+            Some(SourceSpan::from((rs, rlen)))
+        }
+    });
     Report::new(SemanticSnippet {
         message: message.into(),
         src: NamedSource::new(label.into(), source),
         span,
+        related,
     })
 }
 
@@ -96,6 +109,7 @@ pub fn check_diagnostic(
     fallback_label: &str,
     span: Span,
     message: &str,
+    related_span: Option<Span>,
     stdin_user: Option<(&str, u32)>,
 ) -> Report {
     if let Some((stdin_body, user_base)) = stdin_user {
@@ -104,12 +118,22 @@ pub fn check_diagnostic(
                 span.start.saturating_sub(user_base),
                 span.end.saturating_sub(user_base),
             );
+            let rel = related_span
+                .filter(|r| r.start >= user_base)
+                .map(|r| {
+                    let a = Span::new(
+                        r.start.saturating_sub(user_base),
+                        r.end.saturating_sub(user_base),
+                    );
+                    (a.start, a.end.saturating_sub(a.start))
+                });
             return snippet(
                 "<stdin>",
                 stdin_body.to_string(),
                 s.start,
                 s.end.saturating_sub(s.start),
                 message,
+                rel,
             );
         }
     }
@@ -118,6 +142,16 @@ pub fn check_diagnostic(
         let rel = span.start.saturating_sub(sm.merged_start);
         let file_start = sm.file_offset.saturating_add(rel);
         let len = span.end.saturating_sub(span.start);
+        let related_in_file = related_span.and_then(|r| {
+            let rsm = mapping.span_at_merged_offset(r.start)?;
+            if rsm.path != sm.path {
+                return None;
+            }
+            let rrel = r.start.saturating_sub(rsm.merged_start);
+            let r_file_start = rsm.file_offset.saturating_add(rrel);
+            let rlen = r.end.saturating_sub(r.start);
+            Some((r_file_start, rlen))
+        });
         if let Some(proj) = project {
             if let Some(f) = proj.files.iter().find(|f| f.path == sm.path) {
                 return snippet(
@@ -126,6 +160,7 @@ pub fn check_diagnostic(
                     file_start,
                     len,
                     message,
+                    related_in_file,
                 );
             }
         }
@@ -136,16 +171,24 @@ pub fn check_diagnostic(
                 file_start,
                 len,
                 message,
+                related_in_file,
             );
         }
     }
 
+    let rel_combined = related_span.map(|r| {
+        (
+            r.start,
+            r.end.saturating_sub(r.start),
+        )
+    });
     snippet(
         fallback_label,
         combined_src.to_string(),
         span.start,
         span.end.saturating_sub(span.start),
         message,
+        rel_combined,
     )
 }
 

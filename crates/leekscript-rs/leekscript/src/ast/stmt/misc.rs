@@ -1,11 +1,16 @@
+use super::params::{fn_param_children, FnParam};
 use super::Block;
 use crate::ast::expr::Expr;
 use crate::ast::literal::LitStr;
 use crate::ast::types::TypeExpr;
+use crate::syntax::{attached_docstring, attached_parsed_doxygen, ParsedDoxygen};
 use crate::syntax::kinds::K;
+use crate::syntax::syntax_el_is_trivia;
+use crate::Span;
 use sipha::AstNode;
 use sipha::prelude::*;
 use sipha::tree::ast::{AstNodeExt, AstTokenExt};
+use sipha::tree::red::SyntaxElement;
 use sipha::types::IntoSyntaxKind;
 
 /// Empty statement: a single `;`.
@@ -23,6 +28,17 @@ pub struct ErrorStmt(SyntaxNode);
 pub struct GlobalDecl(SyntaxNode);
 
 impl GlobalDecl {
+    /// Leading Doxygen doc comment (`/** … */`, `/// …`) on this declaration, if any.
+    #[must_use]
+    pub fn docstring(&self) -> Option<String> {
+        attached_docstring(self.syntax())
+    }
+
+    #[must_use]
+    pub fn parsed_docstring(&self) -> Option<ParsedDoxygen> {
+        attached_parsed_doxygen(self.syntax())
+    }
+
     /// Optional type in `T name` form (`global integer x` — not `global x: integer`).
     pub fn type_expr(&self) -> Option<TypeExpr> {
         self.syntax().child::<TypeExpr>()
@@ -36,11 +52,97 @@ impl GlobalDecl {
     }
 }
 
+/// One member inside a class body (`K::ClassMember`): field, method, or constructor.
+#[derive(Debug, Clone, AstNode)]
+#[ast(kind = K::ClassMember)]
+pub struct ClassMember(SyntaxNode);
+
+impl ClassMember {
+    /// Leading Doxygen doc comment (`/** … */`, `/// …`) on this declaration, if any.
+    #[must_use]
+    pub fn docstring(&self) -> Option<String> {
+        attached_docstring(self.syntax())
+    }
+
+    /// `constructor () { }` / `m () { }` — has a `{ … }` body.
+    #[must_use]
+    pub fn has_method_body(&self) -> bool {
+        self.syntax()
+            .child_nodes()
+            .any(|n| n.kind_as::<K>() == Some(K::Block))
+    }
+
+    #[must_use]
+    pub fn is_constructor(&self) -> bool {
+        self.syntax()
+            .descendant_tokens()
+            .iter()
+            .any(|t| t.kind_as::<K>() == Some(K::ConstructorKw))
+    }
+
+    /// Parameters inside `( … )` for methods and constructors.
+    pub fn fn_params(&self) -> impl Iterator<Item = FnParam> + '_ {
+        fn_param_children(self.syntax())
+    }
+
+    /// Leading type when spelled (`integer n`, method return type before name, …).
+    #[must_use]
+    pub fn leading_type_expr(&self) -> Option<TypeExpr> {
+        self.syntax().child::<TypeExpr>()
+    }
+
+    /// Constructor uses `class_name`; methods use the `ident` before `(`.
+    pub fn method_name_and_span(&self, class_name: &str) -> Option<(String, Span)> {
+        if self.is_constructor() {
+            let span = self
+                .syntax()
+                .descendant_tokens()
+                .iter()
+                .find(|t| t.kind_as::<K>() == Some(K::ConstructorKw))
+                .map(|t| t.text_range())
+                .unwrap_or_else(|| Span::new(0, 0));
+            return Some((class_name.to_string(), span));
+        }
+        method_name_ident_before_params(self.syntax())
+    }
+}
+
+fn method_name_ident_before_params(syntax: &sipha::tree::red::SyntaxNode) -> Option<(String, Span)> {
+    let children: Vec<SyntaxElement> = syntax
+        .children()
+        .filter(|e| !syntax_el_is_trivia(e))
+        .collect();
+    let lparen_idx = children.iter().position(|e| {
+        e.as_token()
+            .is_some_and(|t| t.kind() == K::LParen.into_syntax_kind())
+    })?;
+    let mut out = None;
+    for el in &children[..lparen_idx] {
+        if let Some(t) = el.as_token() {
+            if t.kind_as::<K>() == Some(K::Ident) {
+                out = Some((t.text().to_string(), t.text_range()));
+            }
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone, AstNode)]
 #[ast(kind = K::ClassDecl)]
 pub struct ClassDecl(SyntaxNode);
 
 impl ClassDecl {
+    /// Leading Doxygen doc comment (`/** … */`, `/// …`) on this declaration, if any.
+    #[must_use]
+    pub fn docstring(&self) -> Option<String> {
+        attached_docstring(self.syntax())
+    }
+
+    #[must_use]
+    pub fn parsed_docstring(&self) -> Option<ParsedDoxygen> {
+        attached_parsed_doxygen(self.syntax())
+    }
+
     /// Class name (`class` … `{`); stops before `extends` if present.
     pub fn name(&self) -> Option<String> {
         let ext = K::ExtendsKw.into_syntax_kind();
@@ -85,6 +187,17 @@ impl ClassDecl {
 pub struct ConstDecl(SyntaxNode);
 
 impl ConstDecl {
+    /// Leading Doxygen doc comment (`/** … */`, `/// …`) on this declaration, if any.
+    #[must_use]
+    pub fn docstring(&self) -> Option<String> {
+        attached_docstring(self.syntax())
+    }
+
+    #[must_use]
+    pub fn parsed_docstring(&self) -> Option<ParsedDoxygen> {
+        attached_parsed_doxygen(self.syntax())
+    }
+
     pub fn first_name(&self) -> Option<String> {
         self.syntax()
             .child_tokens()

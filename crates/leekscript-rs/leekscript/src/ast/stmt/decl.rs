@@ -1,7 +1,8 @@
+use super::params::{fn_param_children, FnParam};
 use super::Block;
 use crate::ast::expr::Expr;
 use crate::ast::types::TypeExpr;
-use crate::syntax::kinds::K;
+use crate::syntax::{attached_docstring, attached_parsed_doxygen, kinds::K, ParsedDoxygen};
 use sipha::prelude::*;
 use sipha::tree::ast::AstNode;
 use sipha::tree::ast::AstNodeExt;
@@ -11,6 +12,18 @@ use sipha::types::IntoSyntaxKind;
 pub struct VarDecl(SyntaxNode);
 
 impl VarDecl {
+    /// Leading Doxygen doc comment (`/** … */`, `/// …`) on this declaration, if any.
+    #[must_use]
+    pub fn docstring(&self) -> Option<String> {
+        attached_docstring(self.syntax())
+    }
+
+    /// Parsed Doxygen commands (`\brief`, `@param`, …), if any.
+    #[must_use]
+    pub fn parsed_docstring(&self) -> Option<ParsedDoxygen> {
+        attached_parsed_doxygen(self.syntax())
+    }
+
     /// First declared identifier (after `var` / `let`).
     pub fn first_name(&self) -> Option<String> {
         self.syntax()
@@ -25,6 +38,18 @@ impl VarDecl {
 pub struct FunctionDecl(SyntaxNode);
 
 impl FunctionDecl {
+    /// Leading Doxygen doc comment (`/** … */`, `/// …`) on this declaration, if any.
+    #[must_use]
+    pub fn docstring(&self) -> Option<String> {
+        attached_docstring(self.syntax())
+    }
+
+    /// Parsed Doxygen commands (`\brief`, `@param`, …), if any.
+    #[must_use]
+    pub fn parsed_docstring(&self) -> Option<ParsedDoxygen> {
+        attached_parsed_doxygen(self.syntax())
+    }
+
     /// Function name (first `ident` after `function`).
     pub fn name(&self) -> Option<String> {
         self.syntax()
@@ -64,6 +89,11 @@ impl FunctionDecl {
 
     pub fn body(&self) -> Option<Block> {
         self.syntax().child::<Block>()
+    }
+
+    /// Formal parameters inside `( … )` in source order.
+    pub fn fn_params(&self) -> impl Iterator<Item = FnParam> + '_ {
+        fn_param_children(self.syntax())
     }
 }
 

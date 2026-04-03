@@ -3,7 +3,7 @@ use sipha::tree::ast::AstToken;
 use sipha::tree::red::SyntaxToken;
 use sipha::types::{IntoSyntaxKind, SyntaxKind};
 
-/// Quoted string literal (`"..."` or `'...'`) as a lexer token.
+/// Quoted string literal (`"…"` or `'…'`) as a lexer token.
 ///
 /// Implements [`AstToken`] (not [`sipha::tree::ast::AstNode`]): literals are leaf tokens, not
 /// [`SyntaxNode`](sipha::tree::red::SyntaxNode)s. Use [`sipha::tree::ast::AstTokenExt::token_ast`] on a

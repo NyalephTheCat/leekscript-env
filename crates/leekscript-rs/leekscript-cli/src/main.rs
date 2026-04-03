@@ -15,7 +15,7 @@ use leekscript::include::{
     prepend_signatures_to_merged,
 };
 use leekscript::syntax::kinds::K;
-use leekscript::Version;
+use leekscript::{Version, is_signature_stub_path, parse_doc, parse_signature_doc};
 use serde::Deserialize;
 use sipha::tree::tree_display::{TreeDisplayOptions, format_syntax_tree};
 use sipha::types::FromSyntaxKind;
@@ -366,7 +366,7 @@ fn cmd_check(
                 }
             };
             let user_base = (combined.len() - src.len()) as u32;
-            match leekscript::parse_doc(&combined, version) {
+            match parse_signature_doc(&combined, version) {
                 Ok(doc) => {
                     if !parse_only {
                         let analysis = leekscript::run_semantic_analysis(doc.root());
@@ -379,6 +379,7 @@ fn cmd_check(
                                 label,
                                 d.span,
                                 &d.message,
+                                d.related_span,
                                 Some((&src, user_base)),
                             ));
                         }
@@ -392,7 +393,7 @@ fn cmd_check(
             return if ok { ExitCode::SUCCESS } else { ExitCode::from(1) };
         }
 
-        match leekscript::parse_doc(&src, version) {
+        match parse_doc(&src, version) {
             Ok(doc) => {
                 if !parse_only {
                     let analysis = leekscript::run_semantic_analysis(doc.root());
@@ -405,6 +406,7 @@ fn cmd_check(
                             label,
                             d.span,
                             &d.message,
+                            d.related_span,
                             None,
                         ));
                     }
@@ -475,7 +477,14 @@ fn cmd_check(
             }
         };
 
-        match leekscript::parse_doc(&combined, version) {
+        let use_sig_grammar =
+            !signature_files.is_empty() || is_signature_stub_path(&entry);
+        let parse_result = if use_sig_grammar {
+            parse_signature_doc(&combined, version)
+        } else {
+            parse_doc(&combined, version)
+        };
+        match parse_result {
             Ok(doc) => {
                 if !parse_only {
                     let analysis = leekscript::run_semantic_analysis(doc.root());
@@ -488,6 +497,7 @@ fn cmd_check(
                             &label,
                             d.span,
                             &d.message,
+                            d.related_span,
                             None,
                         ));
                     }
@@ -1154,7 +1164,7 @@ fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
             report::emit(report::stdin_io(e));
             return ExitCode::from(1);
         }
-        let doc = match leekscript::parse_doc(&src, version) {
+        let doc = match parse_doc(&src, version) {
             Ok(d) => d,
             Err(e) => {
                 report::emit(report::parse_diagnostic("<stdin>", &src, &e));
@@ -1179,7 +1189,12 @@ fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
                 continue;
             }
         };
-        let doc = match leekscript::parse_doc(&src, version) {
+        let parse_result = if is_signature_stub_path(path) {
+            parse_signature_doc(&src, version)
+        } else {
+            parse_doc(&src, version)
+        };
+        let doc = match parse_result {
             Ok(d) => d,
             Err(e) => {
                 ok = false;

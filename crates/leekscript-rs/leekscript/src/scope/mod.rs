@@ -13,5 +13,9 @@ mod model;
 pub use analysis::{run_semantic_analysis, AnalysisResult};
 pub use leek_ty::LeekTy;
 pub use model::{
-    Reference, Scope, ScopeId, ScopeKind, SemanticDiagnostic, Symbol, SymbolId, SymbolKind,
+    ExprTypeKey, Reference, Scope, ScopeId, ScopeKind, SemanticCode, SemanticDiagnostic, Symbol,
+    SymbolId, SymbolKind,
+};
+pub use crate::syntax::{
+    parse_doxygen, DoxygenParam, DoxygenRetval, DoxygenThrows, ParsedDoxygen,
 };

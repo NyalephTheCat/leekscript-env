@@ -49,15 +49,19 @@ pub use include::{
     try_resolve_include_file,
 };
 pub use parse::{
-    ParseError, ParsedWithRecovery, Version, FLAG_PARSE_RECOVERY, parse_doc, parse_doc_or_recover,
-    parse_doc_with_recovery, parse_doc_with_recovery_limited, parse_syntax_root,
+    ParseError, ParsedWithRecovery, Version, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, is_signature_stub_path,
+    parse_doc, parse_doc_or_recover, parse_doc_with_recovery, parse_doc_with_recovery_limited,
+    parse_signature_doc, parse_syntax_root,
 };
 #[cfg(feature = "partial-reparse")]
 pub use parse::parse_rule_at_offset;
 pub use sipha::types::{Pos, Span};
 
 #[cfg(feature = "walk")]
-pub use scope::{run_semantic_analysis, AnalysisResult, LeekTy, Reference, Scope, ScopeId};
+pub use scope::{
+    run_semantic_analysis, AnalysisResult, ExprTypeKey, LeekTy, Reference, Scope, ScopeId,
+    SemanticCode, SemanticDiagnostic,
+};
 
 #[cfg(feature = "transform")]
 pub use document::{TransformResult, Transformer, transform};
