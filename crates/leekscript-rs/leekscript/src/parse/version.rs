@@ -5,6 +5,8 @@ pub const FLAG_V2: FlagId = 2;
 pub const FLAG_V3: FlagId = 3;
 pub const FLAG_V4: FlagId = 4;
 pub const FLAG_VNEXT: FlagId = 5;
+/// When set, module scope uses `recover_until` around each top-level statement (multi-error / IDE-style parse).
+pub const FLAG_PARSE_RECOVERY: FlagId = 6;
 
 /// Language dialect for parsing.
 ///

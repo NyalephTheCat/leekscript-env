@@ -6,7 +6,8 @@ fn parse_reference_fixture(rel: &str, version: Version) {
         .join("..")
         .join("..");
     let path = repo_root
-        .join("leekscript-java")
+        .join("leek-wars-generator")
+        .join("leekscript")
         .join("src")
         .join("test")
         .join("resources")
@@ -20,7 +21,7 @@ fn parse_reference_fixture(rel: &str, version: Version) {
 #[test]
 fn parses_reference_fixtures_subset_v4() {
     // Start small and expand as grammar coverage improves.
-    // Same `.leek` files as under `leekscript-java/src/test/resources`.
+    // Same `.leek` files as under `leek-wars-generator/leekscript/src/test/resources`.
     parse_reference_fixture("ai/code/trivial.leek", Version::V4);
     parse_reference_fixture("ai/code/assignments.leek", Version::V4);
     parse_reference_fixture("ai/code/return_in_function.leek", Version::V4);

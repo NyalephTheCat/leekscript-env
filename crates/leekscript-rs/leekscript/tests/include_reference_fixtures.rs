@@ -1,4 +1,4 @@
-//! Include graph loading against `leekscript-java/src/test/resources` (shared fixture tree).
+//! Include graph loading against `leek-wars-generator/leekscript/src/test/resources` (shared fixture tree).
 
 use leekscript::{
     IncludeLimits, IncludeLoadError, Version, load_project_with_includes,
@@ -11,7 +11,8 @@ fn reference_resources_root() -> PathBuf {
         .join("..")
         .join("..")
         .join("..")
-        .join("leekscript-java")
+        .join("leek-wars-generator")
+        .join("leekscript")
         .join("src")
         .join("test")
         .join("resources")

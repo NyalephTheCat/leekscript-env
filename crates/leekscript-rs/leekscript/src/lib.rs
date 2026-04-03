@@ -48,7 +48,12 @@ pub use include::{
     merge_included_sources_to_single_file_mapped, prepend_signatures_to_merged, resolve_include_path,
     try_resolve_include_file,
 };
-pub use parse::{ParseError, Version, parse_doc, parse_syntax_root};
+pub use parse::{
+    ParseError, ParsedWithRecovery, Version, FLAG_PARSE_RECOVERY, parse_doc, parse_doc_or_recover,
+    parse_doc_with_recovery, parse_doc_with_recovery_limited, parse_syntax_root,
+};
+#[cfg(feature = "partial-reparse")]
+pub use parse::parse_rule_at_offset;
 pub use sipha::types::{Pos, Span};
 
 #[cfg(feature = "walk")]

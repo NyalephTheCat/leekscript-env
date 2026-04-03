@@ -13,6 +13,11 @@ use sipha::types::IntoSyntaxKind;
 #[ast(kind = K::EmptyStmt)]
 pub struct EmptyStmt(SyntaxNode);
 
+/// Parse error placeholder (recovery mode); empty CST node at the error offset.
+#[derive(Debug, Clone, AstNode)]
+#[ast(kind = K::ErrorStmt)]
+pub struct ErrorStmt(SyntaxNode);
+
 #[derive(Debug, Clone, AstNode)]
 #[ast(kind = K::GlobalDecl)]
 pub struct GlobalDecl(SyntaxNode);

@@ -1,4 +1,5 @@
 use super::cfg_flags;
+use crate::parse::version::FLAG_PARSE_RECOVERY;
 use crate::syntax::kinds::K;
 use sipha::prelude::parse::GrammarChoiceFn;
 use sipha::prelude::*;
@@ -8,7 +9,18 @@ pub fn define(g: &mut GrammarBuilder) {
     g.parser_rule("start", |g| {
         g.node(K::Root, |g| {
             g.zero_or_more(|g| {
-                g.call("stmt");
+                g.choice(
+                    |g| {
+                        g.if_flag(FLAG_PARSE_RECOVERY);
+                        g.recover_until("top_level_sync", |g| {
+                            g.call("stmt");
+                        });
+                    },
+                    |g| {
+                        g.if_not_flag(FLAG_PARSE_RECOVERY);
+                        g.call("stmt");
+                    },
+                );
             });
             g.skip();
         });
@@ -117,6 +129,152 @@ pub fn define(g: &mut GrammarBuilder) {
                     g.optional(|g| {
                         g.call("semi");
                     });
+                });
+            }),
+        ];
+        g.choices(alts);
+    });
+
+    // Statement-boundary sync for `recover_until` at module scope: trivia, then `;` (consumed) or a
+    // keyword that can start a top-level statement. Keywords use [`GrammarBuilder::lookahead`] so
+    // we do not eat the keyword — the following `stmt` parse must see it.
+    g.parser_rule("top_level_sync", |g| {
+        g.skip();
+        let alts: Vec<GrammarChoiceFn> = vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("semi");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_function");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_class");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_var");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::vnext(g);
+                    g.call("kw_let");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_global");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_if");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_for");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_while");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_do");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_return");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_break");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_continue");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_include");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_else");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    g.call("kw_switch");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_try");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_throw");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_import");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_export");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_goto");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_package");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_const");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v4(g);
+                    cfg_flags::vnext(g);
+                    g.call("kw_match");
                 });
             }),
         ];

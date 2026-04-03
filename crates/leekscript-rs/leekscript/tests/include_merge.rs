@@ -130,7 +130,8 @@ fn merge_matches_java_fixture_multiple_includes() {
         .join("..")
         .join("..")
         .join("..")
-        .join("leekscript-java")
+        .join("leek-wars-generator")
+        .join("leekscript")
         .join("src")
         .join("test")
         .join("resources");

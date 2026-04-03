@@ -28,6 +28,8 @@ pub enum K {
     IncludeStmt,
     /// Lone `;` (empty statement), e.g. `;;` or `for (;; )`.
     EmptyStmt,
+    /// Zero-width placeholder from sipha recovery (`parse_doc_with_recovery`); marks a parse error.
+    ErrorStmt,
 
     // CST — declarations
     VarDecl,
@@ -278,6 +280,7 @@ impl K {
             Self::ContinueStmt => "CONTINUE_STMT",
             Self::IncludeStmt => "INCLUDE_STMT",
             Self::EmptyStmt => "EMPTY_STMT",
+            Self::ErrorStmt => "ERROR_STMT",
             Self::VarDecl => "VAR_DECL",
             Self::FunctionDecl => "FUNCTION_DECL",
             Self::GlobalDecl => "GLOBAL_DECL",

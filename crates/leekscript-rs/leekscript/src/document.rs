@@ -7,7 +7,7 @@
 //! aligned.
 
 use crate::ast::Root;
-use crate::parse::{ParseError, Version, parse_doc};
+use crate::parse::{ParseError, Version, parse_doc, parse_doc_with_recovery};
 use sipha::diagnostics::error::SemanticDiagnostic;
 use sipha::diagnostics::line_index::LineIndex;
 use sipha::diagnostics::parsed_doc::ParsedDoc;
@@ -61,6 +61,7 @@ const STMT_BOUNDARY_KINDS: &[SyntaxKind] = &[
     K::MatchStmt as SyntaxKind,
     K::Stmt as SyntaxKind,
     K::EmptyStmt as SyntaxKind,
+    K::ErrorStmt as SyntaxKind,
 ];
 
 /// Failure when splicing source or re-parsing after an edit.
@@ -84,8 +85,12 @@ pub struct LeekDoc {
 
 impl LeekDoc {
     /// Parse and wrap as an editable document.
+    ///
+    /// Uses [`crate::parse::parse_doc_with_recovery`] so formatting and directive scanning can
+    /// proceed past local errors (same as a typical IDE buffer). Use [`crate::parse::parse_doc`]
+    /// when you need a strict parse.
     pub fn parse(src: &str, version: Version) -> Result<Self, ParseError> {
-        parse_doc(src, version).map(|doc| Self::from_parsed(&doc))
+        parse_doc_with_recovery(src, version).map(|r| Self::from_parsed(&r.doc))
     }
 
     /// Take ownership of a parse result as an editable document (clones the source buffer).
