@@ -137,6 +137,23 @@ struct Printer<'a> {
     type_syntax_depth: u32,
 }
 
+/// How many **extra** empty lines appear in source trivia between `prev_end` and `next_start`
+/// (half-open byte range into UTF-8 source): one `\n` closes the previous statement; each further
+/// `\n` opens another visual line (blank if only whitespace follows before the next stmt).
+#[inline]
+fn extra_blank_lines_in_source_gap(source: &[u8], prev_end: u32, next_start: u32) -> usize {
+    let (a, b) = if prev_end <= next_start {
+        (prev_end as usize, next_start as usize)
+    } else {
+        (next_start as usize, prev_end as usize)
+    };
+    if a >= b || b > source.len() {
+        return 0;
+    }
+    let newlines = source[a..b].iter().filter(|&&ch| ch == b'\n').count();
+    newlines.saturating_sub(1)
+}
+
 impl Printer<'_> {
     fn opts_at(&self, offset: u32) -> FormatOptions {
         FormatOptions::effective_at(self.base, &self.plan.patches, offset)
@@ -289,6 +306,7 @@ impl Printer<'_> {
 
         let mut i = 0usize;
         let mut need_newline_before_stmt = false;
+        let mut prev_stmt_node: Option<SyntaxNode> = None;
 
         while i < children.len() {
             match &children[i] {
@@ -326,17 +344,45 @@ impl Printer<'_> {
                         // stmt does not insert a leading space on this line (e.g. after `);`).
                         self.prev_kind = None;
                         let o = self.opts_at(off);
-                        let mut extra = if is_class_body {
-                            if skip_class_body_member_gap(prev_child_node(&children, i), n) {
-                                0
-                            } else {
-                                o.blank_lines_between_class_members
-                            }
+                        let skip_gap = is_class_body
+                            && skip_class_body_member_gap(prev_child_node(&children, i), n);
+                        let mut extra = if skip_gap {
+                            0
+                        } else if is_class_body {
+                            o.blank_lines_between_class_members
                         } else {
                             o.blank_lines_between_block_statements
                         };
                         if o.max_consecutive_blank_lines_in_block > 0 {
                             extra = extra.min(o.max_consecutive_blank_lines_in_block);
+                        }
+                        let cap = if o.max_consecutive_blank_lines_in_block > 0 {
+                            o.max_consecutive_blank_lines_in_block
+                        } else {
+                            10usize
+                        };
+                        if !skip_gap {
+                            if let Some(ref prev) = prev_stmt_node {
+                                // Leading whitespace/newlines before the next stmt live as trivia on its
+                                // first semantic token, not in `[prev.end, n.offset())` (often empty).
+                                let gap_end = n
+                                    .descendant_semantic_tokens()
+                                    .first()
+                                    .map(|t| t.text_range().start)
+                                    .unwrap_or(n.offset());
+                                let src_extra = extra_blank_lines_in_source_gap(
+                                    self.source,
+                                    prev.text_range().end,
+                                    gap_end,
+                                )
+                                .min(cap);
+                                extra = extra.max(src_extra);
+                            }
+                        }
+                        if o.max_consecutive_blank_lines_in_block > 0 {
+                            extra = extra.min(o.max_consecutive_blank_lines_in_block);
+                        } else {
+                            extra = extra.min(10);
                         }
                         for _ in 0..extra {
                             self.emit_newline(off);
@@ -345,6 +391,7 @@ impl Printer<'_> {
                     need_newline_before_stmt = true;
                     self.emit_indent(off);
                     self.format_node(n, Some(block));
+                    prev_stmt_node = Some(n.clone());
                     i += 1;
                 }
             }
@@ -475,4 +522,206 @@ impl Printer<'_> {
         self.push_str_no_nl(t.text(), tab_w);
         self.prev_kind = Some(k);
     }
+
+    /// Range-format entry: format `node` without extra leading indent (outer layout/trivia is preserved separately).
+    fn finish_range_format_subtree(&mut self, node: &SyntaxNode, parent: Option<&SyntaxNode>) {
+        self.format_node(node, parent);
+    }
+}
+
+#[inline]
+fn same_syntax_node(a: &SyntaxNode, b: &SyntaxNode) -> bool {
+    a.offset() == b.offset() && a.text_len() == b.text_len() && a.kind() == b.kind()
+}
+
+/// Immediate parent via DFS — [`SyntaxNode::ancestors`] can return empty when `find_path` misses
+/// (e.g. some recovery shapes); this keeps range selection walk-up reliable.
+fn immediate_parent_of_node(root: &SyntaxNode, target: &SyntaxNode) -> Option<SyntaxNode> {
+    fn walk(here: &SyntaxNode, target: &SyntaxNode) -> Option<SyntaxNode> {
+        for c in here.child_nodes() {
+            if same_syntax_node(&c, target) {
+                return Some(here.clone());
+            }
+            if let Some(p) = walk(&c, target) {
+                return Some(p);
+            }
+        }
+        None
+    }
+    walk(root, target)
+}
+
+#[inline]
+fn parent_of_node(root: &SyntaxNode, node: &SyntaxNode) -> Option<SyntaxNode> {
+    if same_syntax_node(node, root) {
+        return None;
+    }
+    node.ancestors(root)
+        .into_iter()
+        .next()
+        .or_else(|| immediate_parent_of_node(root, node))
+}
+
+fn normalize_trivia_leaf(mut n: SyntaxNode, root: &SyntaxNode) -> Option<SyntaxNode> {
+    while n.kind_as::<K>() == Some(K::Trivia) {
+        n = parent_of_node(root, &n)?;
+    }
+    Some(n)
+}
+
+/// Smallest non-trivia [`SyntaxNode`] whose span contains `[start, end)` (UTF-8 bytes).
+fn minimal_covering_node(root: &SyntaxNode, sel: Span) -> Option<SyntaxNode> {
+    let start = sel.start.min(sel.end);
+    let end = sel.start.max(sel.end);
+    if start >= end {
+        return None;
+    }
+    let rr = root.text_range();
+    if start < rr.start || end > rr.end {
+        return None;
+    }
+    let seed = root.node_at_offset(start)?;
+    let mut n = normalize_trivia_leaf(seed, root)?;
+    while n.text_range().start > start || n.text_range().end < end {
+        let p = parent_of_node(root, &n)?;
+        n = p;
+    }
+    loop {
+        let candidates: Vec<SyntaxNode> = n
+            .child_nodes()
+            .filter(|c| c.kind_as::<K>() != Some(K::Trivia))
+            .filter(|c| {
+                let r = c.text_range();
+                r.start <= start && r.end >= end
+            })
+            .collect();
+        let Some(best) = candidates.into_iter().min_by_key(SyntaxNode::text_len) else {
+            break;
+        };
+        if best.kind_as::<K>() == Some(K::Trivia) {
+            break;
+        }
+        if same_syntax_node(&best, &n) {
+            break;
+        }
+        n = best;
+    }
+    if n.kind_as::<K>() == Some(K::Trivia) {
+        return None;
+    }
+    Some(n)
+}
+
+/// Printer [`indent_level`](Printer::indent_level) before formatting `node`, matching [`format_block`](Printer::format_block).
+fn block_body_indent_depth(root: &SyntaxNode, node: &SyntaxNode) -> u32 {
+    let mut count = 0u32;
+    let mut cur = node.clone();
+    loop {
+        if same_syntax_node(&cur, root) {
+            break;
+        }
+        let Some(p) = parent_of_node(root, &cur) else {
+            break;
+        };
+        if p.kind_as::<K>() == Some(K::Block) && p.child_nodes().any(|c| same_syntax_node(&c, &cur)) {
+            count += 1;
+        }
+        cur = p;
+    }
+    count
+}
+
+fn format_leek_subtree_node(
+    doc: &LeekDoc,
+    root: &SyntaxNode,
+    node: &SyntaxNode,
+    base: &FormatOptions,
+) -> Option<(Span, String)> {
+    if node.kind_as::<K>() == Some(K::Root) {
+        return None;
+    }
+    let parent = parent_of_node(root, node);
+    // Match [`Printer::format_root`]: top-level statements use `parent: None`, not `Some(root)`.
+    let parent_for_printer = parent
+        .as_ref()
+        .filter(|p| !same_syntax_node(p, root));
+    let toks = node.descendant_semantic_tokens();
+    if toks.is_empty() {
+        return None;
+    }
+    let first_tok = &toks[0];
+    let last_tok = toks.last().expect("non-empty");
+    let nr = node.text_range();
+    let lead = std::str::from_utf8(
+        &doc.source()[nr.start as usize..first_tok.text_range().start as usize],
+    )
+    .ok()?;
+    let trail = std::str::from_utf8(
+        &doc.source()[last_tok.text_range().end as usize..nr.end as usize],
+    )
+    .ok()?;
+    let plan = crate::format::directives::scan_directives(doc);
+    let mut p = Printer {
+        source: doc.source(),
+        base,
+        plan: &plan,
+        out: String::with_capacity(node.text_len() as usize * 2),
+        prev_kind: None,
+        indent_level: block_body_indent_depth(root, node),
+        line_col: 0,
+        type_syntax_depth: 0,
+    };
+    p.finish_range_format_subtree(node, parent_for_printer);
+    let mut out = String::with_capacity(lead.len() + p.out.len() + trail.len());
+    out.push_str(lead);
+    out.push_str(&p.out);
+    out.push_str(trail);
+    let span = node.text_range();
+    let old = std::str::from_utf8(span.as_slice(doc.source())).unwrap_or("");
+    if old == out {
+        return None;
+    }
+    Some((span, out))
+}
+
+/// Format the smallest syntax subtree (or several top-level subtrees) that cover `selection`.
+///
+/// Returns one or more `(span, text)` replacements (sorted by descending `span.start`). [`None`] when
+/// nothing changes or the selection cannot be resolved.
+#[must_use]
+pub fn format_leek_doc_range(doc: &LeekDoc, selection: Span, base: &FormatOptions) -> Option<Vec<(Span, String)>> {
+    let root = doc.root_syntax();
+    let node = minimal_covering_node(root, selection)?;
+    let rr = root.text_range();
+    if node.kind_as::<K>() == Some(K::Root) {
+        let covers_whole_file = selection.start <= rr.start && selection.end >= rr.end;
+        if covers_whole_file {
+            let formatted = format_leek_doc(doc, base);
+            if formatted == doc.source_str() {
+                return None;
+            }
+            return Some(vec![(Span::new(0, doc.source().len() as u32), formatted)]);
+        }
+        let mut out: Vec<(Span, String)> = Vec::new();
+        for c in root
+            .child_nodes()
+            .filter(|x| x.kind_as::<K>() != Some(K::Trivia))
+        {
+            let r = c.text_range();
+            if r.end <= selection.start || r.start >= selection.end {
+                continue;
+            }
+            let sub = format_leek_subtree_node(doc, root, &c, base);
+            if let Some(pair) = sub {
+                out.push(pair);
+            }
+        }
+        if out.is_empty() {
+            return None;
+        }
+        out.sort_by_key(|(s, _)| std::cmp::Reverse(s.start));
+        return Some(out);
+    }
+    let one = format_leek_subtree_node(doc, root, &node, base)?;
+    Some(vec![one])
 }

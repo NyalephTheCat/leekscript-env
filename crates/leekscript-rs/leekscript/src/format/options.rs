@@ -98,8 +98,9 @@ pub struct FormatOptions {
     /// between methods and between fields and methods.
     /// The class `{ ... }` block is the direct child of [`crate::syntax::kinds::K::ClassDecl`].
     pub blank_lines_between_class_members: usize,
-    /// When non-zero, caps [`Self::blank_lines_between_block_statements`] and
-    /// [`Self::blank_lines_between_class_members`] (`0` = no cap).
+    /// When non-zero, caps [`Self::blank_lines_between_block_statements`],
+    /// [`Self::blank_lines_between_class_members`], and **source-preserved** blank lines between
+    /// block/class members (`0` = no cap on policy; source gaps are still limited to 10).
     pub max_consecutive_blank_lines_in_block: usize,
     /// Line endings for inserted breaks (verbatim regions keep original bytes).
     pub line_ending: LineEnding,
@@ -128,7 +129,7 @@ impl Default for FormatOptions {
             trailing_newline: true,
             blank_lines_between_block_statements: 0,
             blank_lines_between_class_members: 1,
-            max_consecutive_blank_lines_in_block: 0,
+            max_consecutive_blank_lines_in_block: 2,
             line_ending: LineEnding::default(),
             semicolon_style: SemicolonStyle::default(),
         }

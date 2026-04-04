@@ -32,7 +32,10 @@
 //! **Blank lines:** [`FormatOptions::blank_lines_between_class_members`](crate::format::FormatOptions::blank_lines_between_class_members)
 //! (default `1`) separates methods and separates field groups from methods; consecutive **fields** stay
 //! tight (no extra blank). [`FormatOptions::blank_lines_between_block_statements`](crate::format::FormatOptions::blank_lines_between_block_statements)
-//! (default `0`) adds blanks between statements in other blocks when set.
+//! (default `0`) adds blanks between statements in other blocks when set. **Inside blocks and class
+//! bodies**, empty lines you already have in the source are kept up to
+//! [`FormatOptions::max_consecutive_blank_lines_in_block`](crate::format::FormatOptions::max_consecutive_blank_lines_in_block)
+//! (default `2`); extra runs are collapsed to that cap.
 //! [`FormatOptions::blank_lines_after_class`](crate::format::FormatOptions::blank_lines_after_class)
 //! (default `2`) adds extra separation after a top-level class before the next declaration.
 
@@ -46,4 +49,4 @@ pub use directives::{
     span_touches_preserve,
 };
 pub use options::{BraceStyle, FormatOptions, FormatPatch, LineEnding, SemicolonStyle};
-pub use print::{format_document, format_leek_doc};
+pub use print::{format_document, format_leek_doc, format_leek_doc_range};

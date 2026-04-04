@@ -1,5 +1,8 @@
-use leekscript::format::{FormatOptions, SemicolonStyle, format_document};
+use leekscript::document::LeekDoc;
+use leekscript::format::{format_document, format_leek_doc_range, FormatOptions, SemicolonStyle};
+use leekscript::parse::parse_doc_with_recovery;
 use leekscript::{LanguageOptions, Version};
+use sipha::types::Span;
 
 #[test]
 fn formats_let_with_spaces() {
@@ -551,6 +554,26 @@ fn max_consecutive_blank_lines_caps_block_extra() {
 }
 
 #[test]
+fn preserves_blank_line_between_block_statements_from_source() {
+    let src = "function main() {\n    a();\n\n    b();\n}";
+    let out = format_document(src, LanguageOptions::v4_experimental_all(), &FormatOptions::default()).unwrap();
+    assert!(
+        out.contains("a();\n\n    b"),
+        "expected one preserved blank line between statements, got:\n{out}"
+    );
+}
+
+#[test]
+fn collapses_many_blank_lines_in_block_to_default_max() {
+    let src = "function f() {\na();\n\n\n\n\nb();\n}";
+    let out = format_document(src, LanguageOptions::v4_experimental_all(), &FormatOptions::default()).unwrap();
+    assert!(
+        !out.contains("\n\n\n\n    b"),
+        "expected at most two extra blank lines (default max), got:\n{out}"
+    );
+}
+
+#[test]
 fn space_after_comma_from_directive() {
     let src = "// leekfmt: space-after-comma=false\nlet x = f(1, 2);\n";
     let out = format_document(src, LanguageOptions::v4_experimental_all(), &FormatOptions::default()).unwrap();
@@ -612,4 +635,32 @@ fn space_around_type_operators_from_directive() {
         out.contains("integer | real"),
         "directive should enable spaced `|`, got:\n{out}"
     );
+}
+
+#[test]
+fn format_range_covers_single_statement_in_block() {
+    let src = "function f() {\n    let x=1;\n    return x;\n}";
+    let pw = parse_doc_with_recovery(src, LanguageOptions::v4_experimental_all()).unwrap();
+    let doc = LeekDoc::from_parsed(&pw.doc);
+    let i = src.find("let x=1").expect("let") as u32;
+    let j = i + u32::try_from("let x=1;".len()).unwrap();
+    let parts = format_leek_doc_range(&doc, Span::new(i, j), &FormatOptions::default()).unwrap();
+    let (span, out) = parts.into_iter().next().unwrap();
+    assert_eq!(
+        std::str::from_utf8(span.as_slice(doc.source())).unwrap(),
+        "\n    let x=1;"
+    );
+    assert!(
+        out.contains("let x = 1;"),
+        "expected formatted assignment, got {out:?}"
+    );
+    assert!(!out.contains("return"));
+}
+
+#[test]
+fn format_range_empty_selection_returns_none() {
+    let src = "let a = 1;";
+    let pw = parse_doc_with_recovery(src, LanguageOptions::v4_experimental_all()).unwrap();
+    let doc = LeekDoc::from_parsed(&pw.doc);
+    assert!(format_leek_doc_range(&doc, Span::new(5, 5), &FormatOptions::default()).is_none());
 }
