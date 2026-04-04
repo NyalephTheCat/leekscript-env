@@ -1,0 +1,486 @@
+//! Stack interpreter and **256-entry opcode dispatch table** (`DISPATCH`).
+//!
+//! Each entry is a function pointer; unassigned slots point at [`op_illegal`]. This is the
+//! execution model the Java reference pipeline does not expose: it emits source/Java and relies on
+//! the JVM instead of a single explicit opcode → handler table.
+
+use std::vec::Vec;
+
+use super::bytecode::Bytecode;
+use super::error::VmError;
+use super::opcode::Opcode;
+use super::value::Value;
+
+/// Default operation budget (matches Java `AI.MAX_OPERATIONS`).
+pub const DEFAULT_MAX_OPERATIONS: u64 = 20_000_000;
+/// Default RAM budget in **quads** (matches Java `AI.MAX_RAM`; multiply by 8 for bytes like `System.getUsedRAM`).
+pub const DEFAULT_MAX_RAM_QUADS: u64 = 12_500_000;
+
+/// Host-provided native (`System.debug`, fight APIs, …). Receives arguments in call order (first
+/// parameter is `args[0]`).
+pub type NativeFn = fn(&[Value]) -> Result<Value, VmError>;
+
+/// One handler per possible `u8` opcode; index `0` is [`Opcode::Illegal`](Opcode::Illegal).
+pub type OpHandler = fn(&mut Vm) -> Result<(), VmError>;
+
+/// Opcode → handler. Every index is populated; unknown opcodes at runtime still hit [`op_illegal`].
+pub static DISPATCH: [OpHandler; 256] = {
+    let mut table: [OpHandler; 256] = [op_illegal; 256];
+    table[Opcode::Nop as usize] = op_nop;
+    table[Opcode::PushConst as usize] = op_push_const;
+    table[Opcode::PushNull as usize] = op_push_null;
+    table[Opcode::Pop as usize] = op_pop;
+    table[Opcode::Dup as usize] = op_dup;
+    table[Opcode::Add as usize] = op_add;
+    table[Opcode::Sub as usize] = op_sub;
+    table[Opcode::Mul as usize] = op_mul;
+    table[Opcode::Div as usize] = op_div;
+    table[Opcode::Mod as usize] = op_mod;
+    table[Opcode::Neg as usize] = op_neg;
+    table[Opcode::Return as usize] = op_return;
+    table[Opcode::GetLocal as usize] = op_get_local;
+    table[Opcode::SetLocal as usize] = op_set_local;
+    table[Opcode::Jump as usize] = op_jump;
+    table[Opcode::JumpIfFalse as usize] = op_jump_if_false;
+    table[Opcode::CallNative as usize] = op_call_native;
+    table[Opcode::EqEquals as usize] = op_eq_equals;
+    table[Opcode::NeEquals as usize] = op_ne_equals;
+    table[Opcode::Lt as usize] = op_lt;
+    table[Opcode::Lte as usize] = op_lte;
+    table[Opcode::Gt as usize] = op_gt;
+    table[Opcode::Gte as usize] = op_gte;
+    table[Opcode::Not as usize] = op_not;
+    table[Opcode::ArrayBuild as usize] = op_array_build;
+    table
+};
+
+/// LeekScript bytecode interpreter (stack machine).
+pub struct Vm {
+    code: Vec<u8>,
+    constants: Vec<Value>,
+    pc: usize,
+    stack: Vec<Value>,
+    locals: Vec<Value>,
+    natives: Vec<NativeFn>,
+    /// Last opcode byte dispatched (for [`VmError::IllegalOpcode`]).
+    pub current_opcode: u8,
+    /// Instructions executed (one increment per opcode dispatch after the handler succeeds).
+    pub operations: u64,
+    /// `None` = no limit.
+    pub max_operations: Option<u64>,
+    /// Live RAM estimate for values on stack + locals (quads; see [`Value::ram_quads`](Value::ram_quads)).
+    pub ram_quads: u64,
+    /// `None` = no limit.
+    pub max_ram_quads: Option<u64>,
+}
+
+impl Vm {
+    /// New VM with empty native table; register callables before `run` if you emit [`Opcode::CallNative`](Opcode::CallNative).
+    ///
+    /// Initializes [`Self::max_operations`] and [`Self::max_ram_quads`] to the same defaults as Java `AI`.
+    #[must_use]
+    pub fn new(bytecode: Bytecode) -> Self {
+        Self {
+            code: bytecode.code,
+            constants: bytecode.constants,
+            pc: 0,
+            stack: Vec::new(),
+            locals: Vec::new(),
+            natives: Vec::new(),
+            current_opcode: 0,
+            operations: 0,
+            max_operations: Some(DEFAULT_MAX_OPERATIONS),
+            ram_quads: 0,
+            max_ram_quads: Some(DEFAULT_MAX_RAM_QUADS),
+        }
+    }
+
+    /// Replace the native function table (index = id used in [`Opcode::CallNative`](Opcode::CallNative)).
+    pub fn set_natives(&mut self, natives: Vec<NativeFn>) {
+        self.natives = natives;
+    }
+
+    /// Grow or shrink locals. New slots are [`Value::Null`](Value::Null). Charges/releases RAM per slot.
+    pub fn set_local_count(&mut self, n: usize) -> Result<(), VmError> {
+        while self.locals.len() < n {
+            self.charge_ram(Value::Null.ram_quads())?;
+            self.locals.push(Value::Null);
+        }
+        while self.locals.len() > n {
+            let v = self.locals.pop().expect("len > n implies non-empty");
+            self.release_ram(v.ram_quads());
+        }
+        Ok(())
+    }
+
+    pub fn stack(&self) -> &[Value] {
+        &self.stack
+    }
+
+    /// Run until [`Opcode::Return`](Opcode::Return) or code end. The returned value is the top of
+    /// the stack when `Return` executes (or [`Value::Null`](Value::Null) if the stack was empty).
+    pub fn run(&mut self) -> Result<Value, VmError> {
+        loop {
+            if self.pc >= self.code.len() {
+                return Err(VmError::UnexpectedEof);
+            }
+            let op = self.read_u8()?;
+            self.current_opcode = op;
+            DISPATCH[op as usize](self)?;
+            self.charge_ops(1)?;
+            if op == Opcode::Return as u8 {
+                return Ok(self.take_return_value());
+            }
+        }
+    }
+
+    /// [`Self::ram_quads`] × 8 (same scaling as Java `System.getUsedRAM`).
+    #[must_use]
+    pub fn ram_bytes(&self) -> u64 {
+        self.ram_quads.saturating_mul(8)
+    }
+
+    /// Reset instruction counter only (does not rewind PC or clear stack).
+    pub fn reset_operations_counter(&mut self) {
+        self.operations = 0;
+    }
+
+    fn take_return_value(&mut self) -> Value {
+        match self.stack.pop() {
+            Some(v) => {
+                self.release_ram(v.ram_quads());
+                v
+            }
+            None => Value::Null,
+        }
+    }
+
+    fn charge_ops(&mut self, n: u64) -> Result<(), VmError> {
+        let next = self.operations.saturating_add(n);
+        if let Some(limit) = self.max_operations {
+            if next > limit {
+                return Err(VmError::TooManyOperations {
+                    limit,
+                    attempted_total: next,
+                });
+            }
+        }
+        self.operations = next;
+        Ok(())
+    }
+
+    fn charge_ram(&mut self, quads: u64) -> Result<(), VmError> {
+        let next = self.ram_quads.saturating_add(quads);
+        if let Some(limit) = self.max_ram_quads {
+            if next > limit {
+                return Err(VmError::OutOfMemory {
+                    limit,
+                    attempted_total: next,
+                });
+            }
+        }
+        self.ram_quads = next;
+        Ok(())
+    }
+
+    fn release_ram(&mut self, quads: u64) {
+        self.ram_quads = self.ram_quads.saturating_sub(quads);
+    }
+
+    fn push_stack(&mut self, v: Value) -> Result<(), VmError> {
+        self.charge_ram(v.ram_quads())?;
+        self.stack.push(v);
+        Ok(())
+    }
+
+    fn pop_stack(&mut self) -> Result<Value, VmError> {
+        let v = self.stack.pop().ok_or(VmError::StackUnderflow)?;
+        self.release_ram(v.ram_quads());
+        Ok(v)
+    }
+
+    fn read_u8(&mut self) -> Result<u8, VmError> {
+        let b = *self.code.get(self.pc).ok_or(VmError::UnexpectedEof)?;
+        self.pc += 1;
+        Ok(b)
+    }
+
+    fn read_u16(&mut self) -> Result<u16, VmError> {
+        if self.pc + 2 > self.code.len() {
+            return Err(VmError::UnexpectedEof);
+        }
+        let v = u16::from_le_bytes([self.code[self.pc], self.code[self.pc + 1]]);
+        self.pc += 2;
+        Ok(v)
+    }
+
+    fn read_u32(&mut self) -> Result<u32, VmError> {
+        if self.pc + 4 > self.code.len() {
+            return Err(VmError::UnexpectedEof);
+        }
+        let v = u32::from_le_bytes([
+            self.code[self.pc],
+            self.code[self.pc + 1],
+            self.code[self.pc + 2],
+            self.code[self.pc + 3],
+        ]);
+        self.pc += 4;
+        Ok(v)
+    }
+
+    fn read_i32(&mut self) -> Result<i32, VmError> {
+        Ok(self.read_u32()? as i32)
+    }
+
+}
+
+/// Handler installed for every unused opcode slot and for truly unknown bytes at runtime.
+pub fn op_illegal(vm: &mut Vm) -> Result<(), VmError> {
+    Err(VmError::IllegalOpcode(vm.current_opcode))
+}
+
+fn op_nop(_vm: &mut Vm) -> Result<(), VmError> {
+    Ok(())
+}
+
+fn op_push_const(vm: &mut Vm) -> Result<(), VmError> {
+    let idx = vm.read_u32()? as usize;
+    let v = vm
+        .constants
+        .get(idx)
+        .cloned()
+        .ok_or(VmError::BadConstantIndex(idx as u32))?;
+    vm.push_stack(v)?;
+    Ok(())
+}
+
+fn op_push_null(vm: &mut Vm) -> Result<(), VmError> {
+    vm.push_stack(Value::Null)?;
+    Ok(())
+}
+
+fn op_pop(vm: &mut Vm) -> Result<(), VmError> {
+    vm.pop_stack()?;
+    Ok(())
+}
+
+fn op_dup(vm: &mut Vm) -> Result<(), VmError> {
+    let v = vm.pop_stack()?;
+    vm.push_stack(v.clone())?;
+    vm.push_stack(v)?;
+    Ok(())
+}
+
+fn op_add(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    let out = match (&a, &b) {
+        (Value::String(_), _) | (_, Value::String(_)) => {
+            let sa = a.to_leek_coerce_string();
+            let sb = b.to_leek_coerce_string();
+            Value::String(format!("{sa}{sb}"))
+        }
+        (Value::Array(ax), Value::Array(bx)) => {
+            let mut v = ax.clone();
+            v.extend(bx.iter().cloned());
+            Value::Array(v)
+        }
+        (Value::Array(ax), _) => {
+            let mut v = ax.clone();
+            v.push(b);
+            Value::Array(v)
+        }
+        (_, Value::Array(bx)) => {
+            let mut v = Vec::with_capacity(1 + bx.len());
+            v.push(a);
+            v.extend(bx.iter().cloned());
+            Value::Array(v)
+        }
+        _ => Value::Number(a.to_real_for_compare() + b.to_real_for_compare()),
+    };
+    vm.push_stack(out)?;
+    Ok(())
+}
+
+fn op_sub(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::Number(a - b))?;
+    Ok(())
+}
+
+fn op_mul(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::Number(a * b))?;
+    Ok(())
+}
+
+fn op_div(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    if b == 0.0 {
+        return Err(VmError::DivByZero);
+    }
+    vm.push_stack(Value::Number(a / b))?;
+    Ok(())
+}
+
+fn op_mod(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    if b == 0.0 {
+        return Err(VmError::DivByZero);
+    }
+    vm.push_stack(Value::Number(a % b))?;
+    Ok(())
+}
+
+fn op_neg(vm: &mut Vm) -> Result<(), VmError> {
+    let x = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::Number(-x))?;
+    Ok(())
+}
+
+fn op_return(vm: &mut Vm) -> Result<(), VmError> {
+    vm.pc = vm.code.len();
+    Ok(())
+}
+
+fn op_get_local(vm: &mut Vm) -> Result<(), VmError> {
+    let i = vm.read_u16()?;
+    let v = vm
+        .locals
+        .get(usize::from(i))
+        .cloned()
+        .ok_or(VmError::BadLocal(i))?;
+    vm.push_stack(v)?;
+    Ok(())
+}
+
+fn op_set_local(vm: &mut Vm) -> Result<(), VmError> {
+    let i = vm.read_u16()?;
+    let v = vm.pop_stack()?;
+    let (old_q, new_q) = {
+        let slot = vm
+            .locals
+            .get_mut(usize::from(i))
+            .ok_or(VmError::BadLocal(i))?;
+        let old = core::mem::replace(slot, v);
+        (old.ram_quads(), slot.ram_quads())
+    };
+    vm.release_ram(old_q);
+    vm.charge_ram(new_q)?;
+    Ok(())
+}
+
+fn apply_pc_delta(vm: &mut Vm, delta: i32) -> Result<(), VmError> {
+    let base = i64::try_from(vm.pc).map_err(|_| VmError::UnexpectedEof)?;
+    let new_pc = base
+        .checked_add(i64::from(delta))
+        .ok_or(VmError::UnexpectedEof)?;
+    let len = i64::try_from(vm.code.len()).map_err(|_| VmError::UnexpectedEof)?;
+    if new_pc < 0 || new_pc > len {
+        return Err(VmError::UnexpectedEof);
+    }
+    vm.pc = usize::try_from(new_pc).map_err(|_| VmError::UnexpectedEof)?;
+    Ok(())
+}
+
+fn op_jump(vm: &mut Vm) -> Result<(), VmError> {
+    let delta = vm.read_i32()?;
+    apply_pc_delta(vm, delta)
+}
+
+fn op_jump_if_false(vm: &mut Vm) -> Result<(), VmError> {
+    let delta = vm.read_i32()?;
+    let cond = vm.pop_stack()?;
+    if cond.truthy() {
+        return Ok(());
+    }
+    apply_pc_delta(vm, delta)
+}
+
+fn op_call_native(vm: &mut Vm) -> Result<(), VmError> {
+    let id = vm.read_u16()? as usize;
+    let argc = vm.read_u8()? as usize;
+    let native = vm
+        .natives
+        .get(id)
+        .copied()
+        .ok_or(VmError::BadNativeIndex(id as u16))?;
+    let mut args = vec![Value::Null; argc];
+    for slot in (0..argc).rev() {
+        args[slot] = vm.pop_stack()?;
+    }
+    let out = native(&args)?;
+    vm.push_stack(out)?;
+    Ok(())
+}
+
+fn op_eq_equals(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    vm.push_stack(Value::Bool(a.equals_equals_v4(&b)))?;
+    Ok(())
+}
+
+fn op_ne_equals(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    vm.push_stack(Value::Bool(!a.equals_equals_v4(&b)))?;
+    Ok(())
+}
+
+fn op_lt(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    vm.push_stack(Value::Bool(
+        a.to_real_for_compare() < b.to_real_for_compare(),
+    ))?;
+    Ok(())
+}
+
+fn op_lte(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    vm.push_stack(Value::Bool(
+        a.to_real_for_compare() <= b.to_real_for_compare(),
+    ))?;
+    Ok(())
+}
+
+fn op_gt(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    vm.push_stack(Value::Bool(
+        a.to_real_for_compare() > b.to_real_for_compare(),
+    ))?;
+    Ok(())
+}
+
+fn op_gte(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    vm.push_stack(Value::Bool(
+        a.to_real_for_compare() >= b.to_real_for_compare(),
+    ))?;
+    Ok(())
+}
+
+fn op_not(vm: &mut Vm) -> Result<(), VmError> {
+    let v = vm.pop_stack()?;
+    vm.push_stack(Value::Bool(!v.truthy()))?;
+    Ok(())
+}
+
+fn op_array_build(vm: &mut Vm) -> Result<(), VmError> {
+    let n = vm.read_u8()? as usize;
+    let mut elems = Vec::with_capacity(n);
+    for _ in 0..n {
+        elems.push(vm.pop_stack()?);
+    }
+    elems.reverse();
+    vm.push_stack(Value::Array(elems))?;
+    Ok(())
+}

@@ -31,6 +31,11 @@
 //! See [`parse::language_options_with_source_directives`]. Merged buffers only honor directives at
 //! the very start of the combined source.
 //!
+//! ## Bytecode VM (experimental)
+//!
+//! [`vm`] is a table-driven stack VM (`opcode → handler` via [`vm::DISPATCH`]) for running a small
+//! LeekScript subset; the Java reference compiler targets the JVM instead. See [`vm::compile_chunk_v4`].
+//!
 //! ## Cargo features
 //!
 //! - **`grammar-v4-only`**: Specializes lexer/parser bytecode for [`parse::Version::V4`] by
@@ -44,6 +49,7 @@ pub mod format;
 pub mod grammar;
 pub mod include;
 pub mod parse;
+pub mod vm;
 #[cfg(feature = "walk")]
 pub mod scope;
 pub mod syntax;
