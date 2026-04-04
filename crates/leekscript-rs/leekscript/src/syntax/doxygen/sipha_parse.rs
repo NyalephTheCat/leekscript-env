@@ -7,7 +7,6 @@ use std::sync::OnceLock;
 
 use sipha::SyntaxKinds;
 use sipha::diagnostics::parsed_doc::ParsedDoc;
-use sipha::parse::engine::Engine;
 use sipha::prelude::*;
 use sipha::tree::red::{SyntaxElement, SyntaxNode};
 
@@ -142,11 +141,12 @@ fn build_doxygen_graph() -> BuiltGraph {
 pub(crate) fn split_via_sipha(body: &str) -> Option<Vec<Segment>> {
     let built = doxygen_graph();
     let graph = built.as_graph();
-    let mut engine = Engine::new();
     let bytes = body.as_bytes();
-    let out = engine.parse_rule_named(&graph, bytes, "start").ok()?;
-    let doc = ParsedDoc::from_slice(bytes, &out)?;
-    tree_root_to_segments(doc.root())
+    crate::parse::with_reusable_engine(|engine| {
+        let out = engine.parse_rule_named(&graph, bytes, "start").ok()?;
+        let doc = ParsedDoc::from_slice(bytes, &out)?;
+        tree_root_to_segments(doc.root())
+    })
 }
 
 fn tree_root_to_segments(root: &SyntaxNode) -> Option<Vec<Segment>> {

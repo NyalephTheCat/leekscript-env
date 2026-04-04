@@ -16,8 +16,28 @@ pub use version::{
     ExperimentalFeatures, LanguageOptions, Version, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE,
 };
 
+use std::cell::RefCell;
+
 use crate::grammar;
 use sipha::prelude::*;
+
+thread_local! {
+    /// Reuse allocation-heavy parse buffers between calls on the same thread (Criterion, LSP, CLI).
+    /// [`RefCell::try_borrow_mut`] avoids panics if parsing is re-entered on the same thread.
+    /// Larger initial capacities than [`Engine::new`] reduce reallocations on big inputs (e.g. std stubs).
+    static REUSABLE_PARSE_ENGINE: RefCell<Engine> = RefCell::new(Engine::with_capacity(8192, 8192));
+}
+
+/// Run `f` with a thread-local [`Engine`] when possible (see [`REUSABLE_PARSE_ENGINE`]).
+pub(crate) fn with_reusable_engine<R>(f: impl FnOnce(&mut Engine) -> R) -> R {
+    REUSABLE_PARSE_ENGINE.with(|cell| {
+        if let Ok(mut engine) = cell.try_borrow_mut() {
+            f(&mut *engine)
+        } else {
+            f(&mut Engine::with_capacity(8192, 8192))
+        }
+    })
+}
 
 /// `true` when `path` looks like a generated API / stdlib stub (e.g. `std.sig.leek`, `std.sig.en.leek`).
 #[must_use]
@@ -34,13 +54,56 @@ pub fn is_signature_stub_path(path: &std::path::Path) -> bool {
 fn parse_doc_with_context(src: &str, ctx: ParseContext) -> Result<ParsedDoc, ParseError> {
     let built = grammar::built_graph();
     let graph = built.as_graph();
+    let bytes = src.as_bytes();
 
-    let mut engine = Engine::new();
-    let out = engine
-        .parse_with_context(&graph, src.as_bytes(), &ctx)
-        .map_err(ParseError::from)?;
+    let out = with_reusable_engine(|engine| {
+        engine
+            .parse_with_context(&graph, bytes, &ctx)
+            .map_err(ParseError::from)
+    })?;
 
-    ParsedDoc::from_slice(src.as_bytes(), &out).ok_or(ParseError::NoSyntaxRoot)
+    ParsedDoc::from_slice(bytes, &out).ok_or(ParseError::NoSyntaxRoot)
+}
+
+/// Parse with `buf` as the working copy of the source: on success the bytes are moved into
+/// [`ParsedDoc`] and `buf` is left empty (default-constructed). Return the buffer with
+/// [`ParsedDoc::into_bytes`](sipha::diagnostics::parsed_doc::ParsedDoc::into_bytes) after use so
+/// `buf` keeps its capacity for the next call (see crate benchmarks).
+#[must_use]
+pub fn parse_doc_reusing_vec(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    buf: &mut Vec<u8>,
+) -> Result<ParsedDoc, ParseError> {
+    let opts = language_options_with_source_directives(src, lang);
+    buf.clear();
+    buf.extend_from_slice(src.as_bytes());
+    parse_doc_buffer_with_context(buf, opts.parse_context())
+}
+
+/// Like [`parse_signature_doc`], but uses the same buffer reuse contract as [`parse_doc_reusing_vec`].
+#[must_use]
+pub fn parse_signature_doc_reusing_vec(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    buf: &mut Vec<u8>,
+) -> Result<ParsedDoc, ParseError> {
+    let opts = language_options_with_source_directives(src, lang);
+    buf.clear();
+    buf.extend_from_slice(src.as_bytes());
+    parse_doc_buffer_with_context(buf, opts.signature_parse_context())
+}
+
+fn parse_doc_buffer_with_context(buf: &mut Vec<u8>, ctx: ParseContext) -> Result<ParsedDoc, ParseError> {
+    let built = grammar::built_graph();
+    let graph = built.as_graph();
+    let out = with_reusable_engine(|engine| {
+        engine
+            .parse_with_context(&graph, buf, &ctx)
+            .map_err(ParseError::from)
+    })?;
+    let source = std::mem::replace(buf, Vec::new());
+    ParsedDoc::new(source, &out).ok_or(ParseError::NoSyntaxRoot)
 }
 
 /// Parse a full document.

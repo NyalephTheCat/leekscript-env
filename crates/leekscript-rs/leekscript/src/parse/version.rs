@@ -75,34 +75,39 @@ impl ExperimentalFeatures {
 
     #[must_use]
     pub fn merge_into_parse_context(self, mut ctx: ParseContext) -> ParseContext {
+        self.apply_to_parse_context(&mut ctx);
+        ctx
+    }
+
+    /// Layer experimental flags onto `ctx` (in-place; avoids repeated [`ParseContext::with_set`] moves).
+    fn apply_to_parse_context(self, ctx: &mut ParseContext) {
         if self.let_bindings {
-            ctx = ctx.with_set(FLAG_EXP_LET);
+            ctx.set(FLAG_EXP_LET);
         }
         if self.lexical_const {
-            ctx = ctx.with_set(FLAG_EXP_LEXICAL_CONST);
+            ctx.set(FLAG_EXP_LEXICAL_CONST);
         }
         if self.match_stmt {
-            ctx = ctx.with_set(FLAG_EXP_MATCH);
+            ctx.set(FLAG_EXP_MATCH);
         }
         if self.modules {
-            ctx = ctx.with_set(FLAG_EXP_MODULES);
+            ctx.set(FLAG_EXP_MODULES);
         }
         if self.exceptions {
-            ctx = ctx.with_set(FLAG_EXP_EXCEPTIONS);
+            ctx.set(FLAG_EXP_EXCEPTIONS);
         }
         if self.goto {
-            ctx = ctx.with_set(FLAG_EXP_GOTO);
+            ctx.set(FLAG_EXP_GOTO);
         }
         if self.loop_levels {
-            ctx = ctx.with_set(FLAG_EXP_LOOP_LEVELS);
+            ctx.set(FLAG_EXP_LOOP_LEVELS);
         }
         if self.fn_optional_params {
-            ctx = ctx.with_set(FLAG_EXP_FN_OPTIONAL_PARAMS);
+            ctx.set(FLAG_EXP_FN_OPTIONAL_PARAMS);
         }
         if self.templates {
-            ctx = ctx.with_set(FLAG_EXP_TEMPLATES);
+            ctx.set(FLAG_EXP_TEMPLATES);
         }
-        ctx
     }
 }
 
@@ -139,8 +144,9 @@ impl LanguageOptions {
 
     #[must_use]
     pub fn parse_context(self) -> ParseContext {
-        self.experimental
-            .merge_into_parse_context(self.version.to_parse_context())
+        let mut ctx = self.version.to_parse_context();
+        self.experimental.apply_to_parse_context(&mut ctx);
+        ctx
     }
 
     /// Parse context for signature / stub units (`function … => T;`) and merged `--signatures` checks.
@@ -152,10 +158,11 @@ impl LanguageOptions {
     /// (`function mapValues<T, U>(…)`) and must parse as real top-level function declarations for scope analysis.
     #[must_use]
     pub fn signature_parse_context(self) -> ParseContext {
-        self.parse_context()
-            .with_set(FLAG_SIGNATURE_MODE)
-            .with_set(FLAG_EXP_FN_OPTIONAL_PARAMS)
-            .with_set(FLAG_EXP_TEMPLATES)
+        let mut ctx = self.parse_context();
+        ctx.set(FLAG_SIGNATURE_MODE);
+        ctx.set(FLAG_EXP_FN_OPTIONAL_PARAMS);
+        ctx.set(FLAG_EXP_TEMPLATES);
+        ctx
     }
 }
 
@@ -186,12 +193,17 @@ impl Version {
     /// Parse a dialect label from `//! leeklang: version=…` / `dialect=…` directives (`v1`–`v4`, `1`–`4`, `ls1`–`ls4`).
     #[must_use]
     pub fn parse_dialect_label(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "v1" | "1" | "ls1" => Some(Self::V1),
-            "v2" | "2" | "ls2" => Some(Self::V2),
-            "v3" | "3" | "ls3" => Some(Self::V3),
-            "v4" | "4" | "ls4" => Some(Self::V4),
-            _ => None,
+        let t = s.trim();
+        if t.eq_ignore_ascii_case("v1") || t == "1" || t.eq_ignore_ascii_case("ls1") {
+            Some(Self::V1)
+        } else if t.eq_ignore_ascii_case("v2") || t == "2" || t.eq_ignore_ascii_case("ls2") {
+            Some(Self::V2)
+        } else if t.eq_ignore_ascii_case("v3") || t == "3" || t.eq_ignore_ascii_case("ls3") {
+            Some(Self::V3)
+        } else if t.eq_ignore_ascii_case("v4") || t == "4" || t.eq_ignore_ascii_case("ls4") {
+            Some(Self::V4)
+        } else {
+            None
         }
     }
 
@@ -199,24 +211,31 @@ impl Version {
     /// lexer/parser behavior which remains gated on `FLAG_V1` alone.
     #[must_use]
     pub fn to_parse_context(self) -> ParseContext {
+        let mut ctx = ParseContext::with_capacity_for(FLAG_EXP_TEMPLATES);
         match self {
-            Version::V1 => ParseContext::new().with_set(FLAG_V1),
-            Version::V2 => ParseContext::new().with_set(FLAG_V2),
-            Version::V3 => ParseContext::new().with_set(FLAG_V2).with_set(FLAG_V3),
-            Version::V4 => ParseContext::new()
-                .with_set(FLAG_V2)
-                .with_set(FLAG_V3)
-                .with_set(FLAG_V4),
+            Version::V1 => ctx.set(FLAG_V1),
+            Version::V2 => ctx.set(FLAG_V2),
+            Version::V3 => {
+                ctx.set(FLAG_V2);
+                ctx.set(FLAG_V3);
+            }
+            Version::V4 => {
+                ctx.set(FLAG_V2);
+                ctx.set(FLAG_V3);
+                ctx.set(FLAG_V4);
+            }
         }
+        ctx
     }
 
     /// Same dialect as [`to_parse_context`](Self::to_parse_context), plus stub-style `function … => T;`
     /// declarations and default values on top-level function parameters (see [`LanguageOptions::signature_parse_context`]).
     #[must_use]
     pub fn to_signature_parse_context(self) -> ParseContext {
-        self.to_parse_context()
-            .with_set(FLAG_SIGNATURE_MODE)
-            .with_set(FLAG_EXP_FN_OPTIONAL_PARAMS)
-            .with_set(FLAG_EXP_TEMPLATES)
+        let mut ctx = self.to_parse_context();
+        ctx.set(FLAG_SIGNATURE_MODE);
+        ctx.set(FLAG_EXP_FN_OPTIONAL_PARAMS);
+        ctx.set(FLAG_EXP_TEMPLATES);
+        ctx
     }
 }

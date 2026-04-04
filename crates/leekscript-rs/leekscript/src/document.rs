@@ -24,8 +24,6 @@ use sipha::tree::walk::{Visitor, WalkOptions, WalkResult};
 #[cfg(feature = "partial-reparse")]
 use crate::syntax::kinds::K;
 #[cfg(feature = "partial-reparse")]
-use sipha::parse::engine::Engine;
-#[cfg(feature = "partial-reparse")]
 use sipha::parse::incremental::TextEdit;
 #[cfg(feature = "partial-reparse")]
 use sipha::parse::partial_reparse::{PartialReparseConfig, reparse_partial_or_fallback};
@@ -225,15 +223,17 @@ impl LeekDoc {
                     boundary_rule: stmt_rule,
                     context: opts.parse_context(),
                 };
-                let mut engine = Engine::new();
-                if let Ok(outcome) = reparse_partial_or_fallback(
-                    &mut engine,
-                    &graph,
-                    &self.source,
-                    &self.root,
-                    &edits,
-                    &config,
-                ) {
+                let outcome = crate::parse::with_reusable_engine(|engine| {
+                    reparse_partial_or_fallback(
+                        engine,
+                        &graph,
+                        &self.source,
+                        &self.root,
+                        &edits,
+                        &config,
+                    )
+                });
+                if let Ok(outcome) = outcome {
                     if outcome.used_partial {
                         if let Some(root) = outcome.root {
                             self.source = TextEdit::apply_edits(&self.source, &edits);

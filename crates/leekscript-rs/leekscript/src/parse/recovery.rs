@@ -2,7 +2,6 @@
 
 use crate::grammar;
 use crate::syntax::kinds::K;
-use sipha::prelude::ParsedDoc;
 use sipha::prelude::*;
 
 use super::{LanguageOptions, ParseError, language_options_with_source_directives};
@@ -44,7 +43,6 @@ pub fn parse_doc_with_recovery_limited(
 ) -> Result<ParsedWithRecovery, ParseError> {
     let built = grammar::built_graph();
     let graph = built.as_graph();
-    let mut engine = Engine::new();
     let opts = language_options_with_source_directives(src, lang);
     let ctx = opts
         .parse_context()
@@ -52,7 +50,9 @@ pub fn parse_doc_with_recovery_limited(
         .with_error_node_kind(K::ErrorStmt as sipha::types::SyntaxKind);
 
     let bytes = src.as_bytes();
-    match engine.parse_recovering_multi_with_context(&graph, bytes, &ctx, max_errors.max(1)) {
+    match super::with_reusable_engine(|engine| {
+        engine.parse_recovering_multi_with_context(&graph, bytes, &ctx, max_errors.max(1))
+    }) {
         Ok(out) => {
             let doc = ParsedDoc::from_slice(bytes, &out).ok_or(ParseError::NoSyntaxRoot)?;
             Ok(ParsedWithRecovery {
@@ -89,7 +89,6 @@ pub fn parse_signature_doc_with_recovery_limited(
 ) -> Result<ParsedWithRecovery, ParseError> {
     let built = grammar::built_graph();
     let graph = built.as_graph();
-    let mut engine = Engine::new();
     let opts = language_options_with_source_directives(src, lang);
     let ctx = opts
         .signature_parse_context()
@@ -97,7 +96,9 @@ pub fn parse_signature_doc_with_recovery_limited(
         .with_error_node_kind(K::ErrorStmt as sipha::types::SyntaxKind);
 
     let bytes = src.as_bytes();
-    match engine.parse_recovering_multi_with_context(&graph, bytes, &ctx, max_errors.max(1)) {
+    match super::with_reusable_engine(|engine| {
+        engine.parse_recovering_multi_with_context(&graph, bytes, &ctx, max_errors.max(1))
+    }) {
         Ok(out) => {
             let doc = ParsedDoc::from_slice(bytes, &out).ok_or(ParseError::NoSyntaxRoot)?;
             Ok(ParsedWithRecovery {
@@ -137,13 +138,14 @@ pub fn parse_rule_at_offset(
         ))
     })?;
 
-    let mut engine = Engine::new();
     let ctx = lang.into().parse_context();
     let bytes = src.as_bytes();
     let start = byte_offset.min(bytes.len() as u32);
-    let out = engine
-        .parse_rule_at_with_context(&graph, bytes, rule, start, &ctx)
-        .map_err(ParseError::from)?;
+    let out = super::with_reusable_engine(|engine| {
+        engine
+            .parse_rule_at_with_context(&graph, bytes, rule, start, &ctx)
+            .map_err(ParseError::from)
+    })?;
     let doc = ParsedDoc::from_slice(bytes, &out).ok_or(ParseError::NoSyntaxRoot)?;
     Ok((doc, out.consumed))
 }

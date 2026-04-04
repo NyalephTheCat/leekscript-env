@@ -28,8 +28,267 @@ pub fn define(g: &mut GrammarBuilder) {
         g.accept();
     });
 
+    // `stmt` keyword ladder is large; expression statements almost never start with a letter
+    // (identifiers/calls) when we can prove the next byte is a non-keyword starter instead.
+    g.parser_rule("stmt_empty_statement", |g| {
+        g.node(K::EmptyStmt, |g| {
+            g.call("semi");
+        });
+    });
+
+    g.parser_rule("stmt_expr_statement", |g| {
+        g.node(K::Stmt, |g| {
+            g.call("expr");
+            g.optional(|g| {
+                g.call("semi");
+            });
+        });
+    });
+
+    // `var` / `let` / typed locals plus ident-led exprs (`foo()`), for leading bytes that are never
+    // the first letter of another top-level keyword (see `stmt_lc_*` for shared letters).
+    g.parser_rule("stmt_var_decl_or_expr", |g| {
+        g.choice(
+            |g| {
+                g.call("var_decl");
+            },
+            |g| {
+                g.call("stmt_expr_statement");
+            },
+        );
+    });
+
+    // Per-leading-letter subsets of the historical stmt ladder, preserving global alternative order
+    // (indices in the old flat `choices` list). `var_decl` is always kept where typed `ident` /
+    // `integer` / … can start with that byte.
+
+    g.parser_rule("stmt_lc_b", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("break_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_c", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("continue_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("class_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_lexical_const(g);
+                g.call("const_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_d", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("do_while_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_e", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("else_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_modules(g);
+                g.call("export_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_f", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("function_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("for_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_g", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("global_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_goto(g);
+                g.call("goto_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_i", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("include_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("if_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_modules(g);
+                g.call("import_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_m", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v4(g);
+                cfg_flags::exp_match(g);
+                g.call("match_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_p", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_modules(g);
+                g.call("package_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_r", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("return_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_s", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                g.call("switch_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_t", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_exceptions(g);
+                g.call("try_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_exceptions(g);
+                g.call("throw_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
+    g.parser_rule("stmt_lc_w", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("var_decl");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("while_stmt");
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ]);
+    });
+
     g.parser_rule("stmt", |g| {
-        let alts: Vec<GrammarChoiceFn> = vec![
+        // v2 keywords are ASCII case-insensitive (`VAR`, `ReTuRn`). Only bytes outside lowercase
+        // `a`–`z` use this full ladder; lowercase still uses per-letter fast paths above.
+        let keyword_stmt_fallback: Vec<GrammarChoiceFn> = vec![
             Box::new(|g: &mut GrammarBuilder| {
                 g.call("include_stmt");
             }),
@@ -70,9 +329,6 @@ pub fn define(g: &mut GrammarBuilder) {
             Box::new(|g: &mut GrammarBuilder| {
                 g.call("do_while_stmt");
             }),
-            // --- CST-only vs leekscript-java: the following statement shapes are NOT implemented
-            // in `WordCompiler` today. Java only recognizes these spellings in `LexicalParser` /
-            // `TokenType` (reserved words). We parse them here for token-stream / syntax-tree parity.
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
                 cfg_flags::exp_exceptions(g);
@@ -111,28 +367,250 @@ pub fn define(g: &mut GrammarBuilder) {
             Box::new(|g: &mut GrammarBuilder| {
                 g.call("while_stmt");
             }),
-            // `match` is not a Java lexer keyword; this is a leekscript-rs extension (v4+).
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v4(g);
                 cfg_flags::exp_match(g);
                 g.call("match_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
-                g.node(K::EmptyStmt, |g| {
-                    g.call("semi");
+                g.call("stmt_expr_statement");
+            }),
+        ];
+
+        // Lowercase letters that never start a second top-level keyword share one ladder.
+        let stmt_lc_simple = CharClass::from_bytes(b"ahjklnoquvxyz");
+
+        let fast_expr_starters = CharClass::EMPTY
+            .with_range(b'0', b'9')
+            .union(CharClass::from_bytes(b"(\"'[{<."))
+            .union(CharClass::from_bytes(b"!+-~"));
+
+        let mut letter_arms: Vec<(CharClass, GrammarChoiceFn)> = Vec::with_capacity(14);
+        letter_arms.push((
+            stmt_lc_simple,
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_var_decl_or_expr");
+            }),
+        ));
+        for (byte, rule) in [
+            (b'b', "stmt_lc_b"),
+            (b'c', "stmt_lc_c"),
+            (b'd', "stmt_lc_d"),
+            (b'e', "stmt_lc_e"),
+            (b'f', "stmt_lc_f"),
+            (b'g', "stmt_lc_g"),
+            (b'i', "stmt_lc_i"),
+            (b'm', "stmt_lc_m"),
+            (b'p', "stmt_lc_p"),
+            (b'r', "stmt_lc_r"),
+            (b's', "stmt_lc_s"),
+            (b't', "stmt_lc_t"),
+            (b'w', "stmt_lc_w"),
+        ] {
+            letter_arms.push((
+                CharClass::from_byte(byte),
+                Box::new(move |g: &mut GrammarBuilder| {
+                    g.call(rule);
+                }),
+            ));
+        }
+
+        let mut arms: Vec<(CharClass, GrammarChoiceFn)> = Vec::with_capacity(3 + letter_arms.len());
+        arms.push((
+            CharClass::from_byte(b';'),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_empty_statement");
+            }),
+        ));
+        arms.push((
+            fast_expr_starters,
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("stmt_expr_statement");
+            }),
+        ));
+        arms.extend(letter_arms);
+
+        g.byte_dispatch(
+            arms,
+            Some(Box::new(move |g: &mut GrammarBuilder| {
+                g.choices(keyword_stmt_fallback);
+            })),
+        );
+    });
+
+    // --- `top_level_sync` helpers: same lookahead order as the historical flat list, split by
+    // first byte so recovery skips the irrelevant keyword arms on ASCII letters.
+
+    g.parser_rule("top_sync_lc_b", |g| {
+        g.lookahead(|g| {
+            g.call("kw_break");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_c", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_class");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
-                // Expression statement fallback.
-                g.node(K::Stmt, |g| {
-                    g.call("expr");
-                    g.optional(|g| {
-                        g.call("semi");
-                    });
+                g.lookahead(|g| {
+                    g.call("kw_continue");
                 });
             }),
-        ];
-        g.choices(alts);
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::exp_lexical_const(g);
+                    g.call("kw_const");
+                });
+            }),
+        ]);
+    });
+
+    g.parser_rule("top_sync_lc_d", |g| {
+        g.lookahead(|g| {
+            g.call("kw_do");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_e", |g| {
+        g.choice(
+            |g| {
+                g.lookahead(|g| {
+                    g.call("kw_else");
+                });
+            },
+            |g| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::exp_modules(g);
+                    g.call("kw_export");
+                });
+            },
+        );
+    });
+
+    g.parser_rule("top_sync_lc_f", |g| {
+        g.choice(
+            |g| {
+                g.lookahead(|g| {
+                    g.call("kw_function");
+                });
+            },
+            |g| {
+                g.lookahead(|g| {
+                    g.call("kw_for");
+                });
+            },
+        );
+    });
+
+    g.parser_rule("top_sync_lc_g", |g| {
+        g.choice(
+            |g| {
+                g.lookahead(|g| {
+                    g.call("kw_global");
+                });
+            },
+            |g| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::exp_goto(g);
+                    g.call("kw_goto");
+                });
+            },
+        );
+    });
+
+    g.parser_rule("top_sync_lc_i", |g| {
+        g.choices(vec![
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_if");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    g.call("kw_include");
+                });
+            }),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::exp_modules(g);
+                    g.call("kw_import");
+                });
+            }),
+        ]);
+    });
+
+    g.parser_rule("top_sync_lc_l", |g| {
+        g.lookahead(|g| {
+            cfg_flags::exp_let(g);
+            g.call("kw_let");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_m", |g| {
+        g.lookahead(|g| {
+            cfg_flags::v4(g);
+            cfg_flags::exp_match(g);
+            g.call("kw_match");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_p", |g| {
+        g.lookahead(|g| {
+            cfg_flags::v3(g);
+            cfg_flags::exp_modules(g);
+            g.call("kw_package");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_r", |g| {
+        g.lookahead(|g| {
+            g.call("kw_return");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_s", |g| {
+        g.lookahead(|g| {
+            cfg_flags::v3(g);
+            g.call("kw_switch");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_t", |g| {
+        g.choice(
+            |g| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::exp_exceptions(g);
+                    g.call("kw_try");
+                });
+            },
+            |g| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::exp_exceptions(g);
+                    g.call("kw_throw");
+                });
+            },
+        );
+    });
+
+    g.parser_rule("top_sync_lc_v", |g| {
+        g.lookahead(|g| {
+            g.call("kw_var");
+        });
+    });
+
+    g.parser_rule("top_sync_lc_w", |g| {
+        g.lookahead(|g| {
+            g.call("kw_while");
+        });
     });
 
     // Statement-boundary sync for `recover_until` at module scope: trivia, then `;` (consumed) or a
@@ -140,7 +618,7 @@ pub fn define(g: &mut GrammarBuilder) {
     // we do not eat the keyword — the following `stmt` parse must see it.
     g.parser_rule("top_level_sync", |g| {
         g.skip();
-        let alts: Vec<GrammarChoiceFn> = vec![
+        let full_alts: Vec<GrammarChoiceFn> = vec![
             Box::new(|g: &mut GrammarBuilder| {
                 g.call("semi");
             }),
@@ -278,7 +756,44 @@ pub fn define(g: &mut GrammarBuilder) {
                 });
             }),
         ];
-        g.choices(alts);
+
+        let mut arms: Vec<(CharClass, GrammarChoiceFn)> = vec![(
+            CharClass::from_byte(b';'),
+            Box::new(|g: &mut GrammarBuilder| {
+                g.call("semi");
+            }),
+        )];
+        for (byte, rule) in [
+            (b'b', "top_sync_lc_b"),
+            (b'c', "top_sync_lc_c"),
+            (b'd', "top_sync_lc_d"),
+            (b'e', "top_sync_lc_e"),
+            (b'f', "top_sync_lc_f"),
+            (b'g', "top_sync_lc_g"),
+            (b'i', "top_sync_lc_i"),
+            (b'l', "top_sync_lc_l"),
+            (b'm', "top_sync_lc_m"),
+            (b'p', "top_sync_lc_p"),
+            (b'r', "top_sync_lc_r"),
+            (b's', "top_sync_lc_s"),
+            (b't', "top_sync_lc_t"),
+            (b'v', "top_sync_lc_v"),
+            (b'w', "top_sync_lc_w"),
+        ] {
+            arms.push((
+                CharClass::from_byte(byte),
+                Box::new(move |g: &mut GrammarBuilder| {
+                    g.call(rule);
+                }),
+            ));
+        }
+
+        g.byte_dispatch(
+            arms,
+            Some(Box::new(move |g: &mut GrammarBuilder| {
+                g.choices(full_alts);
+            })),
+        );
     });
 
     g.parser_rule("class_decl", |g| {

@@ -35,14 +35,46 @@ pub fn language_options_with_source_directives(
     base: impl Into<LanguageOptions>,
 ) -> LanguageOptions {
     let mut opts = base.into();
-    for rest in scan_leading_leeklang_rests(src) {
-        apply_leeklang_rest(&mut opts, &rest);
-    }
+    scan_apply_leading_leeklang(src, &mut opts);
     opts
 }
 
-fn scan_leading_leeklang_rests(src: &str) -> Vec<String> {
-    let mut rests = Vec::new();
+fn trim_ascii_start(mut s: &[u8]) -> &[u8] {
+    while let Some((&b, rest)) = s.split_first() {
+        if matches!(b, b' ' | b'\t' | b'\r' | b'\n') {
+            s = rest;
+        } else {
+            break;
+        }
+    }
+    s
+}
+
+/// True if `body` (bytes after `//`) might start a `leeklang:` directive after ASCII trim (matches
+/// the common case; non-ASCII whitespace before the marker still falls through when we re-check
+/// with full `str::trim`).
+fn line_body_might_be_leeklang(body: &[u8]) -> bool {
+    let b = trim_ascii_start(body);
+    if b.is_empty() {
+        return false;
+    }
+    if b[0] == b'!' {
+        let b = trim_ascii_start(&b[1..]);
+        return starts_with_leeklang_marker(b);
+    }
+    starts_with_leeklang_marker(b)
+}
+
+fn starts_with_leeklang_marker(b: &[u8]) -> bool {
+    b.len() >= 9 && b[..9].eq_ignore_ascii_case(b"leeklang:")
+}
+
+/// True if `prefix` of `s` may contain UTF-8 that affects trimming (e.g. Unicode space before `leeklang:`).
+fn prefix_might_contain_non_ascii(s: &[u8], prefix: usize) -> bool {
+    s.iter().take(prefix.min(s.len())).copied().any(|b| b > 127)
+}
+
+fn scan_apply_leading_leeklang(src: &str, opts: &mut LanguageOptions) {
     let bytes = src.as_bytes();
     let mut i = 0usize;
     if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
@@ -61,11 +93,14 @@ fn scan_leading_leeklang_rests(src: &str) -> Vec<String> {
             while end < bytes.len() && bytes[end] != b'\n' {
                 end += 1;
             }
-            if let Some(line) = src.get(start..end) {
-                if let Some(body) = line.strip_prefix("//") {
-                    let trimmed = body.trim();
+            let body = &bytes[i + 2..end];
+            if line_body_might_be_leeklang(body) || prefix_might_contain_non_ascii(body, body.len()) {
+                if let Some(line) = src.get(start..end)
+                    && let Some(body_str) = line.strip_prefix("//")
+                {
+                    let trimmed = body_str.trim();
                     if let Some((rest, _file_wide)) = leeklang_directive_rest(trimmed) {
-                        rests.push(rest.to_string());
+                        apply_leeklang_rest(opts, rest);
                     }
                 }
             }
@@ -82,14 +117,16 @@ fn scan_leading_leeklang_rests(src: &str) -> Vec<String> {
                 break;
             }
             let block_end = end + 2;
-            if let Some(block) = src.get(start..block_end) {
-                if let Some(inner) = block
-                    .strip_prefix("/*")
-                    .and_then(|s| s.strip_suffix("*/"))
+            let inner = &bytes[start + 2..end];
+            if line_body_might_be_leeklang(inner) || prefix_might_contain_non_ascii(inner, 256) {
+                if let Some(block) = src.get(start..block_end)
+                    && let Some(inner_str) = block
+                        .strip_prefix("/*")
+                        .and_then(|s| s.strip_suffix("*/"))
                 {
-                    let trimmed = inner.trim();
+                    let trimmed = inner_str.trim();
                     if let Some((rest, _file_wide)) = leeklang_directive_rest(trimmed) {
-                        rests.push(rest.to_string());
+                        apply_leeklang_rest(opts, rest);
                     }
                 }
             }
@@ -98,7 +135,6 @@ fn scan_leading_leeklang_rests(src: &str) -> Vec<String> {
         }
         break;
     }
-    rests
 }
 
 /// `rest` is the payload after the `leeklang:` marker. The `bool` matches `leekfmt`’s file-wide `!`
@@ -117,7 +153,26 @@ fn leeklang_directive_rest(trimmed: &str) -> Option<(&str, bool)> {
     Some((rest.trim_start(), true))
 }
 
+fn write_normalized_leeklang_key(key: &str, out: &mut [u8; 96]) -> Option<usize> {
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    if key.len() > out.len() {
+        return None;
+    }
+    for (i, &b) in key.as_bytes().iter().enumerate() {
+        out[i] = match b {
+            b'A'..=b'Z' => b + 32,
+            b'-' => b'_',
+            _ => b,
+        };
+    }
+    Some(key.len())
+}
+
 fn apply_leeklang_rest(opts: &mut LanguageOptions, rest: &str) {
+    let mut key_buf = [0u8; 96];
     for part in rest.split([';', ',']) {
         let part = part.trim();
         if part.is_empty() {
@@ -132,9 +187,11 @@ fn apply_leeklang_rest(opts: &mut LanguageOptions, rest: &str) {
                 .split_once('=')
                 .or_else(|| segment.split_once(':'))
                 .unwrap_or((segment, ""));
-            let key = key.trim().to_ascii_lowercase().replace('-', "_");
-            let value = value.trim();
-            apply_kv(opts, &key, value);
+            let Some(n) = write_normalized_leeklang_key(key, &mut key_buf) else {
+                continue;
+            };
+            let key_norm = std::str::from_utf8(&key_buf[..n]).expect("leeklang keys are ASCII");
+            apply_kv(opts, key_norm, value.trim());
         }
     }
 }
@@ -147,15 +204,21 @@ fn apply_kv(opts: &mut LanguageOptions, key: &str, value: &str) {
             }
         }
         "experimental" => {
-            let v = value.to_ascii_lowercase();
-            match v.as_str() {
-                "all" | "true" | "yes" | "on" | "1" => {
-                    opts.experimental = ExperimentalFeatures::ALL;
-                }
-                "none" | "false" | "no" | "off" | "0" => {
-                    opts.experimental = ExperimentalFeatures::NONE;
-                }
-                _ => {}
+            let v = value.trim();
+            if v.eq_ignore_ascii_case("all")
+                || v.eq_ignore_ascii_case("true")
+                || v.eq_ignore_ascii_case("yes")
+                || v.eq_ignore_ascii_case("on")
+                || v == "1"
+            {
+                opts.experimental = ExperimentalFeatures::ALL;
+            } else if v.eq_ignore_ascii_case("none")
+                || v.eq_ignore_ascii_case("false")
+                || v.eq_ignore_ascii_case("no")
+                || v.eq_ignore_ascii_case("off")
+                || v == "0"
+            {
+                opts.experimental = ExperimentalFeatures::NONE;
             }
         }
         "experimental_let" => {
@@ -208,10 +271,21 @@ fn apply_kv(opts: &mut LanguageOptions, key: &str, value: &str) {
 }
 
 fn parse_bool_loose(s: &str) -> Option<bool> {
-    match s.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("1")
+        || s.eq_ignore_ascii_case("true")
+        || s.eq_ignore_ascii_case("yes")
+        || s.eq_ignore_ascii_case("on")
+    {
+        Some(true)
+    } else if s.eq_ignore_ascii_case("0")
+        || s.eq_ignore_ascii_case("false")
+        || s.eq_ignore_ascii_case("no")
+        || s.eq_ignore_ascii_case("off")
+    {
+        Some(false)
+    } else {
+        None
     }
 }
 
@@ -256,5 +330,15 @@ mod tests {
             LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE),
         );
         assert!(o.experimental.let_bindings, "{o:?}");
+    }
+
+    #[test]
+    fn unicode_space_before_leeklang_on_line_comment() {
+        let src = format!("//\u{00A0}leeklang: version=v2\nvar x = 1;\n");
+        let o = language_options_with_source_directives(
+            &src,
+            LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE),
+        );
+        assert_eq!(o.version, Version::V2);
     }
 }
