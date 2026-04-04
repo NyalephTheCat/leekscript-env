@@ -1,5 +1,7 @@
+use crate::ast::binding_name::function_decl_name_token;
 use super::Block;
 use super::params::{FnParam, fn_param_children};
+use super::TemplateParams;
 use crate::ast::expr::Expr;
 use crate::ast::types::TypeExpr;
 use crate::syntax::{ParsedDoxygen, attached_docstring, attached_parsed_doxygen, kinds::K};
@@ -50,12 +52,15 @@ impl FunctionDecl {
         attached_parsed_doxygen(self.syntax())
     }
 
-    /// Function name (first `ident` after `function`).
+    /// Function name (first binding token after `function`, including keywords allowed by `name`).
     pub fn name(&self) -> Option<String> {
-        self.syntax()
-            .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
-            .map(|t| t.text().to_string())
+        function_decl_name_token(self.syntax()).map(|t| t.text().to_string())
+    }
+
+    /// Template parameters `function name<T, U>(…)` when present (experimental).
+    #[must_use]
+    pub fn template_params(&self) -> Option<TemplateParams> {
+        self.syntax().child::<TemplateParams>()
     }
 
     /// Result type only when spelled with `->` / `=>` after `)` (not parameter types in `T name` form).

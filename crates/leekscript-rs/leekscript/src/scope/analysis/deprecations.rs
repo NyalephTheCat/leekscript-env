@@ -19,7 +19,7 @@ impl Analyzer {
     }
 
     fn ls4_or_later(&self) -> bool {
-        matches!(self.version, Version::V4 | Version::VNext)
+        matches!(self.version, Version::V4)
     }
 
     /// `===` / `!==` — deprecated for LS 4+ (`LeekExpression.java` in leekscript-java).

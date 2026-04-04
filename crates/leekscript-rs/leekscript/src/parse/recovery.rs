@@ -5,7 +5,7 @@ use crate::syntax::kinds::K;
 use sipha::prelude::ParsedDoc;
 use sipha::prelude::*;
 
-use super::{ParseError, Version};
+use super::{LanguageOptions, ParseError, language_options_with_source_directives};
 
 /// Successful parse with optional recovery diagnostics.
 ///
@@ -31,22 +31,23 @@ const DEFAULT_MAX_RECOVERY_ERRORS: usize = 64;
 #[must_use]
 pub fn parse_doc_with_recovery(
     src: &str,
-    version: Version,
+    lang: impl Into<LanguageOptions>,
 ) -> Result<ParsedWithRecovery, ParseError> {
-    parse_doc_with_recovery_limited(src, version, DEFAULT_MAX_RECOVERY_ERRORS)
+    parse_doc_with_recovery_limited(src, lang, DEFAULT_MAX_RECOVERY_ERRORS)
 }
 
 /// Like [`parse_doc_with_recovery`], with an explicit cap on collected parse errors.
 pub fn parse_doc_with_recovery_limited(
     src: &str,
-    version: Version,
+    lang: impl Into<LanguageOptions>,
     max_errors: usize,
 ) -> Result<ParsedWithRecovery, ParseError> {
     let built = grammar::built_graph();
     let graph = built.as_graph();
     let mut engine = Engine::new();
-    let ctx = version
-        .to_parse_context()
+    let opts = language_options_with_source_directives(src, lang);
+    let ctx = opts
+        .parse_context()
         .with_set(super::version::FLAG_PARSE_RECOVERY)
         .with_error_node_kind(K::ErrorStmt as sipha::types::SyntaxKind);
 
@@ -79,7 +80,7 @@ pub fn parse_doc_with_recovery_limited(
 #[cfg(feature = "partial-reparse")]
 pub fn parse_rule_at_offset(
     src: &str,
-    version: Version,
+    lang: impl Into<LanguageOptions>,
     rule_name: &str,
     byte_offset: u32,
 ) -> Result<(ParsedDoc, u32), ParseError> {
@@ -92,7 +93,7 @@ pub fn parse_rule_at_offset(
     })?;
 
     let mut engine = Engine::new();
-    let ctx = version.to_parse_context();
+    let ctx = lang.into().parse_context();
     let bytes = src.as_bytes();
     let start = byte_offset.min(bytes.len() as u32);
     let out = engine
@@ -104,12 +105,16 @@ pub fn parse_rule_at_offset(
 
 /// Best-effort parse: use recovery when the strict parse fails.
 #[must_use]
-pub fn parse_doc_or_recover(src: &str, version: Version) -> Result<ParsedWithRecovery, ParseError> {
-    match super::parse_doc(src, version) {
+pub fn parse_doc_or_recover(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+) -> Result<ParsedWithRecovery, ParseError> {
+    let opts = lang.into();
+    match super::parse_doc(src, opts) {
         Ok(doc) => Ok(ParsedWithRecovery {
             doc,
             errors: vec![],
         }),
-        Err(_) => parse_doc_with_recovery(src, version),
+        Err(_) => parse_doc_with_recovery(src, opts),
     }
 }

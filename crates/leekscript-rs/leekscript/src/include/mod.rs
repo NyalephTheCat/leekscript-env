@@ -25,7 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Root, Stmt};
-use crate::parse::{ParseError, Version, is_signature_stub_path, parse_doc, parse_signature_doc};
+use crate::parse::{LanguageOptions, ParseError, is_signature_stub_path, parse_doc, parse_signature_doc};
 
 /// Resolved project: entry file and all transitively included sources, in **depth-first preorder**
 /// (same order as the reference compiler’s first include pass).
@@ -252,9 +252,9 @@ fn canonical_file_key(path: &Path) -> Result<PathBuf, std::io::Error> {
 pub fn load_project_with_includes(
     project_root: impl AsRef<Path>,
     entry: impl AsRef<Path>,
-    version: Version,
+    lang: impl Into<LanguageOptions>,
 ) -> Result<LoadedProject, IncludeLoadError> {
-    load_project_with_includes_limited(project_root, entry, version, IncludeLimits::REFERENCE)
+    load_project_with_includes_limited(project_root, entry, lang, IncludeLimits::REFERENCE)
 }
 
 /// Like [`load_project_with_includes`], but with an explicit [`IncludeLimits`] (e.g.
@@ -262,9 +262,10 @@ pub fn load_project_with_includes(
 pub fn load_project_with_includes_limited(
     project_root: impl AsRef<Path>,
     entry: impl AsRef<Path>,
-    version: Version,
+    lang: impl Into<LanguageOptions>,
     limits: IncludeLimits,
 ) -> Result<LoadedProject, IncludeLoadError> {
+    let lang = lang.into();
     let project_root = project_root.as_ref();
     let root_canon = fs::canonicalize(project_root)
         .map_err(|e| IncludeLoadError::InvalidEntry(project_root.to_path_buf(), e))?;
@@ -283,7 +284,7 @@ pub fn load_project_with_includes_limited(
     load_file_recursive(
         &entry_path,
         &root_canon,
-        version,
+        lang,
         limits,
         &mut seen,
         &mut files,
@@ -298,7 +299,7 @@ pub fn load_project_with_includes_limited(
 fn load_file_recursive(
     file_path: &Path,
     root_dir: &Path,
-    version: Version,
+    lang: LanguageOptions,
     limits: IncludeLimits,
     seen: &mut HashSet<PathBuf>,
     out: &mut Vec<LoadedSourceFile>,
@@ -316,9 +317,9 @@ fn load_file_recursive(
 
     let source = fs::read_to_string(file_path).map_err(IncludeLoadError::Io)?;
     let parsed = if is_signature_stub_path(file_path) {
-        parse_signature_doc(&source, version)
+        parse_signature_doc(&source, lang)
     } else {
-        parse_doc(&source, version)
+        parse_doc(&source, lang)
     }
     .map_err(|e| IncludeLoadError::Parse(file_path.to_path_buf(), e))?;
 
@@ -359,7 +360,7 @@ fn load_file_recursive(
                 });
             }
         };
-        load_file_recursive(&resolved, root_dir, version, limits, seen, out)?;
+        load_file_recursive(&resolved, root_dir, lang, limits, seen, out)?;
     }
 
     Ok(())

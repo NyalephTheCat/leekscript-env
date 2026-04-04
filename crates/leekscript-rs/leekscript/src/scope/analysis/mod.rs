@@ -15,7 +15,8 @@
 //! state (`scope_stack`, `pending_class_body`, `skip_leave_block_span`) is reset before phase 2.
 //!
 //! Phase 2 records [`AnalysisResult::expr_types`] and applies control-flow narrowing for
-//! `instanceof`, `!= null` / `null !=`, and `&&` in `if` / `while` bodies.
+//! `instanceof`, `!= null` / `null !=`, and `&&` in `if` / `while` bodies, plus guard-style
+//! `if (…) return` / `throw` / always-abrupt `else` on following statements in the same block.
 
 mod analyzer;
 mod condition;

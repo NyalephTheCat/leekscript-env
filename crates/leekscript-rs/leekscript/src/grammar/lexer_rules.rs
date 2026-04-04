@@ -2,7 +2,6 @@
 
 #[cfg(not(feature = "grammar-v4-only"))]
 use crate::parse::version::FLAG_V3;
-use crate::parse::version::FLAG_VNEXT;
 use crate::syntax::kinds::K;
 use sipha::prelude::*;
 
@@ -103,12 +102,13 @@ pub(crate) fn versioned_keyword_rule_if(
     });
 }
 
-/// Keyword when `FLAG_VNEXT` is set. When `grammar-v4-only` is off, also require `base_flag`
+/// Keyword when `feature_flag` is set. When `grammar-v4-only` is off, also require `base_flag`
 /// (for example `FLAG_V3` or `FLAG_V4`) so the spelling stays an identifier below that level.
-pub(crate) fn keyword_rule_if_vnext(
+pub(crate) fn keyword_rule_if_experimental(
     g: &mut GrammarBuilder,
     name: &'static str,
     #[cfg_attr(feature = "grammar-v4-only", allow(unused_variables))] base_flag: FlagId,
+    feature_flag: FlagId,
     kind: K,
     word: &'static [u8],
 ) {
@@ -117,7 +117,7 @@ pub(crate) fn keyword_rule_if_vnext(
         {
             g.if_flag(base_flag);
         }
-        g.if_flag(FLAG_VNEXT);
+        g.if_flag(feature_flag);
         g.keyword(kind, word);
     });
 }

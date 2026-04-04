@@ -10,8 +10,12 @@ use std::path::{Path, PathBuf};
 use sipha::tree::ast::{AstNode, AstNodeExt};
 
 use crate::ast::{Root, Stmt};
+use crate::parse::LanguageOptions;
 
-use super::{LoadedProject, LoadedSourceFile, ResolveError, try_resolve_include_file};
+use super::{
+    IncludeLoadError, LoadedProject, LoadedSourceFile, ResolveError, load_project_with_includes,
+    try_resolve_include_file,
+};
 
 /// Maps byte offsets in merged include output back to a concrete source file and offset.
 #[derive(Debug, Clone, Default)]
@@ -87,16 +91,42 @@ impl std::error::Error for MergeIncludesError {
     }
 }
 
-/// I/O failure while reading or canonicalizing a `--signatures` file.
+/// Failure while building the `--signatures` prelude (I/O, include load, or merge).
 #[derive(Debug)]
 pub enum PreludeBuildError {
     Io(PathBuf, std::io::Error),
+    /// Loading the signature entry or a transitively included file failed.
+    IncludeLoad {
+        signature_entry: PathBuf,
+        source: IncludeLoadError,
+    },
+    /// Expanding top-level `include` statements in the loaded signature bundle failed.
+    Merge {
+        signature_entry: PathBuf,
+        source: MergeIncludesError,
+    },
 }
 
 impl fmt::Display for PreludeBuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PreludeBuildError::Io(p, e) => write!(f, "{}: {e}", p.display()),
+            PreludeBuildError::IncludeLoad {
+                signature_entry,
+                source,
+            } => write!(
+                f,
+                "`--signatures` {}: {source}",
+                signature_entry.display()
+            ),
+            PreludeBuildError::Merge {
+                signature_entry,
+                source,
+            } => write!(
+                f,
+                "`--signatures` {} (merge): {source}",
+                signature_entry.display()
+            ),
         }
     }
 }
@@ -105,25 +135,31 @@ impl std::error::Error for PreludeBuildError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             PreludeBuildError::Io(_, e) => Some(e),
+            PreludeBuildError::IncludeLoad { source, .. } => Some(source),
+            PreludeBuildError::Merge { source, .. } => Some(source),
         }
     }
 }
 
 /// Prepend one or more “header” sources (stdlib / API signatures) before merged check input.
 ///
-/// Each file is concatenated in order, separated by a single `\n`. If the result is non-empty, one
-/// more `\n` is inserted before `merged` so the prelude and project source stay separate top-level
-/// regions. [`MergedSourceMapping`] spans for the merged body are shifted by the prelude length;
-/// new spans map each signature file’s text to its canonical path (byte offsets start at 0 in that
-/// file).
+/// Each path is treated as a **bundle entry**: the file is loaded with
+/// [`super::load_project_with_includes`] using **its parent directory** as the project root, then
+/// top-level `include("…")` statements are expanded like [`merge_included_sources_to_single_file_mapped`].
+/// Bundles are concatenated in order, separated by a single `\n`. If the prelude is non-empty, one
+/// more `\n` is inserted before `merged` so the prelude and check input stay separate top-level
+/// regions. [`MergedSourceMapping`] spans from each bundle are shifted; the user body mapping is
+/// shifted by the total prelude length.
 ///
 /// With an empty `signature_paths` slice, returns `(merged.to_string(), merged_mapping)` without
 /// copying the mapping.
 pub fn prepend_signatures_to_merged(
+    lang: impl Into<LanguageOptions>,
     signature_paths: &[PathBuf],
     merged: &str,
     merged_mapping: MergedSourceMapping,
 ) -> Result<(String, MergedSourceMapping), PreludeBuildError> {
+    let lang = lang.into();
     if signature_paths.is_empty() {
         return Ok((merged.to_string(), merged_mapping));
     }
@@ -135,19 +171,31 @@ pub fn prepend_signatures_to_merged(
         if i > 0 {
             prelude.push('\n');
         }
-        let merged_start = prelude.len() as u32;
-        let text = fs::read_to_string(path).map_err(|e| PreludeBuildError::Io(path.clone(), e))?;
+        let base = prelude.len() as u32;
+
         let canon = fs::canonicalize(path).map_err(|e| PreludeBuildError::Io(path.clone(), e))?;
+        let sig_root = canon.parent().unwrap_or_else(|| Path::new("/"));
+        let sig_root = fs::canonicalize(sig_root).map_err(|e| PreludeBuildError::Io(sig_root.to_path_buf(), e))?;
+
+        let project = load_project_with_includes(&sig_root, &canon, lang).map_err(|e| {
+            PreludeBuildError::IncludeLoad {
+                signature_entry: canon.clone(),
+                source: e,
+            }
+        })?;
+
+        let (text, mut chunk_map) = merge_included_sources_to_single_file_mapped(&sig_root, &project)
+            .map_err(|e| PreludeBuildError::Merge {
+                signature_entry: canon,
+                source: e,
+            })?;
+
         prelude.push_str(&text);
-        let merged_end = prelude.len() as u32;
-        if merged_end > merged_start {
-            prelude_spans.push(MergedSpanMap {
-                merged_start,
-                merged_end,
-                path: canon,
-                file_offset: 0,
-            });
+        for s in &mut chunk_map.spans {
+            s.merged_start = s.merged_start.saturating_add(base);
+            s.merged_end = s.merged_end.saturating_add(base);
         }
+        prelude_spans.extend(chunk_map.spans);
     }
 
     let shift = if prelude.is_empty() {

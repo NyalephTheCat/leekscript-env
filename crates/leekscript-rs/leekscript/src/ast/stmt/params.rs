@@ -1,11 +1,12 @@
 //! Formal parameter nodes (`K::FnParam`) shared by function and method headers.
 
+use crate::ast::binding_name::fn_param_binding_token;
 use crate::Span;
+use crate::ast::expr::Expr;
 use crate::ast::types::TypeExpr;
 use crate::syntax::kinds::K;
 use sipha::prelude::*;
 use sipha::tree::ast::{AstNode, AstNodeExt};
-use sipha::types::IntoSyntaxKind;
 
 #[derive(Debug, Clone, sipha::AstNode)]
 #[ast(kind = K::FnParam)]
@@ -21,18 +22,18 @@ impl FnParam {
     /// Binding identifier (after optional `@`).
     #[must_use]
     pub fn name(&self) -> Option<String> {
-        self.syntax()
-            .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
-            .map(|t| t.text().to_string())
+        fn_param_binding_token(self.syntax()).map(|t| t.text().to_string())
     }
 
     #[must_use]
     pub fn name_span(&self) -> Option<Span> {
-        self.syntax()
-            .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
-            .map(|t| t.text_range())
+        fn_param_binding_token(self.syntax()).map(|t| t.text_range())
+    }
+
+    /// Default value after `=` when present (`method` parameters, or `function` with experimental optional params).
+    #[must_use]
+    pub fn default_expr(&self) -> Option<Expr> {
+        self.syntax().child::<Expr>()
     }
 }
 

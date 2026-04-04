@@ -2,7 +2,7 @@
 
 use leekscript::{
     Version, load_project_with_includes, merge_included_sources_to_single_file,
-    merge_included_sources_to_single_file_mapped, prepend_signatures_to_merged,
+    merge_included_sources_to_single_file_mapped, parse_signature_doc, prepend_signatures_to_merged,
 };
 use std::path::Path;
 
@@ -103,7 +103,8 @@ fn prepend_signatures_shifts_mapping_and_inserts_prelude() {
 
     let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
     let (merged, map) = merge_included_sources_to_single_file_mapped(&root, &p).unwrap();
-    let (combined, full_map) = prepend_signatures_to_merged(&[sig.clone()], &merged, map).unwrap();
+    let (combined, full_map) =
+        prepend_signatures_to_merged(Version::V4, &[sig.clone()], &merged, map).unwrap();
 
     assert!(combined.starts_with("function abs"));
     assert!(combined.contains("var y = abs"));
@@ -127,6 +128,40 @@ fn prepend_signatures_shifts_mapping_and_inserts_prelude() {
         "expected main.leek, got {:?}",
         sm2.path
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn prepend_signatures_expands_top_level_includes() {
+    let root = tmp_merge_root("sig_include");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let bundle = root.join("bundle.sig.leek");
+    let frag = root.join("fragment.sig.leek");
+    std::fs::write(&frag, "function tiny() => integer;\n").unwrap();
+    std::fs::write(
+        &bundle,
+        "include(\"fragment.sig.leek\");\nfunction other() => integer;\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("main.leek"), "var y = 1;\n").unwrap();
+
+    let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
+    let (merged, map) = merge_included_sources_to_single_file_mapped(&root, &p).unwrap();
+    let (combined, _) =
+        prepend_signatures_to_merged(Version::V4, &[bundle.clone()], &merged, map).unwrap();
+
+    assert!(
+        combined.contains("function tiny()"),
+        "included fragment should be in prelude: {combined}"
+    );
+    assert!(
+        combined.contains("function other()"),
+        "bundle decl after include should remain: {combined}"
+    );
+    assert!(combined.contains("var y"), "main should follow prelude");
+
+    parse_signature_doc(&combined, Version::V4).expect("parse merged prelude+main");
     let _ = std::fs::remove_dir_all(&root);
 }
 

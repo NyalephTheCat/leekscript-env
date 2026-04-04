@@ -250,19 +250,11 @@ pub fn merge_command(err: MergeIncludesError) -> Report {
 }
 
 pub fn prelude_signatures(err: PreludeBuildError) -> Report {
-    match err {
-        PreludeBuildError::Io(p, e) => {
-            message(format!("`--signatures` file `{}`: {e}", p.display()))
-        }
-    }
+    message(err.to_string())
 }
 
-pub fn signatures_for_entry(entry: &Path, sig: &Path, err: &std::io::Error) -> Report {
-    message(format!(
-        "{}: `--signatures` `{}`: {err}",
-        entry.display(),
-        sig.display()
-    ))
+pub fn signatures_for_entry(entry: &Path, err: PreludeBuildError) -> Report {
+    message(format!("`{}`: {err}", entry.display()))
 }
 
 pub fn format_config(path: &Path, err: impl std::fmt::Display) -> Report {

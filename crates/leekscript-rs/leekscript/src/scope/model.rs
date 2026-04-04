@@ -56,6 +56,8 @@ pub enum SymbolKind {
     Method,
     /// `constructor (...) { }`
     Constructor,
+    /// Type parameter from a declaration’s `<T, U>` list (experimental templates).
+    TypeParam,
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +67,8 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub name: String,
     pub name_span: Span,
+    /// `static` class field / method (only meaningful in class body scope).
+    pub is_static: bool,
     pub declared_ty: Option<LeekTy>,
     /// Filled by inference when there is no annotation or to refine `Unknown`.
     pub inferred_ty: Option<LeekTy>,
@@ -113,6 +117,8 @@ pub enum SemanticCode {
     DeprecatedStrictEquality,
     /// Call to a function / global / method whose doc marks `@deprecated`.
     DeprecatedCallable,
+    /// Member access, indexing, or call on a value that may be null (`T?`).
+    NullableChainAccess,
 }
 
 /// Whether a diagnostic should fail `leekscript check` or only warn.

@@ -1,6 +1,6 @@
 use leekscript::ast::{BinaryExpr, Expr, IncludeStmt, Root, Stmt, TypeExpr};
 use leekscript::syntax::kinds::K;
-use leekscript::{Version, parse_doc};
+use leekscript::{LanguageOptions, Version, parse_doc};
 use sipha::tree::ast::{AstNode, AstNodeExt};
 use sipha::tree::red::SyntaxNode;
 
@@ -10,8 +10,8 @@ fn stmts_v4(src: &str) -> Vec<Stmt> {
     AstNodeExt::children::<Stmt>(root.syntax()).collect()
 }
 
-fn stmts_vnext(src: &str) -> Vec<Stmt> {
-    let doc = parse_doc(src, Version::VNext).expect("parse");
+fn stmts_experimental_all(src: &str) -> Vec<Stmt> {
+    let doc = parse_doc(src, LanguageOptions::v4_experimental_all()).expect("parse");
     let root = Root::cast(doc.root().clone()).expect("Root::cast");
     AstNodeExt::children::<Stmt>(root.syntax()).collect()
 }
@@ -82,8 +82,8 @@ fn var_decl_first_name() {
 }
 
 #[test]
-fn let_decl_first_name_requires_vnext() {
-    let s = stmts_vnext("let x = 1;");
+fn let_decl_first_name_requires_experimental_let() {
+    let s = stmts_experimental_all("let x = 1;");
     let v = s[0].as_var_decl().expect("var decl");
     assert_eq!(v.first_name(), Some("x".into()));
 }
@@ -93,6 +93,21 @@ fn function_decl_name() {
     let s = stmts_v4("function foo() {}");
     let f = s[0].as_function().expect("function");
     assert_eq!(f.name(), Some("foo".into()));
+}
+
+#[test]
+fn function_decl_name_may_be_keyword_function() {
+    let s = stmts_v4("function function() {}");
+    let f = s[0].as_function().expect("function");
+    assert_eq!(f.name(), Some("function".into()));
+}
+
+#[test]
+fn typed_fn_param_may_be_named_function() {
+    let s = stmts_v4("function foo(integer function) {}");
+    let f = s[0].as_function().expect("function");
+    let p = f.fn_params().next().expect("param");
+    assert_eq!(p.name(), Some("function".into()));
 }
 
 #[test]
@@ -125,9 +140,9 @@ fn expr_enum_casts_root_and_binary_descendants() {
 
 #[test]
 fn break_and_continue_level() {
-    let b = stmts_vnext("break 2;");
+    let b = stmts_experimental_all("break 2;");
     assert_eq!(b[0].as_break().expect("break").level(), Some(2));
-    let c = stmts_vnext("continue 3;");
+    let c = stmts_experimental_all("continue 3;");
     assert_eq!(c[0].as_continue().expect("continue").level(), Some(3));
 }
 
@@ -208,7 +223,7 @@ fn foreach_switch_class_global_const() {
         Some("x".into())
     );
 
-    let s = stmts_vnext("const a = 1;");
+    let s = stmts_experimental_all("const a = 1;");
     assert_eq!(
         s[0].as_const().expect("const").first_name(),
         Some("a".into())
@@ -217,25 +232,25 @@ fn foreach_switch_class_global_const() {
 
 #[test]
 fn import_match_try_throw_export() {
-    let s = stmts_vnext(r#"import "m";"#);
+    let s = stmts_experimental_all(r#"import "m";"#);
     let imp = s[0].as_import().expect("import");
     assert_eq!(imp.string_path().map(|p| p.value()), Some("m".into()));
 
-    let s = stmts_vnext("match 1 { .. : return 0 }");
+    let s = stmts_experimental_all("match 1 { .. : return 0 }");
     let m = s[0].as_match().expect("match");
     assert!(m.scrutinee().is_some());
 
-    let s = stmts_vnext("try { return 1; } catch (integer e) { } finally { }");
+    let s = stmts_experimental_all("try { return 1; } catch (integer e) { } finally { }");
     let t = s[0].as_try().expect("try");
     assert!(t.try_block().is_some());
     assert_eq!(t.catch_clauses().count(), 1);
     assert!(t.finally_block().is_some());
 
-    let s = stmts_vnext("throw 1;");
+    let s = stmts_experimental_all("throw 1;");
     let th = s[0].as_throw().expect("throw");
     assert!(th.expr().is_some());
 
-    let s = stmts_vnext("export { var x = 1 }");
+    let s = stmts_experimental_all("export { var x = 1 }");
     let ex = s[0].as_export().expect("export");
     assert!(ex.block().is_some());
 }
@@ -259,7 +274,7 @@ fn for_stmt_clause_exprs() {
 
 #[test]
 fn empty_stmt_double_semicolon_and_after_var_decl() {
-    let s = stmts_vnext("function f() { ;; let x = 1;; }");
+    let s = stmts_experimental_all("function f() { ;; let x = 1;; }");
     let f = s[0].as_function().expect("function");
     let body = f.body().expect("body");
     assert_eq!(
@@ -414,13 +429,13 @@ fn first_type_expr_descendant(syntax: &sipha::tree::red::SyntaxNode) -> Option<T
 
 #[test]
 fn catch_clause_param_and_import_name_path() {
-    let s = stmts_vnext("try { } catch (integer e) { }");
+    let s = stmts_experimental_all("try { } catch (integer e) { }");
     let t = s[0].as_try().expect("try");
     let c = t.catch_clauses().next().expect("catch");
     assert_eq!(c.param_name(), Some("e".into()));
     assert!(c.param_type().is_some());
 
-    let s = stmts_vnext("import foo.bar;");
+    let s = stmts_experimental_all("import foo.bar;");
     let i = s[0].as_import().expect("import");
     assert_eq!(i.name_segments(), Some(vec!["foo".into(), "bar".into()]));
 }

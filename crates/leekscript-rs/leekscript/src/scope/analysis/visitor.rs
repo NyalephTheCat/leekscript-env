@@ -21,6 +21,7 @@ impl Visitor for Analyzer {
         self.sync_enter(node);
         if self.phase == AnalysisPhase::ResolveAndInfer {
             self.push_narrowing_frame_if_needed(node);
+            self.push_short_circuit_or_rhs_narrowing_if_needed(node);
         }
         WalkResult::Continue(())
     }
@@ -31,6 +32,7 @@ impl Visitor for Analyzer {
             self.apply_var_inits(node);
             self.apply_foreach_var_inference(node);
             self.on_leave_node_deprecations(node);
+            self.pop_short_circuit_or_rhs_narrowing_if_needed(node);
             self.pop_narrowing_frame_if_needed(node);
         }
         self.sync_leave(node);

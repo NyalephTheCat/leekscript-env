@@ -23,11 +23,20 @@
 //! [`format`] is a configurable pretty-printer with `// leekfmt:`, `//! leekfmt:` (file-wide options),
 //! and `/* leekfmt: */` directive comments for options and verbatim regions.
 //!
+//! ## Per-file dialect (`leeklang:`)
+//!
+//! Leading comments can set the parse dialect and experimental flags before any other tokens:
+//! `// leeklang: version=v4 experimental-let=true` (also `//! …`, block `/* … */`, and `dialect=`).
+//! Optional flags also include `experimental-fn-optional-params` and `experimental-templates` (or `experimental-generics`).
+//! See [`parse::language_options_with_source_directives`]. Merged buffers only honor directives at
+//! the very start of the combined source.
+//!
 //! ## Cargo features
 //!
-//! - **`grammar-v4-only`**: Specializes lexer/parser bytecode for [`parse::Version::V4`] /
-//!   [`parse::Version::VNext`] by stripping older-dialect flag checks. Do not parse
-//!   [`parse::Version::V1`]–[`parse::Version::V3`] with this enabled.
+//! - **`grammar-v4-only`**: Specializes lexer/parser bytecode for [`parse::Version::V4`] by
+//!   stripping older-dialect flag checks. Do not parse [`parse::Version::V1`]–[`parse::Version::V3`]
+//!   with this enabled. Experimental parse flags remain in the bytecode and are controlled via
+//!   [`parse::ExperimentalFeatures`] on [`parse::LanguageOptions`].
 
 pub mod ast;
 pub mod document;
@@ -51,9 +60,10 @@ pub use include::{
 #[cfg(feature = "partial-reparse")]
 pub use parse::parse_rule_at_offset;
 pub use parse::{
-    FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, ParseError, ParsedWithRecovery, Version,
-    is_signature_stub_path, parse_doc, parse_doc_or_recover, parse_doc_with_recovery,
-    parse_doc_with_recovery_limited, parse_signature_doc, parse_syntax_root,
+    ExperimentalFeatures, LanguageOptions, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, ParseError,
+    ParsedWithRecovery, Version, is_signature_stub_path, language_options_with_source_directives,
+    parse_doc, parse_doc_or_recover, parse_doc_with_recovery, parse_doc_with_recovery_limited,
+    parse_signature_doc, parse_syntax_root,
 };
 pub use sipha::types::{Pos, Span};
 

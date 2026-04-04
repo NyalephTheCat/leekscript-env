@@ -15,6 +15,10 @@ pub(crate) struct ScopeGraph {
     next_symbol_id: u32,
     /// Span keys for binding identifiers (skip treating them as value reads in phase 2).
     pub binding_spans: HashSet<ExprTypeKey>,
+    /// Class name → class body [`ScopeId`] (fields / methods), filled in phase 1.
+    pub(crate) class_body_scope_by_name: HashMap<String, ScopeId>,
+    /// Subclass name → immediate superclass name (`class C extends P`), phase 1.
+    pub(crate) class_extends: HashMap<String, String>,
 }
 
 impl ScopeGraph {
@@ -25,6 +29,8 @@ impl ScopeGraph {
             next_scope_id: 0,
             next_symbol_id: 0,
             binding_spans: HashSet::new(),
+            class_body_scope_by_name: HashMap::new(),
+            class_extends: HashMap::new(),
         }
     }
 
@@ -49,6 +55,7 @@ impl ScopeGraph {
         kind: SymbolKind,
         declared_ty: Option<LeekTy>,
         doc: Option<ParsedDoxygen>,
+        is_static: bool,
     ) -> SymbolId {
         let id = SymbolId(self.next_symbol_id);
         self.next_symbol_id += 1;
@@ -58,6 +65,7 @@ impl ScopeGraph {
             kind,
             name: name.clone(),
             name_span,
+            is_static,
             declared_ty,
             inferred_ty: None,
             doc,
@@ -72,6 +80,7 @@ impl ScopeGraph {
                     kind: SymbolKind::Variable,
                     name: String::new(),
                     name_span: Span::new(0, 0),
+                    is_static: false,
                     declared_ty: None,
                     inferred_ty: None,
                     doc: None,

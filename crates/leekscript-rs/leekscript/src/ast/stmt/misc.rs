@@ -1,5 +1,7 @@
 use super::Block;
+use crate::ast::binding_name::is_lexical_binding_name;
 use super::params::{FnParam, fn_param_children};
+use super::TemplateParams;
 use crate::Span;
 use crate::ast::expr::Expr;
 use crate::ast::literal::LitStr;
@@ -91,6 +93,15 @@ impl ClassMember {
         self.syntax().child::<TypeExpr>()
     }
 
+    /// `static` field or method (leading modifier before the member name / type).
+    #[must_use]
+    pub fn is_static(&self) -> bool {
+        self.syntax()
+            .descendant_tokens()
+            .into_iter()
+            .any(|t| t.kind_as::<K>() == Some(K::StaticKw))
+    }
+
     /// Constructor uses `class_name`; methods use the `ident` before `(`.
     pub fn method_name_and_span(&self, class_name: &str) -> Option<(String, Span)> {
         if self.is_constructor() {
@@ -121,8 +132,10 @@ fn method_name_ident_before_params(
     let mut out = None;
     for el in &children[..lparen_idx] {
         if let Some(t) = el.as_token() {
-            if t.kind_as::<K>() == Some(K::Ident) {
-                out = Some((t.text().to_string(), t.text_range()));
+            if let Some(k) = t.kind_as::<K>() {
+                if is_lexical_binding_name(k) {
+                    out = Some((t.text().to_string(), t.text_range()));
+                }
             }
         }
     }
@@ -159,6 +172,12 @@ impl ClassDecl {
             }
         }
         None
+    }
+
+    /// Template parameters `class C<T> { }` / `class C<T> extends …` when present (experimental).
+    #[must_use]
+    pub fn template_params(&self) -> Option<TemplateParams> {
+        self.syntax().child::<TemplateParams>()
     }
 
     /// Superclass name after `extends`, if any.

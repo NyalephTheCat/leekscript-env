@@ -7,7 +7,7 @@
 //! aligned.
 
 use crate::ast::Root;
-use crate::parse::{ParseError, Version, parse_doc, parse_doc_with_recovery};
+use crate::parse::{LanguageOptions, ParseError, parse_doc, parse_doc_with_recovery};
 use sipha::diagnostics::error::SemanticDiagnostic;
 use sipha::diagnostics::line_index::LineIndex;
 use sipha::diagnostics::parsed_doc::ParsedDoc;
@@ -89,8 +89,8 @@ impl LeekDoc {
     /// Uses [`crate::parse::parse_doc_with_recovery`] so formatting and directive scanning can
     /// proceed past local errors (same as a typical IDE buffer). Use [`crate::parse::parse_doc`]
     /// when you need a strict parse.
-    pub fn parse(src: &str, version: Version) -> Result<Self, ParseError> {
-        parse_doc_with_recovery(src, version).map(|r| Self::from_parsed(&r.doc))
+    pub fn parse(src: &str, lang: impl Into<LanguageOptions>) -> Result<Self, ParseError> {
+        parse_doc_with_recovery(src, lang).map(|r| Self::from_parsed(&r.doc))
     }
 
     /// Take ownership of a parse result as an editable document (clones the source buffer).
@@ -184,7 +184,7 @@ impl LeekDoc {
     /// Replace the half-open byte range `span` with `replacement`, then align the CST.
     ///
     /// With the **`partial-reparse`** feature (enabled in default features), this first attempts
-    /// sipha’s partial reparse at a statement boundary using the correct dialect [`Version`]. If
+    /// sipha’s partial reparse at a statement boundary using the given [`LanguageOptions`]. If
     /// that does not apply, or sipha falls back to incremental reuse (which does not carry
     /// dialect flags), this performs a full [`parse_doc`] on the spliced text.
     ///
@@ -194,8 +194,9 @@ impl LeekDoc {
         &mut self,
         span: Span,
         replacement: &str,
-        version: Version,
+        lang: impl Into<LanguageOptions>,
     ) -> Result<(), DocEditError> {
+        let opts = lang.into();
         let start = span.start as usize;
         let end = span.end as usize;
         if start > end || end > self.source.len() {
@@ -222,7 +223,7 @@ impl LeekDoc {
                 let config = PartialReparseConfig {
                     boundary_kinds: STMT_BOUNDARY_KINDS,
                     boundary_rule: stmt_rule,
-                    context: version.to_parse_context(),
+                    context: opts.parse_context(),
                 };
                 let mut engine = Engine::new();
                 if let Ok(outcome) = reparse_partial_or_fallback(
@@ -245,7 +246,7 @@ impl LeekDoc {
             }
         }
 
-        let doc = parse_doc(&text, version).map_err(DocEditError::Reparse)?;
+        let doc = parse_doc(&text, opts).map_err(DocEditError::Reparse)?;
         self.source = doc.source().to_vec();
         self.root = doc.root().clone();
         self.line_index = LineIndex::new(&self.source);
@@ -277,11 +278,11 @@ impl LeekDoc {
         self.refresh_source_from_tree();
     }
 
-    /// Parse [`Self::source_str`] again with the given dialect version.
+    /// Parse [`Self::source_str`] again with the given language options.
     ///
     /// Use after external edits to the buffer, or to re-validate after a transform.
-    pub fn reparse(&mut self, version: Version) -> Result<(), ParseError> {
-        let doc = parse_doc(self.source_str(), version)?;
+    pub fn reparse(&mut self, lang: impl Into<LanguageOptions>) -> Result<(), ParseError> {
+        let doc = parse_doc(self.source_str(), lang)?;
         self.source = doc.source().to_vec();
         self.root = doc.root().clone();
         self.line_index = LineIndex::new(&self.source);
@@ -295,13 +296,13 @@ impl LeekDoc {
     #[cfg(feature = "emit")]
     pub fn reparse_after_emit(
         &mut self,
-        version: Version,
+        lang: impl Into<LanguageOptions>,
         options: &EmitOptions,
     ) -> Result<(), ParseError> {
         let text = syntax_root_to_string(&self.root, options);
         self.source = text.into_bytes();
         self.line_index = LineIndex::new(&self.source);
-        let doc = parse_doc(self.source_str(), version)?;
+        let doc = parse_doc(self.source_str(), lang)?;
         self.root = doc.root().clone();
         Ok(())
     }

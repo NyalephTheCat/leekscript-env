@@ -473,13 +473,14 @@ pub fn define(g: &mut GrammarBuilder) {
     // Untyped `x` must win over type named `x` (see `a.filter(x -> …)`).
     // Typed body: `=> T expr` uses `lambda_return_type` (no bare `ident` as `T`) so
     // `dp => dp["x"]` still parses as untyped lambda.
+    // Typed params before bare names so `(V x) =>` is `V x`, not param `V` then junk `x`.
     g.parser_rule("lambda_param", |g| {
         g.choice(
             |g| {
+                g.call("ls_type");
                 g.call("ident");
             },
             |g| {
-                g.call("ls_type");
                 g.call("ident");
             },
         );
@@ -633,12 +634,16 @@ pub fn define(g: &mut GrammarBuilder) {
     g.parser_rule("anon_function_expr", |g| {
         g.node(K::AnonFunctionExpr, |g| {
             g.call("kw_function");
+            g.optional(|g| {
+                cfg_flags::exp_templates(g);
+                g.call("decl_template_params");
+            });
             g.call("lparen");
             g.optional(|g| {
-                g.call("fn_param");
+                g.call("function_fn_param");
                 g.zero_or_more(|g| {
                     g.call("comma");
-                    g.call("fn_param");
+                    g.call("function_fn_param");
                 });
                 g.optional(|g| {
                     g.call("comma");
@@ -729,6 +734,10 @@ pub fn define(g: &mut GrammarBuilder) {
             Box::new(|g| {
                 g.lookahead(|g| {
                     g.call("kw_function");
+                    g.optional(|g| {
+                        cfg_flags::exp_templates(g);
+                        g.call("decl_template_params");
+                    });
                     g.call("lparen");
                 });
                 g.call("anon_function_expr");

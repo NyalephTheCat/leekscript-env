@@ -18,12 +18,16 @@ impl NarrowingEnv {
         let _ = self.stack.pop();
     }
 
-    /// Apply innermost narrowing for `sid` on top of `base` (e.g. declared/inferred type).
+    /// Apply active narrowing for `sid` on top of `base` (e.g. declared/inferred type).
+    ///
+    /// Frames are ordered outer → inner; each map can refine symbols for its region. Later frames
+    /// override earlier ones for the same symbol so an empty inner frame does not hide refinements
+    /// from an outer frame (e.g. `||` RHS facts below a per-node narrowing push).
     #[must_use]
     pub(crate) fn with_narrowing(&self, sid: SymbolId, base: LeekTy) -> LeekTy {
         let mut t = base;
-        if let Some(top) = self.stack.last() {
-            if let Some(nt) = top.get(&sid) {
+        for frame in &self.stack {
+            if let Some(nt) = frame.get(&sid) {
                 t = nt.clone();
             }
         }

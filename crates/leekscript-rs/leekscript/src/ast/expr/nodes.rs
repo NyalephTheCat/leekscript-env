@@ -1,5 +1,6 @@
 //! Concrete expression CST nodes (one struct per `K::…Expr` syntax kind).
 
+use crate::ast::stmt::TemplateParams;
 use crate::syntax::kinds::K;
 use sipha::AstNode;
 use sipha::prelude::*;
@@ -63,6 +64,14 @@ pub struct IntervalExpr(SyntaxNode);
 #[derive(Debug, Clone, AstNode)]
 #[ast(kind = K::AnonFunctionExpr)]
 pub struct AnonFunctionExpr(SyntaxNode);
+
+impl AnonFunctionExpr {
+    /// Leading `<T>` on `function<T>(…) { }` when present (experimental).
+    #[must_use]
+    pub fn template_params(&self) -> Option<TemplateParams> {
+        self.syntax().child::<TemplateParams>()
+    }
+}
 
 #[derive(Debug, Clone, AstNode)]
 #[ast(kind = K::IfExpr)]

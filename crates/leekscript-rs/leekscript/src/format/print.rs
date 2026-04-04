@@ -7,7 +7,7 @@ use crate::format::directives::{
 };
 use crate::format::options::{BraceStyle, FormatOptions, SemicolonStyle};
 use crate::format::spacing::needs_space_between;
-use crate::parse::{ParseError, Version};
+use crate::parse::{LanguageOptions, ParseError};
 use crate::syntax::kinds::K;
 use crate::syntax::syntax_el_is_trivia;
 use sipha::prelude::AstNode;
@@ -95,10 +95,10 @@ fn str_display_width(s: &str, tab_width: usize) -> usize {
 /// Parse and format a LeekScript document.
 pub fn format_document(
     src: &str,
-    version: Version,
+    lang: impl Into<LanguageOptions>,
     base: &FormatOptions,
 ) -> Result<String, ParseError> {
-    let doc = LeekDoc::parse(src, version)?;
+    let doc = LeekDoc::parse(src, lang)?;
     Ok(format_leek_doc(&doc, base))
 }
 
@@ -264,6 +264,7 @@ impl Printer<'_> {
                     | K::TypeNullableType
                     | K::TypePrimaryType
                     | K::BuiltinTypeNameExpr
+                    | K::TemplateParams
             )
         );
         if bump_type {

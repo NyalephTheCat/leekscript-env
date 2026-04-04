@@ -75,37 +75,37 @@ pub fn define(g: &mut GrammarBuilder) {
             // `TokenType` (reserved words). We parse them here for token-stream / syntax-tree parity.
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_exceptions(g);
                 g.call("try_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_exceptions(g);
                 g.call("throw_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_modules(g);
                 g.call("import_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_modules(g);
                 g.call("export_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_goto(g);
                 g.call("goto_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_modules(g);
                 g.call("package_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v3(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_lexical_const(g);
                 g.call("const_decl");
             }),
             Box::new(|g: &mut GrammarBuilder| {
@@ -114,7 +114,7 @@ pub fn define(g: &mut GrammarBuilder) {
             // `match` is not a Java lexer keyword; this is a leekscript-rs extension (v4+).
             Box::new(|g: &mut GrammarBuilder| {
                 cfg_flags::v4(g);
-                cfg_flags::vnext(g);
+                cfg_flags::exp_match(g);
                 g.call("match_stmt");
             }),
             Box::new(|g: &mut GrammarBuilder| {
@@ -161,7 +161,7 @@ pub fn define(g: &mut GrammarBuilder) {
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_let(g);
                     g.call("kw_let");
                 });
             }),
@@ -224,56 +224,56 @@ pub fn define(g: &mut GrammarBuilder) {
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_exceptions(g);
                     g.call("kw_try");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_exceptions(g);
                     g.call("kw_throw");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_modules(g);
                     g.call("kw_import");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_modules(g);
                     g.call("kw_export");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_goto(g);
                     g.call("kw_goto");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_modules(g);
                     g.call("kw_package");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_lexical_const(g);
                     g.call("kw_const");
                 });
             }),
             Box::new(|g: &mut GrammarBuilder| {
                 g.lookahead(|g| {
                     cfg_flags::v4(g);
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_match(g);
                     g.call("kw_match");
                 });
             }),
@@ -286,10 +286,30 @@ pub fn define(g: &mut GrammarBuilder) {
             g.call("kw_class");
             g.call("ident");
             g.optional(|g| {
+                cfg_flags::exp_templates(g);
+                g.call("decl_template_params");
+            });
+            g.optional(|g| {
                 g.call("kw_extends");
                 g.call("ident");
             });
             g.call("class_body");
+        });
+    });
+
+    // `function f<T, U>(…)`, `class C<T>`, `function<T>(…) {}` — comma-separated idents (not lambdas: `<T>` clashes with set literals).
+    g.parser_rule("decl_template_params", |g| {
+        g.node(K::TemplateParams, |g| {
+            g.call("op_lt");
+            g.call("ident");
+            g.zero_or_more(|g| {
+                g.call("comma");
+                g.call("ident");
+            });
+            g.optional(|g| {
+                g.call("comma");
+            });
+            g.call("type_gt");
         });
     });
 
@@ -359,6 +379,9 @@ pub fn define(g: &mut GrammarBuilder) {
                     Box::new(|g| {
                         g.call("kw_include");
                     }),
+                    Box::new(|g| {
+                        g.call("kw_function");
+                    }),
                 ]);
             },
         );
@@ -374,10 +397,10 @@ pub fn define(g: &mut GrammarBuilder) {
                     g.call("kw_constructor");
                     g.call("lparen");
                     g.optional(|g| {
-                        g.call("fn_param");
+                        g.call("method_fn_param");
                         g.zero_or_more(|g| {
                             g.call("comma");
-                            g.call("fn_param");
+                            g.call("method_fn_param");
                         });
                         g.optional(|g| {
                             g.call("comma");
@@ -419,10 +442,10 @@ pub fn define(g: &mut GrammarBuilder) {
                         Box::new(|g| {
                             g.call("lparen");
                             g.optional(|g| {
-                                g.call("fn_param");
+                                g.call("method_fn_param");
                                 g.zero_or_more(|g| {
                                     g.call("comma");
-                                    g.call("fn_param");
+                                    g.call("method_fn_param");
                                 });
                                 g.optional(|g| {
                                     g.call("comma");
@@ -558,17 +581,17 @@ pub fn define(g: &mut GrammarBuilder) {
     g.parser_rule("break_stmt", |g| {
         g.node(K::BreakStmt, |g| {
             g.call("kw_break");
-            // `break 2` is VNext only; without it, reject a digit level so it is not parsed as
-            // `break;` + expression statement `2`.
+            // `break 2` needs experimental loop levels; without it, reject a digit level so it is
+            // not parsed as `break;` + expression statement `2`.
             g.choice(
                 |g| {
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_loop_levels(g);
                     g.optional(|g| {
                         g.call("break_continue_level");
                     });
                 },
                 |g| {
-                    cfg_flags::not_vnext(g);
+                    cfg_flags::not_exp_loop_levels(g);
                     g.neg_lookahead(|g| {
                         g.call("break_continue_level");
                     });
@@ -585,13 +608,13 @@ pub fn define(g: &mut GrammarBuilder) {
             g.call("kw_continue");
             g.choice(
                 |g| {
-                    cfg_flags::vnext(g);
+                    cfg_flags::exp_loop_levels(g);
                     g.optional(|g| {
                         g.call("break_continue_level");
                     });
                 },
                 |g| {
-                    cfg_flags::not_vnext(g);
+                    cfg_flags::not_exp_loop_levels(g);
                     g.neg_lookahead(|g| {
                         g.call("break_continue_level");
                     });
@@ -623,6 +646,7 @@ pub fn define(g: &mut GrammarBuilder) {
                     g.call("var_decl_items");
                 }),
                 Box::new(|g| {
+                    cfg_flags::exp_let(g);
                     g.call("kw_let");
                     g.call("var_decl_items");
                 }),
@@ -677,12 +701,16 @@ pub fn define(g: &mut GrammarBuilder) {
         g.node(K::FunctionDecl, |g| {
             g.call("kw_function");
             g.call("name");
+            g.optional(|g| {
+                cfg_flags::exp_templates(g);
+                g.call("decl_template_params");
+            });
             g.call("lparen");
             g.optional(|g| {
-                g.call("fn_param");
+                g.call("function_fn_param");
                 g.zero_or_more(|g| {
                     g.call("comma");
-                    g.call("fn_param");
+                    g.call("function_fn_param");
                 });
                 g.optional(|g| {
                     g.call("comma");
@@ -714,29 +742,50 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     // Typed params before bare names so `(n)` is not parsed as type `n`.
-    g.parser_rule("fn_param", |g| {
+    g.parser_rule("fn_param_core", |g| {
+        g.choice(
+            |g| {
+                g.call("ls_type");
+                g.optional(|g| {
+                    g.call("op_at");
+                });
+                // Match `name` / class members: `string string` parameter names use type keywords.
+                g.call("name");
+            },
+            |g| {
+                g.optional(|g| {
+                    g.call("op_at");
+                });
+                g.call("ident");
+            },
+        );
+    });
+
+    // Method / constructor parameters — optional default with `= expr`.
+    g.parser_rule("method_fn_param", |g| {
         g.node(K::FnParam, |g| {
-            g.choice(
-                |g| {
-                    g.call("ls_type");
-                    g.optional(|g| {
-                        g.call("op_at");
-                    });
-                    // Match `name` / class members: `string string` parameter names use type keywords.
-                    g.call("name");
-                },
-                |g| {
-                    g.optional(|g| {
-                        g.call("op_at");
-                    });
-                    g.call("ident");
-                },
-            );
+            g.call("fn_param_core");
+            g.optional(|g| {
+                g.call("eq");
+                g.call("expr");
+            });
+        });
+    });
+
+    // Top-level / anonymous `function` parameters — `= expr` only with experimental fn optional params.
+    g.parser_rule("function_fn_param", |g| {
+        g.node(K::FnParam, |g| {
+            g.call("fn_param_core");
+            g.optional(|g| {
+                cfg_flags::exp_fn_optional_params(g);
+                g.call("eq");
+                g.call("expr");
+            });
         });
     });
 
     g.parser_rule("param", |g| {
-        g.call("fn_param");
+        g.call("function_fn_param");
     });
 
     g.parser_rule("if_stmt", |g| {
@@ -885,6 +934,7 @@ pub fn define(g: &mut GrammarBuilder) {
                             g.call("kw_var");
                         },
                         |g| {
+                            cfg_flags::exp_let(g);
                             g.call("kw_let");
                         },
                     );

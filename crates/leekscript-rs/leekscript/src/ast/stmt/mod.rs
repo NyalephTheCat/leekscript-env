@@ -7,6 +7,7 @@ mod flow;
 mod include;
 mod misc;
 mod params;
+mod template_params;
 
 pub use block::Block;
 pub use control::{DoWhileStmt, ForStmt, ForeachStmt, IfStmt, SwitchArm, SwitchStmt, WhileStmt};
@@ -18,6 +19,7 @@ pub use misc::{
     GlobalDecl, GotoStmt, ImportStmt, MatchStmt, PackageStmt, ThrowStmt, TryStmt,
 };
 pub use params::{FnParam, fn_param_children};
+pub use template_params::TemplateParams;
 
 use crate::syntax::kinds::K;
 use sipha::AstEnum;

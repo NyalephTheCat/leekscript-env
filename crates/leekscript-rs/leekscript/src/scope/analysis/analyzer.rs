@@ -6,7 +6,7 @@ use sipha::tree::walk::WalkOptions;
 
 use crate::Span;
 use crate::ast::types::TypeExpr;
-use crate::ast::{ForeachStmt, VarDecl};
+use crate::ast::{ClassMember, ForeachStmt, VarDecl};
 use crate::parse::Version;
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::{
@@ -15,15 +15,22 @@ use crate::scope::model::{
 };
 use crate::syntax::kinds::K;
 
+use super::condition::{
+    facts_when_expression_known_false, is_short_circuit_or_rhs_operand,
+    short_circuit_or_lhs_operand,
+};
 use super::enter_leave::{sync_enter, sync_leave};
 use super::graph::ScopeGraph;
 use super::infer::{
-    expr_span_ty, infer_binary, infer_interval_ty, set_var_inferred_if_unannotated,
+    expr_span_ty, infer_array_expr, infer_binary, infer_bracket_map_expr, infer_call_expr,
+    infer_cast_expr, infer_index_expr, infer_interval_ty, infer_member_expr, infer_ternary_expr,
+    set_var_inferred_if_unannotated,
 };
 use super::narrowing::{accumulated_narrowing_maps, should_track_narrowing};
 use super::narrowing_env::NarrowingEnv;
 use super::phase::AnalysisPhase;
 use super::spans::foreach_bind_spans;
+use crate::scope::extract::leek_ty_from_builtin_type_ident_text;
 
 pub(crate) struct Analyzer {
     pub phase: AnalysisPhase,
@@ -38,6 +45,10 @@ pub(crate) struct Analyzer {
     pub expr_types: HashMap<ExprTypeKey, LeekTy>,
     pub diagnostics: Vec<SemanticDiagnostic>,
     pub class_name_stack: Vec<String>,
+    /// Template names for each nested `class C<T> { … }` (parallel to `class_name_stack`).
+    pub(crate) class_template_stack: Vec<Vec<String>>,
+    /// Template names for each nested `function f<T>` / `function<T>(…) { }` (for `var x: T` typing).
+    pub(crate) fn_template_stack: Vec<Vec<String>>,
     pub node_stack: Vec<Option<K>>,
     pub instanceof_type_ctx_depth: u32,
     pub narrowing: NarrowingEnv,
@@ -61,6 +72,8 @@ impl Analyzer {
             expr_types: HashMap::new(),
             diagnostics: Vec::new(),
             class_name_stack: Vec::new(),
+            class_template_stack: Vec::new(),
+            fn_template_stack: Vec::new(),
             node_stack: Vec::new(),
             instanceof_type_ctx_depth: 0,
             narrowing: NarrowingEnv::default(),
@@ -111,6 +124,20 @@ impl Analyzer {
         sync_leave(self, node);
     }
 
+    /// Builtin type keywords are sometimes lexed as [`K::Ident`]. Skip bogus undefined diagnostics
+    /// for those spellings in **class fields** (not methods): fields have no method body, methods do.
+    fn skip_mislexed_builtin_type_in_class_field(a: &Analyzer, token: &SyntaxToken) -> bool {
+        if leek_ty_from_builtin_type_ident_text(token.text()).is_none() {
+            return false;
+        }
+        for n in a.syntax_node_stack.iter().rev() {
+            if n.kind_as::<K>() == Some(K::ClassMember) {
+                return ClassMember::cast(n.clone()).is_some_and(|cm| !cm.has_method_body());
+            }
+        }
+        false
+    }
+
     pub(crate) fn resolve_ident(&mut self, token: &SyntaxToken) {
         if token.kind_as::<K>() != Some(K::Ident) {
             return;
@@ -122,6 +149,11 @@ impl Analyzer {
         }
         if self.phase == AnalysisPhase::ResolveAndInfer
             && matches!(self.node_stack.last(), Some(Some(K::MemberExpr)))
+        {
+            return;
+        }
+        if self.phase == AnalysisPhase::ResolveAndInfer
+            && Self::skip_mislexed_builtin_type_in_class_field(self, token)
         {
             return;
         }
@@ -181,17 +213,30 @@ impl Analyzer {
             name.to_string(),
             name_span,
             SymbolKind::Class,
-            Some(LeekTy::Class(name.to_string())),
+            Some(LeekTy::ClassObject(name.to_string())),
             None,
+            false,
         ))
     }
 
     pub(crate) fn infer_expr_node(&mut self, node: &SyntaxNode) {
         let span = node.text_range();
         let key = ExprTypeKey::from_span(span);
+        if node.kind_as::<K>() == Some(K::BracketMapExpr) {
+            // Inner `Expr` nodes can share this node's exact byte span; `ExprTypeKey` is span-only,
+            // so caching here would overwrite the value expression's type (e.g. `[from: 0]`).
+            let _ = infer_bracket_map_expr(self, node);
+            return;
+        }
         let ty = match node.kind_as::<K>() {
             Some(K::BinaryExpr) => infer_binary(self, node),
             Some(K::IntervalExpr) => infer_interval_ty(self, node),
+            Some(K::MemberExpr) => infer_member_expr(self, node),
+            Some(K::IndexExpr) => infer_index_expr(self, node),
+            Some(K::CallExpr) => infer_call_expr(self, node),
+            Some(K::TernaryExpr) => infer_ternary_expr(self, node),
+            Some(K::ArrayExpr) => infer_array_expr(self, node),
+            Some(K::CastExpr) => infer_cast_expr(self, node),
             Some(K::Expr | K::ParenExpr | K::UnaryExpr) => expr_span_ty(self, node),
             _ => return,
         };
@@ -209,20 +254,15 @@ impl Analyzer {
         let Some(sym_id) = self.resolve_here(&name) else {
             return;
         };
+        // Use the first direct `Expr` child (the initializer root), not the last descendant
+        // `Expr` — nested expressions (e.g. `ActionMemory` inside `ActionMemory.MAX_COUNT`) would
+        // otherwise be mistaken for the whole RHS type.
         let rhs_ty = vd
             .syntax()
-            .descendant_nodes()
-            .filter(|n| n.kind_as::<K>() == Some(K::IntervalExpr))
-            .map(|n| expr_span_ty(self, &n))
-            .find(|t| *t != LeekTy::Unknown)
-            .or_else(|| {
-                vd.syntax()
-                    .descendant_nodes()
-                    .filter(|n| n.kind_as::<K>() == Some(K::Expr))
-                    .map(|e| expr_span_ty(self, &e))
-                    .filter(|t| *t != LeekTy::Unknown)
-                    .last()
-            });
+            .child_nodes()
+            .find(|n| n.kind_as::<K>() == Some(K::Expr))
+            .map(|e| expr_span_ty(self, &e))
+            .filter(|t| *t != LeekTy::Unknown);
         let Some(rhs_ty) = rhs_ty else {
             return;
         };
@@ -238,7 +278,11 @@ impl Analyzer {
                 self.diagnostics.push(SemanticDiagnostic {
                     severity: SemanticSeverity::Error,
                     code: SemanticCode::IncompatibleInitializer,
-                    message: format!("initializer type incompatible with `{name}` annotation"),
+                    message: format!(
+                        "type mismatch for `{name}`: expected `{expected}`, found `{found}`",
+                        expected = dt,
+                        found = rhs_ty,
+                    ),
                     span: vd.syntax().text_range(),
                     related_span: type_annotation_span,
                 });
@@ -269,6 +313,31 @@ impl Analyzer {
         }
         let map = accumulated_narrowing_maps(self, node);
         self.narrowing.push_frame(map);
+    }
+
+    /// After `A` in `A || B` is falsy, refinements implied by `!A` apply while visiting `B`.
+    pub(crate) fn push_short_circuit_or_rhs_narrowing_if_needed(&mut self, node: &SyntaxNode) {
+        if !is_short_circuit_or_rhs_operand(self, node) {
+            return;
+        }
+        let Some(parent) = self.syntax_parent_of(node) else {
+            return;
+        };
+        let Some(lhs) = short_circuit_or_lhs_operand(self, &parent) else {
+            return;
+        };
+        let facts = facts_when_expression_known_false(self, &lhs, &|sid| {
+            let base = self.symbol_effective_ty(sid);
+            self.narrowing.with_narrowing(sid, base)
+        });
+        self.narrowing.push_frame(facts);
+    }
+
+    pub(crate) fn pop_short_circuit_or_rhs_narrowing_if_needed(&mut self, node: &SyntaxNode) {
+        if !is_short_circuit_or_rhs_operand(self, node) {
+            return;
+        }
+        self.narrowing.pop_frame();
     }
 
     pub(crate) fn syntax_parent_of(&self, node: &SyntaxNode) -> Option<SyntaxNode> {

@@ -1,4 +1,5 @@
 mod error;
+mod lang_directive;
 mod recovery;
 pub(crate) mod version;
 
@@ -9,7 +10,10 @@ pub use recovery::{
     ParsedWithRecovery, parse_doc_or_recover, parse_doc_with_recovery,
     parse_doc_with_recovery_limited,
 };
-pub use version::{FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, Version};
+pub use lang_directive::language_options_with_source_directives;
+pub use version::{
+    ExperimentalFeatures, LanguageOptions, Version, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE,
+};
 
 use crate::grammar;
 use sipha::prelude::*;
@@ -40,20 +44,32 @@ fn parse_doc_with_context(src: &str, ctx: ParseContext) -> Result<ParsedDoc, Par
 
 /// Parse a full document.
 ///
-/// If the `grammar-v4-only` Cargo feature is enabled, only [`Version::V4`] and [`Version::VNext`]
-/// are supported; older [`Version`] values will not match the lexer/parser graph correctly.
-pub fn parse_doc(src: &str, version: Version) -> Result<ParsedDoc, ParseError> {
-    parse_doc_with_context(src, version.to_parse_context())
+/// `lang` is usually a [`LanguageOptions`] or a [`Version`] (which implies no experimental flags).
+/// Leading `leeklang:` comments are merged on top of `lang` (see [`language_options_with_source_directives`]).
+///
+/// If the `grammar-v4-only` Cargo feature is enabled, only [`Version::V4`] is supported as the
+/// base dialect; older [`Version`] values will not match the lexer/parser graph correctly.
+pub fn parse_doc(src: &str, lang: impl Into<LanguageOptions>) -> Result<ParsedDoc, ParseError> {
+    let opts = language_options_with_source_directives(src, lang);
+    parse_doc_with_context(src, opts.parse_context())
 }
 
 /// Parse a signature / stub document: top-level `function` may end with `;` instead of a block.
 ///
 /// Use [`is_signature_stub_path`] for filename heuristics. When prepending `--signatures` to a
 /// check buffer, use this mode for the combined source so the prelude and project parse together.
-pub fn parse_signature_doc(src: &str, version: Version) -> Result<ParsedDoc, ParseError> {
-    parse_doc_with_context(src, version.to_signature_parse_context())
+/// Leading `leeklang:` comments are applied the same way as for [`parse_doc`].
+pub fn parse_signature_doc(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+) -> Result<ParsedDoc, ParseError> {
+    let opts = language_options_with_source_directives(src, lang);
+    parse_doc_with_context(src, opts.signature_parse_context())
 }
 
-pub fn parse_syntax_root(src: &str, version: Version) -> Result<SyntaxNode, ParseError> {
-    Ok(parse_doc(src, version)?.root().clone())
+pub fn parse_syntax_root(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+) -> Result<SyntaxNode, ParseError> {
+    Ok(parse_doc(src, lang)?.root().clone())
 }

@@ -10,13 +10,14 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand, ValueEnum};
 use leekscript::format::{BraceStyle, FormatOptions, LineEnding, SemicolonStyle, format_document};
 use leekscript::include::{
-    MergedSourceMapping, PreludeBuildError, load_project_with_includes,
+    MergedSourceMapping, load_project_with_includes,
     merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
     prepend_signatures_to_merged,
 };
 use leekscript::syntax::kinds::K;
 use leekscript::{
-    SemanticSeverity, Version, is_signature_stub_path, parse_doc, parse_signature_doc,
+    ExperimentalFeatures, LanguageOptions, SemanticSeverity, Version, is_signature_stub_path,
+    language_options_with_source_directives, parse_doc, parse_signature_doc,
 };
 use serde::Deserialize;
 use sipha::tree::tree_display::{TreeDisplayOptions, format_syntax_tree};
@@ -29,8 +30,6 @@ enum Dialect {
     V2,
     V3,
     V4,
-    /// V4 plus upcoming syntax (`let`, `match`, `import`/`export`, `try`/`catch`, `break n`, …).
-    VNext,
 }
 
 impl From<Dialect> for Version {
@@ -40,7 +39,6 @@ impl From<Dialect> for Version {
             Dialect::V2 => Version::V2,
             Dialect::V3 => Version::V3,
             Dialect::V4 => Version::V4,
-            Dialect::VNext => Version::VNext,
         }
     }
 }
@@ -52,12 +50,64 @@ impl From<Dialect> for Version {
     about = "LeekScript parser, formatter, and include merger"
 )]
 struct Cli {
-    /// Language dialect (v1–v4, or v-next)
+    /// Language dialect (v1–v4)
     #[arg(long, global = true, value_enum, default_value_t = Dialect::V4)]
     dialect: Dialect,
 
+    /// Enable every experimental parse feature (`let`, `match`, modules, exceptions, `goto`, `break n`, function defaults, templates, …).
+    #[arg(long, global = true)]
+    experimental: bool,
+
+    /// Experimental: `let` bindings.
+    #[arg(long = "experimental-let", global = true)]
+    experimental_let: bool,
+    /// Experimental: `const` declarations.
+    #[arg(long = "experimental-const", global = true)]
+    experimental_const: bool,
+    /// Experimental: `match` statement.
+    #[arg(long = "experimental-match", global = true)]
+    experimental_match: bool,
+    /// Experimental: `import` / `export` / `package`.
+    #[arg(long = "experimental-modules", global = true)]
+    experimental_modules: bool,
+    /// Experimental: `try` / `catch` / `finally` / `throw`.
+    #[arg(long = "experimental-exceptions", global = true)]
+    experimental_exceptions: bool,
+    /// Experimental: `goto`.
+    #[arg(long = "experimental-goto", global = true)]
+    experimental_goto: bool,
+    /// Experimental: `break N` / `continue N` loop levels.
+    #[arg(long = "experimental-loop-levels", global = true)]
+    experimental_loop_levels: bool,
+    /// Experimental: default values on top-level / anonymous `function (a = 1)` parameters (methods always allow `=`).
+    #[arg(long = "experimental-fn-optional-params", global = true)]
+    experimental_fn_optional_params: bool,
+    /// Experimental: template parameters on classes and `function` declarations (`function f<T>(…)`, `class C<T>`, `function<T>(…) {}`; not arrow lambdas).
+    #[arg(long = "experimental-templates", global = true)]
+    experimental_templates: bool,
+
     #[command(subcommand)]
     command: Command,
+}
+
+fn language_options(cli: &Cli) -> LanguageOptions {
+    let version = Version::from(cli.dialect);
+    let experimental = if cli.experimental {
+        ExperimentalFeatures::ALL
+    } else {
+        ExperimentalFeatures {
+            let_bindings: cli.experimental_let,
+            lexical_const: cli.experimental_const,
+            match_stmt: cli.experimental_match,
+            modules: cli.experimental_modules,
+            exceptions: cli.experimental_exceptions,
+            goto: cli.experimental_goto,
+            loop_levels: cli.experimental_loop_levels,
+            fn_optional_params: cli.experimental_fn_optional_params,
+            templates: cli.experimental_templates,
+        }
+    };
+    LanguageOptions::new(version, experimental)
 }
 
 #[derive(Subcommand)]
@@ -72,7 +122,8 @@ enum Command {
         #[arg(long, value_name = "DIR")]
         root: Option<PathBuf>,
 
-        /// Prepend signature / stub `.leek` files (stdlib declarations) before the check unit; repeatable, order matters
+        /// Prepend signature / stub `.leek` files (stdlib declarations) before the check unit; repeatable, order matters.
+        /// Top-level `include("…")` in each file is expanded like `merge` (project root = that file’s directory).
         #[arg(long = "signatures", value_name = "FILE")]
         signature_files: Vec<PathBuf>,
 
@@ -244,7 +295,7 @@ impl From<CliSemicolonStyle> for SemicolonStyle {
 fn main() -> ExitCode {
     report::install_hook();
     let cli = Cli::parse();
-    let version = Version::from(cli.dialect);
+    let lang = language_options(&cli);
 
     match cli.command {
         Command::Check {
@@ -253,7 +304,7 @@ fn main() -> ExitCode {
             signature_files,
             files,
         } => cmd_check(
-            version,
+            lang,
             parse_only,
             root.as_deref(),
             &signature_files,
@@ -331,7 +382,7 @@ fn main() -> ExitCode {
                 FormatDest::InPlace
             };
             cmd_format(
-                version,
+                lang,
                 dest,
                 &files,
                 &opts,
@@ -339,8 +390,8 @@ fn main() -> ExitCode {
                 format_root.as_deref(),
             )
         }
-        Command::Merge { root, entry } => cmd_merge(version, &root, &entry),
-        Command::Tree { trivia, files } => cmd_tree(version, trivia, &files),
+        Command::Merge { root, entry } => cmd_merge(lang, &root, &entry),
+        Command::Tree { trivia, files } => cmd_tree(lang, trivia, &files),
     }
 }
 
@@ -349,7 +400,7 @@ fn kind_to_name(k: SyntaxKind) -> Option<&'static str> {
 }
 
 fn cmd_check(
-    version: Version,
+    lang: LanguageOptions,
     parse_only: bool,
     root_override: Option<&Path>,
     signature_files: &[PathBuf],
@@ -367,6 +418,7 @@ fn cmd_check(
 
         if !signature_files.is_empty() {
             let (combined, map) = match prepend_signatures_to_merged(
+                lang,
                 signature_files,
                 &src,
                 MergedSourceMapping::default(),
@@ -378,10 +430,12 @@ fn cmd_check(
                 }
             };
             let user_base = (combined.len() - src.len()) as u32;
-            match parse_signature_doc(&combined, version) {
+            match parse_signature_doc(&combined, lang) {
                 Ok(doc) => {
                     if !parse_only {
-                        let analysis = leekscript::run_semantic_analysis(doc.root(), version);
+                        let resolved = language_options_with_source_directives(&combined, lang);
+                        let analysis =
+                            leekscript::run_semantic_analysis(doc.root(), resolved.version);
                         for d in &analysis.diagnostics {
                             if d.severity == SemanticSeverity::Error {
                                 ok = false;
@@ -412,10 +466,12 @@ fn cmd_check(
             };
         }
 
-        match parse_doc(&src, version) {
+        match parse_doc(&src, lang) {
             Ok(doc) => {
                 if !parse_only {
-                    let analysis = leekscript::run_semantic_analysis(doc.root(), version);
+                    let resolved = language_options_with_source_directives(&src, lang);
+                    let analysis =
+                        leekscript::run_semantic_analysis(doc.root(), resolved.version);
                     for d in &analysis.diagnostics {
                         if d.severity == SemanticSeverity::Error {
                             ok = false;
@@ -472,7 +528,7 @@ fn cmd_check(
                 .to_path_buf()
         };
 
-        let project = match load_project_with_includes(&root, &entry, version) {
+        let project = match load_project_with_includes(&root, &entry, lang) {
             Ok(p) => p,
             Err(e) => {
                 ok = false;
@@ -490,30 +546,32 @@ fn cmd_check(
             }
         };
 
-        let (combined, full_map) = match prepend_signatures_to_merged(signature_files, &merged, map)
-        {
+        let (combined, full_map) = match prepend_signatures_to_merged(
+            lang,
+            signature_files,
+            &merged,
+            map,
+        ) {
             Ok(x) => x,
             Err(e) => {
                 ok = false;
-                match e {
-                    PreludeBuildError::Io(ref sig, ref io_err) => {
-                        report::emit(report::signatures_for_entry(path, sig, io_err));
-                    }
-                }
+                report::emit(report::signatures_for_entry(path, e));
                 continue;
             }
         };
 
         let use_sig_grammar = !signature_files.is_empty() || is_signature_stub_path(&entry);
         let parse_result = if use_sig_grammar {
-            parse_signature_doc(&combined, version)
+            parse_signature_doc(&combined, lang)
         } else {
-            parse_doc(&combined, version)
+            parse_doc(&combined, lang)
         };
         match parse_result {
             Ok(doc) => {
                 if !parse_only {
-                    let analysis = leekscript::run_semantic_analysis(doc.root(), version);
+                    let resolved = language_options_with_source_directives(&combined, lang);
+                    let analysis =
+                        leekscript::run_semantic_analysis(doc.root(), resolved.version);
                     for d in &analysis.diagnostics {
                         if d.severity == SemanticSeverity::Error {
                             ok = false;
@@ -820,7 +878,7 @@ enum FormatDest {
 }
 
 fn cmd_format(
-    version: Version,
+    lang: LanguageOptions,
     dest: FormatDest,
     files: &[PathBuf],
     opts: &FormatOptions,
@@ -877,7 +935,7 @@ fn cmd_format(
         };
 
         let label = entry.display().to_string();
-        let project = match load_project_with_includes(&root, &entry, version) {
+        let project = match load_project_with_includes(&root, &entry, lang) {
             Ok(p) => p,
             Err(e) => {
                 report::emit(report::include_load(&root, entry_path, &e));
@@ -892,7 +950,7 @@ fn cmd_format(
             }
         };
 
-        let out = match format_document(&merged, version, opts) {
+        let out = match format_document(&merged, lang, opts) {
             Ok(o) => o,
             Err(e) => {
                 report::emit(report::parse_diagnostic(
@@ -927,7 +985,7 @@ fn cmd_format(
             report::emit(report::stdin_io(e));
             return ExitCode::from(1);
         }
-        return match format_document(&src, version, opts) {
+        return match format_document(&src, lang, opts) {
             Ok(out) => {
                 match dest {
                     FormatDest::InPlace => {
@@ -983,7 +1041,7 @@ fn cmd_format(
                 continue;
             }
         };
-        let out = match format_document(&src, version, opts) {
+        let out = match format_document(&src, lang, opts) {
             Ok(o) => o,
             Err(e) => {
                 ok = false;
@@ -1193,7 +1251,7 @@ space-around-type-operators = true
     }
 }
 
-fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
+fn cmd_tree(lang: LanguageOptions, trivia: bool, files: &[PathBuf]) -> ExitCode {
     let opts = TreeDisplayOptions {
         show_trivia: trivia,
         ..Default::default()
@@ -1205,7 +1263,7 @@ fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
             report::emit(report::stdin_io(e));
             return ExitCode::from(1);
         }
-        let doc = match parse_doc(&src, version) {
+        let doc = match parse_doc(&src, lang) {
             Ok(d) => d,
             Err(e) => {
                 report::emit(report::parse_diagnostic("<stdin>", &src, &e));
@@ -1231,9 +1289,9 @@ fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
             }
         };
         let parse_result = if is_signature_stub_path(path) {
-            parse_signature_doc(&src, version)
+            parse_signature_doc(&src, lang)
         } else {
-            parse_doc(&src, version)
+            parse_doc(&src, lang)
         };
         let doc = match parse_result {
             Ok(d) => d,
@@ -1262,8 +1320,8 @@ fn cmd_tree(version: Version, trivia: bool, files: &[PathBuf]) -> ExitCode {
     }
 }
 
-fn cmd_merge(version: Version, root: &Path, entry: &Path) -> ExitCode {
-    let project = match load_project_with_includes(root, entry, version) {
+fn cmd_merge(lang: LanguageOptions, root: &Path, entry: &Path) -> ExitCode {
+    let project = match load_project_with_includes(root, entry, lang) {
         Ok(p) => p,
         Err(e) => {
             report::emit(report::include_load(root, entry, &e));

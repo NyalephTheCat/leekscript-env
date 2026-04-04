@@ -1,15 +1,15 @@
 //! Name / binding span helpers for AST nodes used during scope construction.
 
 use crate::Span;
+use crate::ast::binding_name::function_decl_name_token;
 use crate::ast::{CatchClause, ClassDecl, ForeachStmt, FunctionDecl, GlobalDecl, VarDecl};
 use crate::syntax::kinds::K;
 use sipha::tree::ast::AstNode;
+use sipha::tree::red::SyntaxNode;
+use sipha::tree::red::SyntaxToken;
 
 pub(crate) fn function_name_span(fd: &FunctionDecl) -> Option<Span> {
-    fd.syntax()
-        .child_tokens()
-        .find(|t| t.kind_as::<K>() == Some(K::Ident))
-        .map(|t| t.text_range())
+    function_decl_name_token(fd.syntax()).map(|t| t.text_range())
 }
 
 pub(crate) fn class_name_span(cd: &ClassDecl) -> Option<Span> {
@@ -53,4 +53,198 @@ pub(crate) fn foreach_bind_spans(fe: &ForeachStmt) -> Vec<(String, Span)> {
         }
     }
     out
+}
+
+/// Tokens inside the `(` `)` header of `for ( … )`, excluding the outer parentheses.
+fn for_stmt_header_inner_tokens(syntax: &SyntaxNode) -> Vec<SyntaxToken> {
+    let mut depth = 0i32;
+    let mut header = Vec::new();
+    for t in syntax.descendant_tokens() {
+        if t.is_trivia() {
+            continue;
+        }
+        match t.kind_as::<K>() {
+            Some(K::LParen) => {
+                if depth >= 1 {
+                    header.push(t.clone());
+                }
+                depth += 1;
+            }
+            Some(K::RParen) => {
+                if depth >= 2 {
+                    header.push(t.clone());
+                }
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {
+                if depth >= 1 {
+                    header.push(t.clone());
+                }
+            }
+        }
+    }
+    header
+}
+
+/// First header clause (up to the first `;` at nesting depth 0) inside `header_inner`.
+fn for_stmt_init_clause_tokens(header_inner: &[SyntaxToken]) -> Vec<SyntaxToken> {
+    let mut d = 0i32;
+    let mut out = Vec::new();
+    for t in header_inner {
+        if t.is_trivia() {
+            continue;
+        }
+        match t.kind_as::<K>() {
+            Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => {
+                d += 1;
+                out.push(t.clone());
+            }
+            Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => {
+                d -= 1;
+                out.push(t.clone());
+            }
+            Some(K::Semi) if d == 0 => break,
+            _ => out.push(t.clone()),
+        }
+    }
+    out
+}
+
+/// `for (var x = 0; …)` / `for (integer i = 0; …)` — variable bound in the whole `for` statement.
+pub(crate) fn for_stmt_init_var_spans(syntax: &SyntaxNode) -> Vec<(String, Span)> {
+    let header = for_stmt_header_inner_tokens(syntax);
+    let init = for_stmt_init_clause_tokens(&header);
+    let mut last_ident: Option<(String, Span)> = None;
+    let mut d = 0i32;
+    let mut i = 0usize;
+    while i < init.len() {
+        let t = &init[i];
+        if t.is_trivia() {
+            i += 1;
+            continue;
+        }
+        match t.kind_as::<K>() {
+            Some(K::Semi) if d == 0 => {
+                return vec![];
+            }
+            Some(K::Eq) if d == 0 => {
+                let out = last_ident.clone();
+                i += 1;
+                while i < init.len() {
+                    let t2 = &init[i];
+                    match t2.kind_as::<K>() {
+                        Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => d += 1,
+                        Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => d -= 1,
+                        Some(K::Semi) if d == 0 => break,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                return out.into_iter().collect();
+            }
+            Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => d += 1,
+            Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => d -= 1,
+            Some(K::Ident) if d == 0 => {
+                last_ident = Some((t.text().to_string(), t.text_range()));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    vec![]
+}
+
+fn last_ident_outside_generics(tokens: &[SyntaxToken]) -> Option<(String, Span)> {
+    let mut angle = 0i32;
+    let mut last = None;
+    for t in tokens {
+        if t.is_trivia() {
+            continue;
+        }
+        match t.kind_as::<K>() {
+            Some(K::Lt) => angle += 1,
+            Some(K::Gt) => angle = (angle - 1).max(0),
+            Some(K::Ident) if angle == 0 => {
+                last = Some((t.text().to_string(), t.text_range()));
+            }
+            _ => {}
+        }
+    }
+    last
+}
+
+fn split_comma_top_level(inner: &[SyntaxToken]) -> Vec<&[SyntaxToken]> {
+    let mut angle = 0i32;
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    let mut out = Vec::new();
+    for (i, t) in inner.iter().enumerate() {
+        if t.is_trivia() {
+            continue;
+        }
+        match t.kind_as::<K>() {
+            Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => depth += 1,
+            Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => depth -= 1,
+            Some(K::Lt) => angle += 1,
+            Some(K::Gt) => angle = (angle - 1).max(0),
+            Some(K::Comma) if depth == 0 && angle == 0 => {
+                out.push(&inner[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&inner[start..]);
+    out
+}
+
+/// Parameters for `x => …`, `integer x => …`, `(a, b) => …`, `(Map<K,V> m, integer n) => …`.
+pub(crate) fn lambda_param_spans(syntax: &SyntaxNode) -> Vec<(String, Span)> {
+    let tokens: Vec<_> = syntax
+        .descendant_tokens()
+        .into_iter()
+        .filter(|t| !t.is_trivia())
+        .take_while(|t| t.kind_as::<K>() != Some(K::Arrow))
+        .collect();
+    if tokens.is_empty() {
+        return vec![];
+    }
+    let has_paren_params = tokens
+        .iter()
+        .any(|t| t.kind_as::<K>() == Some(K::LParen));
+    if !has_paren_params {
+        return last_ident_outside_generics(&tokens).into_iter().collect();
+    }
+    let Some(start) = tokens
+        .iter()
+        .position(|t| t.kind_as::<K>() == Some(K::LParen))
+    else {
+        return vec![];
+    };
+    let mut depth = 0i32;
+    let mut end = None;
+    for (i, t) in tokens.iter().enumerate().skip(start) {
+        match t.kind_as::<K>() {
+            Some(K::LParen) => depth += 1,
+            Some(K::RParen) => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(end) = end else {
+        return vec![];
+    };
+    let inner = &tokens[start + 1..end];
+    split_comma_top_level(inner)
+        .into_iter()
+        .filter_map(|seg| last_ident_outside_generics(seg))
+        .collect()
 }

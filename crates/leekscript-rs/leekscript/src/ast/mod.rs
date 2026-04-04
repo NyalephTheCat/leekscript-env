@@ -3,6 +3,7 @@
 //! Types are written **before** names (`T x`, e.g. `integer n`, `global string s`), not `x: T`.
 //! Function return types still use `->` / `=>` after the parameter list.
 
+pub(crate) mod binding_name;
 mod expr;
 mod literal;
 mod root;
@@ -21,7 +22,7 @@ pub use stmt::{
     Block, BreakStmt, CatchClause, ClassDecl, ClassMember, ConstDecl, ContinueStmt, DoWhileStmt,
     ElseStmt, EmptyStmt, ExportStmt, ExprStmt, FnParam, ForStmt, ForeachStmt, FunctionDecl,
     GlobalDecl, GotoStmt, IfStmt, ImportStmt, IncludeStmt, MatchStmt, PackageStmt, ReturnStmt,
-    Stmt, StmtBlock, SwitchArm, SwitchStmt, ThrowStmt, TryStmt, VarDecl, WhileStmt,
-    fn_param_children,
+    Stmt, StmtBlock, SwitchArm, SwitchStmt, TemplateParams, ThrowStmt, TryStmt, VarDecl,
+    WhileStmt, fn_param_children,
 };
 pub use types::{TypeExpr, TypeNode, TypeNullableType, TypePrimaryType, TypeUnionType};

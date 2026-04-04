@@ -216,7 +216,7 @@ fn is_binary_op(k: K) -> bool {
 ///
 /// When `in_type_syntax` is true (inside type-syntax CST nodes such as [`K::TypeExpr`],
 /// [`K::TypeUnionType`], [`K::TypeNullableType`], [`K::TypePrimaryType`], or
-/// [`K::BuiltinTypeNameExpr`]), spacing of
+/// [`K::BuiltinTypeNameExpr`], [`K::TemplateParams`]), spacing of
 /// `|`, `<`, and `>` follows [`FormatOptions::space_around_type_operators`] (`false` →
 /// `integer|real`, `Array<number>`; `true` → `integer | real`, `Array < number >`).
 #[must_use]

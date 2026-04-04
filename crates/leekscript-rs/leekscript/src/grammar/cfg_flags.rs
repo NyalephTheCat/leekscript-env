@@ -3,7 +3,11 @@
 //! With that feature, the built graph assumes [`Version::V4`](crate::parse::Version::V4); these
 //! become no-ops so lexer/parser bytecode avoids runtime flag branches.
 
-use crate::parse::version::FLAG_VNEXT;
+use crate::parse::version::{
+    FLAG_EXP_EXCEPTIONS, FLAG_EXP_FN_OPTIONAL_PARAMS, FLAG_EXP_GOTO, FLAG_EXP_LET,
+    FLAG_EXP_LEXICAL_CONST, FLAG_EXP_LOOP_LEVELS, FLAG_EXP_MATCH, FLAG_EXP_MODULES,
+    FLAG_EXP_TEMPLATES,
+};
 #[cfg(not(feature = "grammar-v4-only"))]
 use crate::parse::version::{FLAG_V1, FLAG_V2, FLAG_V3, FLAG_V4};
 use sipha::prelude::*;
@@ -36,12 +40,42 @@ pub(crate) fn not_v1(
     g.if_not_flag(FLAG_V1);
 }
 
-/// Upcoming-language features (`Version::VNext`). Unlike `v2` / `v3` / `v4`, this is **not**
-/// stripped when `grammar-v4-only` is on, so V4 and VNext stay distinguishable at parse time.
-pub(crate) fn vnext(g: &mut GrammarBuilder) {
-    g.if_flag(FLAG_VNEXT);
+pub(crate) fn exp_let(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_LET);
 }
 
-pub(crate) fn not_vnext(g: &mut GrammarBuilder) {
-    g.if_not_flag(FLAG_VNEXT);
+pub(crate) fn exp_lexical_const(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_LEXICAL_CONST);
+}
+
+pub(crate) fn exp_match(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_MATCH);
+}
+
+pub(crate) fn exp_modules(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_MODULES);
+}
+
+pub(crate) fn exp_exceptions(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_EXCEPTIONS);
+}
+
+pub(crate) fn exp_goto(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_GOTO);
+}
+
+pub(crate) fn exp_loop_levels(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_LOOP_LEVELS);
+}
+
+pub(crate) fn not_exp_loop_levels(g: &mut GrammarBuilder) {
+    g.if_not_flag(FLAG_EXP_LOOP_LEVELS);
+}
+
+pub(crate) fn exp_fn_optional_params(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_FN_OPTIONAL_PARAMS);
+}
+
+pub(crate) fn exp_templates(g: &mut GrammarBuilder) {
+    g.if_flag(FLAG_EXP_TEMPLATES);
 }

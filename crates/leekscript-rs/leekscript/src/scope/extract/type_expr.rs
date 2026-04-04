@@ -4,9 +4,23 @@ use sipha::tree::ast::AstNode;
 
 use crate::scope::leek_ty::LeekTy;
 
+#[inline]
+fn template_list_contains(template_names: &[String], id: &str) -> bool {
+    template_names.iter().any(|n| n == id)
+}
+
 /// Map a parsed type syntax node to [`LeekTy`].
 #[must_use]
 pub fn leek_ty_from_type_expr(te: &TypeExpr) -> LeekTy {
+    leek_ty_from_type_expr_with_templates(te, &[])
+}
+
+/// Like [`leek_ty_from_type_expr`], but treats identifiers in `template_names` as [`LeekTy::TypeParam`].
+#[must_use]
+pub(crate) fn leek_ty_from_type_expr_with_templates(
+    te: &TypeExpr,
+    template_names: &[String],
+) -> LeekTy {
     let Some(u) = te.union_type() else {
         return LeekTy::Unknown;
     };
@@ -18,13 +32,14 @@ pub fn leek_ty_from_type_expr(te: &TypeExpr) -> LeekTy {
         let m = &members[0];
         let inner = m
             .primary()
-            .map(|p| leek_ty_from_primary(&p))
+            .map(|p| leek_ty_from_primary(&p, template_names))
             .unwrap_or(LeekTy::Unknown);
-        return if m.is_optional() {
+        let t = if m.is_optional() {
             LeekTy::Nullable(Box::new(inner))
         } else {
             inner
         };
+        return t.normalize_null_in_union();
     }
     LeekTy::Union(
         members
@@ -32,7 +47,7 @@ pub fn leek_ty_from_type_expr(te: &TypeExpr) -> LeekTy {
             .map(|m| {
                 let mut t = m
                     .primary()
-                    .map(|p| leek_ty_from_primary(&p))
+                    .map(|p| leek_ty_from_primary(&p, template_names))
                     .unwrap_or(LeekTy::Unknown);
                 if m.is_optional() {
                     t = LeekTy::Nullable(Box::new(t));
@@ -41,10 +56,14 @@ pub fn leek_ty_from_type_expr(te: &TypeExpr) -> LeekTy {
             })
             .collect(),
     )
+    .normalize_null_in_union()
 }
 
-pub(super) fn leek_ty_from_primary(p: &TypePrimaryType) -> LeekTy {
+pub(super) fn leek_ty_from_primary(p: &TypePrimaryType, template_names: &[String]) -> LeekTy {
     if let Some(id) = p.ident_text() {
+        if template_list_contains(template_names, &id) {
+            return LeekTy::TypeParam(id);
+        }
         return LeekTy::Class(id);
     }
     for t in p.syntax().child_tokens() {
@@ -62,7 +81,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType) -> LeekTy {
                 let args = p.generic_argument_roots();
                 let el = args
                     .first()
-                    .map(|a| leek_ty_from_type_expr(&a))
+                    .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                     .unwrap_or(LeekTy::Any);
                 return LeekTy::Array(Box::new(el));
             }
@@ -70,7 +89,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType) -> LeekTy {
                 let args = p.generic_argument_roots();
                 let el = args
                     .first()
-                    .map(|a| leek_ty_from_type_expr(&a))
+                    .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                     .unwrap_or(LeekTy::Any);
                 return LeekTy::Array(Box::new(el));
             }
@@ -78,11 +97,11 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType) -> LeekTy {
                 let args = p.generic_argument_roots();
                 let k = args
                     .get(0)
-                    .map(leek_ty_from_type_expr)
+                    .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                     .unwrap_or(LeekTy::Any);
                 let v = args
                     .get(1)
-                    .map(leek_ty_from_type_expr)
+                    .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                     .unwrap_or(LeekTy::Any);
                 return LeekTy::Map(Box::new(k), Box::new(v));
             }
@@ -90,7 +109,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType) -> LeekTy {
                 let args = p.generic_argument_roots();
                 let inner = args
                     .first()
-                    .map(leek_ty_from_type_expr)
+                    .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                     .unwrap_or(LeekTy::Unknown);
                 return LeekTy::Interval(Box::new(LeekTy::interval_inner(inner)));
             }
@@ -98,14 +117,14 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType) -> LeekTy {
                 let args = p.generic_argument_roots();
                 let ret = args
                     .last()
-                    .map(leek_ty_from_type_expr)
+                    .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                     .unwrap_or(LeekTy::Any);
                 let params = if args.len() <= 1 {
                     Vec::new()
                 } else {
                     args[..args.len() - 1]
                         .iter()
-                        .map(leek_ty_from_type_expr)
+                        .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                         .collect()
                 };
                 return LeekTy::Function {
