@@ -5,11 +5,14 @@ pub(crate) mod version;
 
 pub use error::{ParseError, ParseErrorInner};
 #[cfg(feature = "partial-reparse")]
-pub use recovery::parse_rule_at_offset;
+pub use recovery::{parse_rule_at_offset, parse_rule_at_offset_with_built};
 pub use recovery::{
     ParsedWithRecovery, parse_doc_or_recover, parse_doc_with_recovery,
-    parse_doc_with_recovery_limited, parse_signature_doc_with_recovery,
+    parse_doc_with_recovery_limited, parse_doc_with_recovery_limited_with_built,
+    parse_doc_with_recovery_with_built, parse_signature_doc_with_recovery,
     parse_signature_doc_with_recovery_limited,
+    parse_signature_doc_with_recovery_limited_with_built,
+    parse_signature_doc_with_recovery_with_built,
 };
 pub use lang_directive::language_options_with_source_directives;
 pub use version::{
@@ -51,8 +54,11 @@ pub fn is_signature_stub_path(path: &std::path::Path) -> bool {
     name.ends_with(".sig.leek") || name.contains(".sig.")
 }
 
-fn parse_doc_with_context(src: &str, ctx: ParseContext) -> Result<ParsedDoc, ParseError> {
-    let built = grammar::built_graph();
+fn parse_doc_with_built_and_context(
+    src: &str,
+    ctx: ParseContext,
+    built: &BuiltGraph,
+) -> Result<ParsedDoc, ParseError> {
     let graph = built.as_graph();
     let bytes = src.as_bytes();
 
@@ -65,6 +71,10 @@ fn parse_doc_with_context(src: &str, ctx: ParseContext) -> Result<ParsedDoc, Par
     ParsedDoc::from_slice(bytes, &out).ok_or(ParseError::NoSyntaxRoot)
 }
 
+fn parse_doc_with_context(src: &str, ctx: ParseContext) -> Result<ParsedDoc, ParseError> {
+    parse_doc_with_built_and_context(src, ctx, grammar::built_graph())
+}
+
 /// Parse with `buf` as the working copy of the source: on success the bytes are moved into
 /// [`ParsedDoc`] and `buf` is left empty (default-constructed). Return the buffer with
 /// [`ParsedDoc::into_bytes`](sipha::diagnostics::parsed_doc::ParsedDoc::into_bytes) after use so
@@ -75,10 +85,58 @@ pub fn parse_doc_reusing_vec(
     lang: impl Into<LanguageOptions>,
     buf: &mut Vec<u8>,
 ) -> Result<ParsedDoc, ParseError> {
+    parse_doc_reusing_vec_with_built(src, lang, buf, grammar::built_graph())
+}
+
+/// Like [`parse_doc`], but uses the given [`BuiltGraph`] (for example from [`crate::grammar::built_graph`])
+/// so callers can obtain the graph once and parse many files or buffers.
+#[must_use]
+pub fn parse_doc_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    built: &BuiltGraph,
+) -> Result<ParsedDoc, ParseError> {
+    let opts = language_options_with_source_directives(src, lang);
+    parse_doc_with_built_and_context(src, opts.parse_context(), built)
+}
+
+/// Like [`parse_signature_doc`], but uses the given [`BuiltGraph`].
+#[must_use]
+pub fn parse_signature_doc_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    built: &BuiltGraph,
+) -> Result<ParsedDoc, ParseError> {
+    let opts = language_options_with_source_directives(src, lang);
+    parse_doc_with_built_and_context(src, opts.signature_parse_context(), built)
+}
+
+/// Like [`parse_doc_reusing_vec`], but uses the given [`BuiltGraph`].
+#[must_use]
+pub fn parse_doc_reusing_vec_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    buf: &mut Vec<u8>,
+    built: &BuiltGraph,
+) -> Result<ParsedDoc, ParseError> {
     let opts = language_options_with_source_directives(src, lang);
     buf.clear();
     buf.extend_from_slice(src.as_bytes());
-    parse_doc_buffer_with_context(buf, opts.parse_context())
+    parse_doc_buffer_with_built_and_context(buf, opts.parse_context(), built)
+}
+
+/// Like [`parse_signature_doc_reusing_vec`], but uses the given [`BuiltGraph`].
+#[must_use]
+pub fn parse_signature_doc_reusing_vec_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    buf: &mut Vec<u8>,
+    built: &BuiltGraph,
+) -> Result<ParsedDoc, ParseError> {
+    let opts = language_options_with_source_directives(src, lang);
+    buf.clear();
+    buf.extend_from_slice(src.as_bytes());
+    parse_doc_buffer_with_built_and_context(buf, opts.signature_parse_context(), built)
 }
 
 /// Like [`parse_signature_doc`], but uses the same buffer reuse contract as [`parse_doc_reusing_vec`].
@@ -88,14 +146,14 @@ pub fn parse_signature_doc_reusing_vec(
     lang: impl Into<LanguageOptions>,
     buf: &mut Vec<u8>,
 ) -> Result<ParsedDoc, ParseError> {
-    let opts = language_options_with_source_directives(src, lang);
-    buf.clear();
-    buf.extend_from_slice(src.as_bytes());
-    parse_doc_buffer_with_context(buf, opts.signature_parse_context())
+    parse_signature_doc_reusing_vec_with_built(src, lang, buf, grammar::built_graph())
 }
 
-fn parse_doc_buffer_with_context(buf: &mut Vec<u8>, ctx: ParseContext) -> Result<ParsedDoc, ParseError> {
-    let built = grammar::built_graph();
+fn parse_doc_buffer_with_built_and_context(
+    buf: &mut Vec<u8>,
+    ctx: ParseContext,
+    built: &BuiltGraph,
+) -> Result<ParsedDoc, ParseError> {
     let graph = built.as_graph();
     let out = with_reusable_engine(|engine| {
         engine

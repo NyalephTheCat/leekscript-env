@@ -35,13 +35,32 @@ pub fn parse_doc_with_recovery(
     parse_doc_with_recovery_limited(src, lang, DEFAULT_MAX_RECOVERY_ERRORS)
 }
 
+/// Like [`parse_doc_with_recovery`], but uses the given [`BuiltGraph`].
+#[must_use]
+pub fn parse_doc_with_recovery_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    built: &BuiltGraph,
+) -> Result<ParsedWithRecovery, ParseError> {
+    parse_doc_with_recovery_limited_with_built(src, lang, DEFAULT_MAX_RECOVERY_ERRORS, built)
+}
+
 /// Like [`parse_doc_with_recovery`], with an explicit cap on collected parse errors.
 pub fn parse_doc_with_recovery_limited(
     src: &str,
     lang: impl Into<LanguageOptions>,
     max_errors: usize,
 ) -> Result<ParsedWithRecovery, ParseError> {
-    let built = grammar::built_graph();
+    parse_doc_with_recovery_limited_with_built(src, lang, max_errors, grammar::built_graph())
+}
+
+/// Like [`parse_doc_with_recovery_limited`], but uses the given [`BuiltGraph`].
+pub fn parse_doc_with_recovery_limited_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    max_errors: usize,
+    built: &BuiltGraph,
+) -> Result<ParsedWithRecovery, ParseError> {
     let graph = built.as_graph();
     let opts = language_options_with_source_directives(src, lang);
     let ctx = opts
@@ -81,13 +100,37 @@ pub fn parse_signature_doc_with_recovery(
     parse_signature_doc_with_recovery_limited(src, lang, DEFAULT_MAX_RECOVERY_ERRORS)
 }
 
+/// Like [`parse_signature_doc_with_recovery`], but uses the given [`BuiltGraph`].
+#[must_use]
+pub fn parse_signature_doc_with_recovery_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    built: &BuiltGraph,
+) -> Result<ParsedWithRecovery, ParseError> {
+    parse_signature_doc_with_recovery_limited_with_built(
+        src,
+        lang,
+        DEFAULT_MAX_RECOVERY_ERRORS,
+        built,
+    )
+}
+
 /// Like [`parse_signature_doc_with_recovery`], with an explicit cap on collected parse errors.
 pub fn parse_signature_doc_with_recovery_limited(
     src: &str,
     lang: impl Into<LanguageOptions>,
     max_errors: usize,
 ) -> Result<ParsedWithRecovery, ParseError> {
-    let built = grammar::built_graph();
+    parse_signature_doc_with_recovery_limited_with_built(src, lang, max_errors, grammar::built_graph())
+}
+
+/// Like [`parse_signature_doc_with_recovery_limited`], but uses the given [`BuiltGraph`].
+pub fn parse_signature_doc_with_recovery_limited_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    max_errors: usize,
+    built: &BuiltGraph,
+) -> Result<ParsedWithRecovery, ParseError> {
     let graph = built.as_graph();
     let opts = language_options_with_source_directives(src, lang);
     let ctx = opts
@@ -130,7 +173,18 @@ pub fn parse_rule_at_offset(
     rule_name: &str,
     byte_offset: u32,
 ) -> Result<(ParsedDoc, u32), ParseError> {
-    let built = grammar::built_graph();
+    parse_rule_at_offset_with_built(src, lang, rule_name, byte_offset, grammar::built_graph())
+}
+
+/// Like [`parse_rule_at_offset`], but uses the given [`BuiltGraph`].
+#[cfg(feature = "partial-reparse")]
+pub fn parse_rule_at_offset_with_built(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    rule_name: &str,
+    byte_offset: u32,
+    built: &BuiltGraph,
+) -> Result<(ParsedDoc, u32), ParseError> {
     let graph = built.as_graph();
     let rule = graph.rule_id(rule_name).ok_or_else(|| {
         ParseError::from(sipha::parse::engine::ParseError::UnknownRuleName(

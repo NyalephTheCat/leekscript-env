@@ -60,15 +60,20 @@ pub use include::{
     resolve_include_path, try_resolve_include_file,
 };
 #[cfg(feature = "partial-reparse")]
-pub use parse::parse_rule_at_offset;
+pub use parse::{parse_rule_at_offset, parse_rule_at_offset_with_built};
 pub use parse::{
     ExperimentalFeatures, LanguageOptions, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, ParseError,
     ParseErrorInner, ParsedWithRecovery, Version, is_signature_stub_path,
     language_options_with_source_directives, parse_doc, parse_doc_or_recover, parse_doc_reusing_vec,
-    parse_doc_with_recovery, parse_doc_with_recovery_limited, parse_signature_doc,
-    parse_signature_doc_reusing_vec, parse_signature_doc_with_recovery,
-    parse_signature_doc_with_recovery_limited, parse_syntax_root,
+    parse_doc_reusing_vec_with_built, parse_doc_with_built, parse_doc_with_recovery,
+    parse_doc_with_recovery_limited, parse_doc_with_recovery_limited_with_built,
+    parse_doc_with_recovery_with_built, parse_signature_doc, parse_signature_doc_reusing_vec,
+    parse_signature_doc_reusing_vec_with_built, parse_signature_doc_with_built,
+    parse_signature_doc_with_recovery, parse_signature_doc_with_recovery_limited,
+    parse_signature_doc_with_recovery_limited_with_built,
+    parse_signature_doc_with_recovery_with_built, parse_syntax_root,
 };
+pub use sipha::parse::builder::{BuiltGraph, SharedGrammar};
 pub use sipha::diagnostics::parsed_doc::ParsedDoc;
 pub use sipha::types::{Pos, Span};
 
