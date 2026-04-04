@@ -14,18 +14,21 @@ pub use limits::IncludeLimits;
 pub use merge::{
     MergeIncludesError, MergedSourceMapping, MergedSpanMap, PreludeBuildError,
     merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
-    prepend_signatures_to_merged,
+    merge_included_sources_to_single_file_mapped_with_overlay, prepend_signatures_to_merged,
 };
 
 use sipha::prelude::ParsedDoc;
 use sipha::tree::ast::{AstNode, AstNodeExt};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Root, Stmt};
-use crate::parse::{LanguageOptions, ParseError, is_signature_stub_path, parse_doc, parse_signature_doc};
+use crate::parse::{
+    LanguageOptions, ParseError, is_signature_stub_path, language_options_with_source_directives, parse_doc,
+    parse_signature_doc,
+};
 
 /// Resolved project: entry file and all transitively included sources, in **depth-first preorder**
 /// (same order as the reference compiler’s first include pass).
@@ -142,6 +145,33 @@ pub fn resolve_include_path(
     resolve_inner(root_dir, current_file_dir, path_arg.trim())
 }
 
+/// Default project root for a Leek entry file when the tool does not take an explicit root (LSP,
+/// `leekscript check` without `--root`).
+///
+/// Walks upward from the entry’s parent for a directory containing `main.leek`. If none is found,
+/// returns the entry file’s parent so behavior matches a single-folder “project”.
+///
+/// This matters because `..` in includes cannot escape above [`project_root`](load_project_with_includes)
+/// (see [`parent_dir_for_include_resolve`]).
+pub fn infer_include_project_root(entry_path: &Path) -> PathBuf {
+    let Some(mut dir) = entry_path.parent().map(Path::to_path_buf) else {
+        return Path::new("/").to_path_buf();
+    };
+    let fallback = dir.clone();
+    loop {
+        if dir.join("main.leek").is_file() {
+            return dir;
+        }
+        let Some(parent) = dir.parent() else {
+            return fallback;
+        };
+        if parent.as_os_str() == dir.as_os_str() {
+            return fallback;
+        }
+        dir = parent.to_path_buf();
+    }
+}
+
 /// Extensions tried after the path from [`resolve_include_path`] when that path is not a file.
 const INCLUDE_FILE_EXTENSIONS: &[&str] = &["leek", "ls", "leekscript"];
 
@@ -245,6 +275,57 @@ fn canonical_file_key(path: &Path) -> Result<PathBuf, std::io::Error> {
     std::fs::canonicalize(path)
 }
 
+/// Look up editor buffer text for a path (LSP / IDE): exact path, then canonicalized path.
+fn overlay_get<'a>(overlay: &'a HashMap<PathBuf, String>, path: &Path) -> Option<&'a String> {
+    overlay
+        .get(path)
+        .or_else(|| fs::canonicalize(path).ok().and_then(|c| overlay.get(&c)))
+}
+
+fn overlay_has(overlay: &HashMap<PathBuf, String>, path: &Path) -> bool {
+    overlay_get(overlay, path).is_some()
+}
+
+/// Stable dedup key for [`load_file_recursive`]: canonical path when the file exists on disk,
+/// otherwise an absolute path when the file is only present in `open_overlay`.
+fn file_seen_key(
+    path: &Path,
+    open_overlay: Option<&HashMap<PathBuf, String>>,
+) -> Result<PathBuf, std::io::Error> {
+    match canonical_file_key(path) {
+        Ok(k) => Ok(k),
+        Err(e) => {
+            if open_overlay.is_some_and(|o| overlay_has(o, path)) {
+                std::path::absolute(path).map_err(|_| e)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+pub(crate) fn try_resolve_include_file_with_overlay(
+    root_dir: &Path,
+    current_file_dir: &Path,
+    path_arg: &str,
+    open_overlay: Option<&HashMap<PathBuf, String>>,
+) -> Result<PathBuf, ResolveError> {
+    match try_resolve_include_file(root_dir, current_file_dir, path_arg) {
+        Ok(p) => Ok(p),
+        Err(ResolveError::EmptyPath) => Err(ResolveError::EmptyPath),
+        Err(ResolveError::NoMatchingFile { logical }) => {
+            if let Some(ov) = open_overlay {
+                for cand in include_path_candidates(&logical) {
+                    if overlay_has(ov, &cand) {
+                        return Ok(fs::canonicalize(&cand).unwrap_or(cand));
+                    }
+                }
+            }
+            Err(ResolveError::NoMatchingFile { logical })
+        }
+    }
+}
+
 /// Load `entry` (relative to `project_root` or absolute) and all files reached by top-level
 /// `include("...")`, in depth-first preorder, using [`IncludeLimits::REFERENCE`].
 ///
@@ -264,6 +345,22 @@ pub fn load_project_with_includes_limited(
     entry: impl AsRef<Path>,
     lang: impl Into<LanguageOptions>,
     limits: IncludeLimits,
+) -> Result<LoadedProject, IncludeLoadError> {
+    load_project_with_includes_limited_with_overlay(project_root, entry, lang, limits, None)
+}
+
+/// Like [`load_project_with_includes_limited`], but uses `open_overlay` for any path present in the
+/// map before reading the filesystem. Missing include targets can be satisfied from the overlay
+/// alone (e.g. a new file open in the editor but not yet written to disk).
+///
+/// Keys should be normal file paths; values are full file text. The LSP typically keys by
+/// `canonicalize(path)` when possible so lookups match resolved include paths.
+pub fn load_project_with_includes_limited_with_overlay(
+    project_root: impl AsRef<Path>,
+    entry: impl AsRef<Path>,
+    lang: impl Into<LanguageOptions>,
+    limits: IncludeLimits,
+    open_overlay: Option<&HashMap<PathBuf, String>>,
 ) -> Result<LoadedProject, IncludeLoadError> {
     let lang = lang.into();
     let project_root = project_root.as_ref();
@@ -288,6 +385,7 @@ pub fn load_project_with_includes_limited(
         limits,
         &mut seen,
         &mut files,
+        open_overlay,
     )?;
 
     Ok(LoadedProject {
@@ -303,8 +401,9 @@ fn load_file_recursive(
     limits: IncludeLimits,
     seen: &mut HashSet<PathBuf>,
     out: &mut Vec<LoadedSourceFile>,
+    open_overlay: Option<&HashMap<PathBuf, String>>,
 ) -> Result<(), IncludeLoadError> {
-    let key = canonical_file_key(file_path).map_err(IncludeLoadError::Io)?;
+    let key = file_seen_key(file_path, open_overlay).map_err(IncludeLoadError::Io)?;
     if seen.contains(&key) {
         return Ok(());
     }
@@ -315,7 +414,15 @@ fn load_file_recursive(
     }
     seen.insert(key);
 
-    let source = fs::read_to_string(file_path).map_err(IncludeLoadError::Io)?;
+    let source = if let Some(ov) = open_overlay {
+        if let Some(s) = overlay_get(ov, file_path) {
+            s.clone()
+        } else {
+            fs::read_to_string(file_path).map_err(IncludeLoadError::Io)?
+        }
+    } else {
+        fs::read_to_string(file_path).map_err(IncludeLoadError::Io)?
+    };
     let parsed = if is_signature_stub_path(file_path) {
         parse_signature_doc(&source, lang)
     } else {
@@ -344,7 +451,12 @@ fn load_file_recursive(
             continue;
         };
         let arg = lit.value();
-        let resolved = match try_resolve_include_file(root_dir, &current_dir, &arg) {
+        let resolved = match try_resolve_include_file_with_overlay(
+            root_dir,
+            &current_dir,
+            &arg,
+            open_overlay,
+        ) {
             Ok(p) => p,
             Err(ResolveError::EmptyPath) => {
                 return Err(IncludeLoadError::Resolve(
@@ -360,15 +472,114 @@ fn load_file_recursive(
                 });
             }
         };
-        load_file_recursive(&resolved, root_dir, lang, limits, seen, out)?;
+        load_file_recursive(
+            &resolved,
+            root_dir,
+            lang,
+            limits,
+            seen,
+            out,
+            open_overlay,
+        )?;
     }
 
     Ok(())
 }
 
+/// One merged buffer ready for `parse_*` / semantic analysis: includes expanded, signatures
+/// prepended, and [`LanguageOptions`] resolved from leading `leeklang:` directives in `combined`.
+#[derive(Debug)]
+pub struct MergedCheckUnit {
+    pub combined: String,
+    pub mapping: MergedSourceMapping,
+    pub project: LoadedProject,
+    pub resolved: LanguageOptions,
+    pub use_signature_grammar: bool,
+}
+
+/// Aggregate error for [`prepare_merged_check_unit`].
+#[derive(Debug)]
+pub enum MergedCheckPrepError {
+    Load(IncludeLoadError),
+    Merge(MergeIncludesError),
+    Prelude(PreludeBuildError),
+}
+
+impl fmt::Display for MergedCheckPrepError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MergedCheckPrepError::Load(e) => e.fmt(f),
+            MergedCheckPrepError::Merge(e) => e.fmt(f),
+            MergedCheckPrepError::Prelude(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for MergedCheckPrepError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            MergedCheckPrepError::Load(e) => Some(e),
+            MergedCheckPrepError::Merge(e) => Some(e),
+            MergedCheckPrepError::Prelude(e) => Some(e),
+        }
+    }
+}
+
+/// Load entry + transitive includes, merge to one string, prepend signature files, then apply
+/// source directives to obtain parse options. Used by `leekscript check`, `merge`, `format
+/// --merge-includes`, and the language server.
+///
+/// Pass `overlay: None` for disk-only loading (CLI). Pass open-document buffers for LSP-style
+/// overlay (same map as [`load_project_with_includes_limited_with_overlay`]). Merge uses
+/// [`merge_included_sources_to_single_file_mapped_with_overlay`] with the same map so includes that
+/// exist only in open buffers (not on disk) still expand correctly.
+#[must_use]
+pub fn prepare_merged_check_unit(
+    project_root: &Path,
+    entry_path: &Path,
+    lang: LanguageOptions,
+    signature_files: &[PathBuf],
+    overlay: Option<&HashMap<PathBuf, String>>,
+) -> Result<MergedCheckUnit, MergedCheckPrepError> {
+    let project = if let Some(o) = overlay {
+        load_project_with_includes_limited_with_overlay(
+            project_root,
+            entry_path,
+            lang,
+            IncludeLimits::REFERENCE,
+            Some(o),
+        )
+        .map_err(MergedCheckPrepError::Load)?
+    } else {
+        load_project_with_includes(project_root, entry_path, lang).map_err(MergedCheckPrepError::Load)?
+    };
+
+    let (merged, map) = merge_included_sources_to_single_file_mapped_with_overlay(
+        project_root,
+        &project,
+        overlay,
+    )
+    .map_err(MergedCheckPrepError::Merge)?;
+
+    let (combined, mapping) =
+        prepend_signatures_to_merged(lang, signature_files, &merged, map).map_err(MergedCheckPrepError::Prelude)?;
+
+    let resolved = language_options_with_source_directives(&combined, lang);
+    let use_signature_grammar = !signature_files.is_empty() || is_signature_stub_path(entry_path);
+
+    Ok(MergedCheckUnit {
+        combined,
+        mapping,
+        project,
+        resolved,
+        use_signature_grammar,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parse::Version;
 
     #[test]
     fn resolve_absolute_from_root() {
@@ -446,5 +657,105 @@ mod tests {
         let got = try_resolve_include_file(&root, &root, "x").unwrap();
         assert_eq!(got.file_name().unwrap(), "x.leekscript");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn infer_root_finds_main_leek_ancestor() {
+        let base = std::env::temp_dir().join(format!("leek_infer_root_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("registries")).unwrap();
+        std::fs::write(base.join("main.leek"), "1;\n").unwrap();
+        let entry = base.join("registries").join("X.leek");
+        std::fs::write(&entry, "1;\n").unwrap();
+        assert_eq!(infer_include_project_root(&entry), base);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn infer_root_falls_back_to_parent() {
+        let base = std::env::temp_dir().join(format!("leek_infer_fallback_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("solo")).unwrap();
+        let entry = base.join("solo").join("a.leek");
+        std::fs::write(&entry, "1;\n").unwrap();
+        assert_eq!(infer_include_project_root(&entry), base.join("solo"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn overlay_resolves_include_not_on_disk() {
+        let base = std::env::temp_dir().join(format!("leek_overlay_inc_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let main = base.join("main.leek");
+        std::fs::write(&main, "include(\"helper\");\n").unwrap();
+        let helper_path = base.join("helper.leek");
+        let mut overlay = HashMap::new();
+        overlay.insert(helper_path.clone(), "2;\n".to_string());
+        let p = load_project_with_includes_limited_with_overlay(
+            &base,
+            &main,
+            Version::V4,
+            IncludeLimits::REFERENCE,
+            Some(&overlay),
+        )
+        .unwrap();
+        assert_eq!(p.files.len(), 2);
+        assert_eq!(p.files[1].path, helper_path);
+        assert_eq!(p.files[1].source, "2;\n");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn prepare_merged_check_unit_single_entry_no_overlay() {
+        let base = std::env::temp_dir().join(format!("leek_prep_unit_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let main = base.join("main.leek");
+        std::fs::write(&main, "var x = 1;\n").unwrap();
+        let lang = crate::parse::LanguageOptions::v4_experimental_all();
+        let prep = prepare_merged_check_unit(&base, &main, lang, &[], None).unwrap();
+        assert!(prep.combined.contains("var x"));
+        assert!(!prep.use_signature_grammar);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn prepare_merged_check_unit_overlay_include_not_on_disk() {
+        let base = std::env::temp_dir().join(format!("leek_prep_virt_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let main = base.join("main.leek");
+        std::fs::write(&main, "include(\"helper\");\n").unwrap();
+        let helper_path = base.join("helper.leek");
+        let mut overlay = HashMap::new();
+        overlay.insert(helper_path.clone(), "var z = 3;\n".to_string());
+        let lang = crate::parse::LanguageOptions::v4_experimental_all();
+        let prep = prepare_merged_check_unit(&base, &main, lang, &[], Some(&overlay)).unwrap();
+        assert_eq!(prep.project.files.len(), 2);
+        assert!(prep.combined.contains("var z"));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn prepare_merged_check_unit_overlay_overrides_entry_buffer() {
+        let base = std::env::temp_dir().join(format!("leek_prep_ov_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let main = base.join("main.leek");
+        std::fs::write(&main, "// stale on disk\n").unwrap();
+        let helper = base.join("helper.leek");
+        std::fs::write(&helper, "var y = 2;\n").unwrap();
+        let mut overlay = HashMap::new();
+        overlay.insert(
+            std::fs::canonicalize(&main).unwrap(),
+            "include(\"helper.leek\");\n".to_string(),
+        );
+        let lang = crate::parse::LanguageOptions::v4_experimental_all();
+        let prep = prepare_merged_check_unit(&base, &main, lang, &[], Some(&overlay)).unwrap();
+        assert_eq!(prep.project.files.len(), 2);
+        assert!(prep.combined.contains("var y"));
+        assert!(!prep.combined.contains("stale"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

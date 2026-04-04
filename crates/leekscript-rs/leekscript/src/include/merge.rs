@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use sipha::tree::ast::{AstNode, AstNodeExt};
@@ -12,10 +13,7 @@ use sipha::tree::ast::{AstNode, AstNodeExt};
 use crate::ast::{Root, Stmt};
 use crate::parse::LanguageOptions;
 
-use super::{
-    IncludeLoadError, LoadedProject, LoadedSourceFile, ResolveError, load_project_with_includes,
-    try_resolve_include_file,
-};
+use super::{IncludeLoadError, LoadedProject, LoadedSourceFile, ResolveError, load_project_with_includes};
 
 /// Maps byte offsets in merged include output back to a concrete source file and offset.
 #[derive(Debug, Clone, Default)]
@@ -54,7 +52,8 @@ impl MergedSourceMapping {
 /// Failure while merging includes into one buffer.
 #[derive(Debug)]
 pub enum MergeIncludesError {
-    /// Same as [`fs::canonicalize`] when building path keys.
+    /// I/O when building stable path keys ([`fs::canonicalize`], or [`std::path::absolute`] for
+    /// overlay-only files that are not on disk).
     Io(PathBuf, std::io::Error),
     /// Include argument could not be resolved (invalid / empty path).
     Resolve(PathBuf, ResolveError),
@@ -66,7 +65,7 @@ impl fmt::Display for MergeIncludesError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MergeIncludesError::Io(p, e) => {
-                write!(f, "could not canonicalize {}: {e}", p.display())
+                write!(f, "could not build merge path key for {}: {e}", p.display())
             }
             MergeIncludesError::Resolve(p, e) => {
                 write!(f, "include path resolve error from {}: {e}", p.display())
@@ -218,8 +217,14 @@ pub fn prepend_signatures_to_merged(
     Ok((full, MergedSourceMapping { spans }))
 }
 
-fn canonical_key(path: &Path) -> Result<PathBuf, MergeIncludesError> {
-    fs::canonicalize(path).map_err(|e| MergeIncludesError::Io(path.to_path_buf(), e))
+/// Stable key for deduplicating [`LoadedProject`] files during merge (must match loader resolution).
+fn merge_path_key(path: &Path) -> Result<PathBuf, MergeIncludesError> {
+    match fs::canonicalize(path) {
+        Ok(p) => Ok(p),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => std::path::absolute(path)
+            .map_err(|e2| MergeIncludesError::Io(path.to_path_buf(), e2)),
+        Err(e) => Err(MergeIncludesError::Io(path.to_path_buf(), e)),
+    }
 }
 
 fn display_path_relative(project_root: &Path, path: &Path) -> String {
@@ -233,7 +238,7 @@ fn build_file_index(
 ) -> Result<HashMap<PathBuf, usize>, MergeIncludesError> {
     let mut map = HashMap::new();
     for (i, file) in project.files.iter().enumerate() {
-        let key = canonical_key(&file.path)?;
+        let key = merge_path_key(&file.path)?;
         map.insert(key, i);
     }
     Ok(map)
@@ -292,12 +297,23 @@ pub fn merge_included_sources_to_single_file_mapped(
     project_root: impl AsRef<Path>,
     project: &LoadedProject,
 ) -> Result<(String, MergedSourceMapping), MergeIncludesError> {
+    merge_included_sources_to_single_file_mapped_with_overlay(project_root, project, None)
+}
+
+/// Like [`merge_included_sources_to_single_file_mapped`], but uses the same `open_overlay` as
+/// [`super::load_project_with_includes_limited_with_overlay`] so includes that exist only in memory
+/// resolve identically during merge expansion.
+pub fn merge_included_sources_to_single_file_mapped_with_overlay(
+    project_root: impl AsRef<Path>,
+    project: &LoadedProject,
+    open_overlay: Option<&HashMap<PathBuf, String>>,
+) -> Result<(String, MergedSourceMapping), MergeIncludesError> {
     let project_root = project_root.as_ref();
     let root_dir = fs::canonicalize(project_root)
         .map_err(|e| MergeIncludesError::Io(project_root.to_path_buf(), e))?;
 
     let index = build_file_index(project)?;
-    let entry_key = canonical_key(&project.entry)?;
+    let entry_key = merge_path_key(&project.entry)?;
     let Some(&entry_idx) = index.get(&entry_key) else {
         return Err(MergeIncludesError::MissingLoadedFile(project.entry.clone()));
     };
@@ -314,6 +330,7 @@ pub fn merge_included_sources_to_single_file_mapped(
         &mut emitted,
         &mut out,
         &mut mapping,
+        open_overlay,
     )?;
     Ok((out, mapping))
 }
@@ -326,6 +343,7 @@ fn emit_top_level(
     emitted: &mut HashSet<PathBuf>,
     out: &mut String,
     mapping: &mut MergedSourceMapping,
+    open_overlay: Option<&HashMap<PathBuf, String>>,
 ) -> Result<(), MergeIncludesError> {
     let Some(root_node) = Root::cast(file.parsed.root().clone()) else {
         let merged_start = out.len() as u32;
@@ -352,17 +370,19 @@ fn emit_top_level(
                     continue;
                 };
                 let arg = lit.value();
-                let resolved = try_resolve_include_file(root_dir, &current_dir, &arg).map_err(
-                    |e| match e {
-                        ResolveError::EmptyPath => {
-                            MergeIncludesError::Resolve(file.path.clone(), e)
-                        }
-                        ResolveError::NoMatchingFile { logical } => {
-                            MergeIncludesError::MissingLoadedFile(logical)
-                        }
-                    },
-                )?;
-                let key = canonical_key(&resolved)?;
+                let resolved = super::try_resolve_include_file_with_overlay(
+                    root_dir,
+                    &current_dir,
+                    &arg,
+                    open_overlay,
+                )
+                .map_err(|e| match e {
+                    ResolveError::EmptyPath => MergeIncludesError::Resolve(file.path.clone(), e),
+                    ResolveError::NoMatchingFile { logical } => {
+                        MergeIncludesError::MissingLoadedFile(logical)
+                    }
+                })?;
+                let key = merge_path_key(&resolved)?;
                 let rel = display_path_relative(root_dir, &key);
 
                 if emitted.contains(&key) {
@@ -381,7 +401,16 @@ fn emit_top_level(
                 out.push_str("// leekscript-include: begin ");
                 out.push_str(&rel);
                 out.push('\n');
-                emit_top_level(included, root_dir, project, index, emitted, out, mapping)?;
+                emit_top_level(
+                    included,
+                    root_dir,
+                    project,
+                    index,
+                    emitted,
+                    out,
+                    mapping,
+                    open_overlay,
+                )?;
             }
             _ => emit_stmt_text(out, file, &stmt, mapping),
         }

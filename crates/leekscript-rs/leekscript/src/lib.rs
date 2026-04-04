@@ -52,10 +52,12 @@ pub mod visit;
 pub use document::{DocEditError, LeekDoc};
 pub use include::{
     IncludeLimits, IncludeLoadError, LoadedProject, LoadedSourceFile, MergeIncludesError,
-    MergedSourceMapping, MergedSpanMap, PreludeBuildError, ResolveError,
-    load_project_with_includes, load_project_with_includes_limited,
-    merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
-    prepend_signatures_to_merged, resolve_include_path, try_resolve_include_file,
+    MergedCheckPrepError, MergedCheckUnit, MergedSourceMapping, MergedSpanMap, PreludeBuildError,
+    ResolveError, infer_include_project_root, load_project_with_includes, load_project_with_includes_limited,
+    load_project_with_includes_limited_with_overlay,     merge_included_sources_to_single_file,
+    merge_included_sources_to_single_file_mapped, merge_included_sources_to_single_file_mapped_with_overlay,
+    prepare_merged_check_unit, prepend_signatures_to_merged,
+    resolve_include_path, try_resolve_include_file,
 };
 #[cfg(feature = "partial-reparse")]
 pub use parse::parse_rule_at_offset;

@@ -5,6 +5,7 @@
 use std::io::{self, Write};
 use std::path::Path;
 
+use leekscript::MergedCheckPrepError;
 use leekscript::ParseError;
 use leekscript::SemanticSeverity;
 use leekscript::include::{
@@ -238,6 +239,34 @@ pub fn include_load(root: &Path, entry: &Path, err: &IncludeLoadError) -> Report
             entry.display(),
             root.display(),
         )),
+    }
+}
+
+/// How to format [`MergeIncludesError`] / prelude failures from [`MergedCheckPrepError`].
+#[derive(Clone, Copy, Debug)]
+pub enum MergedCheckPrepContext {
+    /// `check` / `format`: merge failures mention the entry path; prelude errors are entry-scoped.
+    CheckOrFormat,
+    /// `merge` subcommand: plain `merge: …` and [`prelude_signatures`] for prelude.
+    MergeSubcommand,
+}
+
+pub fn merged_check_prep(
+    root: &Path,
+    entry: &Path,
+    err: MergedCheckPrepError,
+    ctx: MergedCheckPrepContext,
+) -> Report {
+    match err {
+        MergedCheckPrepError::Load(e) => include_load(root, entry, &e),
+        MergedCheckPrepError::Merge(e) => match ctx {
+            MergedCheckPrepContext::CheckOrFormat => merge_includes(entry, e),
+            MergedCheckPrepContext::MergeSubcommand => merge_command(e),
+        },
+        MergedCheckPrepError::Prelude(e) => match ctx {
+            MergedCheckPrepContext::CheckOrFormat => signatures_for_entry(entry, e),
+            MergedCheckPrepContext::MergeSubcommand => prelude_signatures(e),
+        },
     }
 }
 
