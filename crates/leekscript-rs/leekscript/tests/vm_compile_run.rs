@@ -21,6 +21,61 @@ fn array_eq_in_var_initializer_compiles_and_runs() {
 }
 
 #[test]
+fn array_literal_with_more_than_255_elements_runs() {
+    let mut src = String::from("return [");
+    for i in 0..260 {
+        if i > 0 {
+            src.push(',');
+        }
+        src.push('1');
+    }
+    src.push_str("];");
+    let chunk = compile_chunk_v4(&src).expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    let v = vm.run().expect("run");
+    let Value::Array(a) = v else {
+        panic!("expected array");
+    };
+    assert_eq!(a.len(), 260);
+}
+
+#[test]
+fn string_concat_charges_ops_like_java_ai_add() {
+    // `AI.add` charges `string(a).length() + string(b).length()` on top of per-line/step costs.
+    // VM charges +1 per opcode after the handler; `Add` on two strings adds len sum inside `op_add`.
+    let chunk = compile_chunk_v4("return 'ab' + 'cde';").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    vm.run().expect("run");
+    assert_eq!(vm.operations, 9, "4 opcode ticks + 2 + 3 string concat ops");
+}
+
+#[test]
+fn map_literal_compiles_to_map_build() {
+    let chunk = compile_chunk_v4("return [:];").expect("compile");
+    assert!(chunk.bytecode.code.contains(&(Opcode::MapBuild as u8)));
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    let v = vm.run().expect("run");
+    assert!(matches!(v, Value::Map(m) if m.is_empty()));
+}
+
+#[test]
+fn map_merge_put_if_absent_matches_java() {
+    let chunk = compile_chunk_v4("return [1: 2] + [1: 3];").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    let v = vm.run().expect("run");
+    let Value::Map(m) = v else {
+        panic!("expected map");
+    };
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0].0, Value::Number(1.0));
+    assert_eq!(m[0].1, Value::Number(2.0));
+}
+
+#[test]
 fn dispatch_table_is_full_and_defaults_to_illegal() {
     use leekscript::vm::DISPATCH;
     assert_eq!(DISPATCH.len(), 256);

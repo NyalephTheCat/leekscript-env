@@ -1,7 +1,8 @@
 //! Compile a tiny LeekScript subset from the CST into [`Bytecode`](super::bytecode::Bytecode).
 //!
-//! Covers numeric expressions, `null` / `true` / `false`, string literals, plain array literals,
-//! Java-style `+` (string concat, array concat, `real` sum), V4-style `==` / `!=` / `===` / `!==`,
+//! Covers numeric expressions, `null` / `true` / `false`, string literals, array / map literals
+//! (`[]`, `[:]`, `[k: v]`), Java-style `+` (string / array / map merge, `real` sum; `AI.add`-style
+//! operation charges for concat), V4-style `==` / `!=` / `===` / `!==`,
 //! ordered comparisons (`AI.real` subset), `!`, short-circuit `&&` / `||` / `and` / `or`, `if`,
 //! `var` with comma-separated declarators, `return`, and expression statements.
 //!
@@ -121,6 +122,72 @@ fn flatten_one_expr_layer(items: &[SyntaxElement]) -> Vec<SyntaxElement> {
         out.push(el.clone());
     }
     out
+}
+
+/// If `semantic` is the non-trivia children of a `K::ArrayExpr`, detect map literal
+/// shapes `[:]` or `[key: BracketMapExpr…]` and return key/value pairs in source order.
+fn try_extract_map_literal_pairs(
+    semantic: &[SyntaxElement],
+) -> Result<Option<Vec<(Expr, Expr)>>, CompileError> {
+    if semantic.len() < 3 {
+        return Ok(None);
+    }
+    match (&semantic[0], semantic.last()) {
+        (SyntaxElement::Token(lb), Some(SyntaxElement::Token(rb))) => {
+            if lb.kind() != K::LBracket.into_syntax_kind()
+                || rb.kind() != K::RBracket.into_syntax_kind()
+            {
+                return Ok(None);
+            }
+        }
+        _ => return Ok(None),
+    }
+
+    let inner = &semantic[1..semantic.len() - 1];
+
+    if inner.len() == 1 {
+        if let SyntaxElement::Node(n) = &inner[0] {
+            if let Some(b) = BracketMapExpr::cast(n.clone()) {
+                let values: Vec<Expr> = AstNodeExt::children::<Expr>(b.syntax()).collect();
+                if values.is_empty() {
+                    return Ok(Some(Vec::new()));
+                }
+            }
+        }
+        return Ok(None);
+    }
+
+    // `[key: value, …]` — the grammar emits `EXPR` then `COLON` then `BRACKET_MAP_EXPR` under
+    // `K::ArrayExpr` (see `bracket_list_or_map_inner`).
+    if inner.len() >= 3 {
+        if let (SyntaxElement::Node(nk), SyntaxElement::Token(col), SyntaxElement::Node(nb)) =
+            (&inner[0], &inner[1], &inner[2])
+        {
+            if col.kind() == K::Colon.into_syntax_kind() {
+                let key = Expr::cast(nk.clone());
+                let bracket = BracketMapExpr::cast(nb.clone());
+                if let (Some(k), Some(b)) = (key, bracket) {
+                    let inner_vals: Vec<Expr> = AstNodeExt::children::<Expr>(b.syntax()).collect();
+                    if inner_vals.is_empty() {
+                        return Err(CompileError::Unsupported(
+                            "map literal missing value after key",
+                        ));
+                    }
+                    let mut pairs = vec![(k, inner_vals[0].clone())];
+                    let rest = &inner_vals[1..];
+                    if rest.len() % 2 != 0 {
+                        return Err(CompileError::Unsupported("map literal"));
+                    }
+                    for ch in rest.chunks_exact(2) {
+                        pairs.push((ch[0].clone(), ch[1].clone()));
+                    }
+                    return Ok(Some(pairs));
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 impl CompileCtx {
@@ -317,20 +384,33 @@ impl CompileCtx {
 
     fn compile_array_literal(&mut self, arr: &ArrayExpr) -> Result<(), CompileError> {
         let syn = arr.syntax();
-        for el in syn.children() {
-            if syntax_el_is_trivia(&el) {
-                continue;
-            }
-            if let SyntaxElement::Node(n) = &el {
-                if BracketMapExpr::can_cast(n.kind()) || IntervalExpr::can_cast(n.kind()) {
+        let semantic: Vec<_> = syn
+            .children()
+            .filter(|e| !syntax_el_is_trivia(e))
+            .collect();
+        for el in &semantic {
+            if let SyntaxElement::Node(n) = el {
+                if IntervalExpr::can_cast(n.kind()) {
                     return Err(CompileError::Unsupported(
-                        "only plain array literals are supported",
+                        "interval literals are not supported by the VM compiler",
                     ));
                 }
             }
         }
+
+        if let Some(pairs) = try_extract_map_literal_pairs(&semantic)? {
+            let n = u16::try_from(pairs.len())
+                .map_err(|_| CompileError::Unsupported("map literal too large"))?;
+            for (k, v) in pairs {
+                self.compile_expr(k)?;
+                self.compile_expr(v)?;
+            }
+            self.builder.emit_map_build(n);
+            return Ok(());
+        }
+
         let items: Vec<Expr> = AstNodeExt::children::<Expr>(syn).collect();
-        let cnt = u8::try_from(items.len())
+        let cnt = u16::try_from(items.len())
             .map_err(|_| CompileError::Unsupported("array literal too large"))?;
         for e in items {
             self.compile_expr(e)?;

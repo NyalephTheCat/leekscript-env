@@ -50,9 +50,14 @@ impl BytecodeBuilder {
         self.code.push(b);
     }
 
-    pub fn emit_array_build(&mut self, element_count: u8) {
+    pub fn emit_array_build(&mut self, element_count: u16) {
         self.emit_opcode(Opcode::ArrayBuild);
-        self.emit_u8(element_count);
+        self.emit_u16_operand(element_count);
+    }
+
+    pub fn emit_map_build(&mut self, pair_count: u16) {
+        self.emit_opcode(Opcode::MapBuild);
+        self.emit_u16_operand(pair_count);
     }
 
     pub fn emit_u16_operand(&mut self, v: u16) {

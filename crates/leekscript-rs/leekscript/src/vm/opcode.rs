@@ -42,6 +42,8 @@ pub enum Opcode {
     Gte = 23,
     /// Pop value; push bool (`!truthy`).
     Not = 24,
-    /// Pop `n` values (last pushed = last element); push one [`Value::Array`](super::value::Value::Array). Followed by `u8` element count `n` (max 255).
+    /// Pop `n` values (last pushed = last element); push one [`Value::Array`](super::value::Value::Array). Followed by `u16` element count `n`.
     ArrayBuild = 25,
+    /// Pop `n` key/value pairs (last pushed = last value); push [`Value::Map`](super::value::Value::Map) in source order. Followed by `u16` pair count `n`.
+    MapBuild = 26,
 }

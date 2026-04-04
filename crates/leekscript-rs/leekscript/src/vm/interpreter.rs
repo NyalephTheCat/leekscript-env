@@ -51,6 +51,7 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::Gte as usize] = op_gte;
     table[Opcode::Not as usize] = op_not;
     table[Opcode::ArrayBuild as usize] = op_array_build;
+    table[Opcode::MapBuild as usize] = op_map_build;
     table
 };
 
@@ -278,23 +279,34 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
         (Value::String(_), _) | (_, Value::String(_)) => {
             let sa = a.to_leek_coerce_string();
             let sb = b.to_leek_coerce_string();
+            let extra = (sa.len() + sb.len()) as u64;
+            vm.charge_ops(extra)?;
             Value::String(format!("{sa}{sb}"))
         }
         (Value::Array(ax), Value::Array(bx)) => {
+            let extra = 2u64.saturating_add(ax.len() as u64).saturating_add(bx.len() as u64);
+            vm.charge_ops(extra)?;
             let mut v = ax.clone();
             v.extend(bx.iter().cloned());
             Value::Array(v)
         }
         (Value::Array(ax), _) => {
+            vm.charge_ops((ax.len() as u64).saturating_mul(2))?;
             let mut v = ax.clone();
             v.push(b);
             Value::Array(v)
         }
         (_, Value::Array(bx)) => {
+            vm.charge_ops((bx.len() as u64).saturating_mul(2))?;
             let mut v = Vec::with_capacity(1 + bx.len());
             v.push(a);
             v.extend(bx.iter().cloned());
             Value::Array(v)
+        }
+        (Value::Map(mx), Value::Map(my)) => {
+            let extra = ((mx.len() + my.len()) * 3) as u64;
+            vm.charge_ops(extra)?;
+            Value::Map(Value::map_merge_java(mx, my))
         }
         _ => Value::Number(a.to_real_for_compare() + b.to_real_for_compare()),
     };
@@ -475,12 +487,25 @@ fn op_not(vm: &mut Vm) -> Result<(), VmError> {
 }
 
 fn op_array_build(vm: &mut Vm) -> Result<(), VmError> {
-    let n = vm.read_u8()? as usize;
+    let n = vm.read_u16()? as usize;
     let mut elems = Vec::with_capacity(n);
     for _ in 0..n {
         elems.push(vm.pop_stack()?);
     }
     elems.reverse();
     vm.push_stack(Value::Array(elems))?;
+    Ok(())
+}
+
+fn op_map_build(vm: &mut Vm) -> Result<(), VmError> {
+    let n = vm.read_u16()? as usize;
+    let mut pairs = Vec::with_capacity(n);
+    for _ in 0..n {
+        let val = vm.pop_stack()?;
+        let key = vm.pop_stack()?;
+        pairs.push((key, val));
+    }
+    pairs.reverse();
+    vm.push_stack(Value::Map(pairs))?;
     Ok(())
 }

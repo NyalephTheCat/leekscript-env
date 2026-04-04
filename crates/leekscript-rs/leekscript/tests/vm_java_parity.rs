@@ -101,6 +101,15 @@ fn parity_string_export() {
 }
 
 #[test]
+fn parity_map_literal_export_and_merge() {
+    // `MapLeekValue.string` empty `[:]`; `mapMerge` uses `putIfAbsent` (left wins on duplicate keys).
+    assert_eq!(run_export("return [:];"), "[:]");
+    assert_eq!(run_export("return [1: 2];"), "[1 : 2]");
+    assert_eq!(run_export("return [1: 2] + [3: 4];"), "[1 : 2, 3 : 4]");
+    assert_eq!(run_export("return [1: 2] + [1: 99];"), "[1 : 2]");
+}
+
+#[test]
 fn parity_operator_plus_java() {
     // TestOperators.testOperator_Plus
     assert_eq!(run_export("return false + 1;"), "1");

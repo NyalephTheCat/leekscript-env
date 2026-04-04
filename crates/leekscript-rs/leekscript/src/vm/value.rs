@@ -13,9 +13,23 @@ pub enum Value {
     String(String),
     /// Dense array (Java `ArrayLeekValue`–style indexing; equality is deep for this VM).
     Array(Vec<Value>),
+    /// Insertion-ordered map literal (`[:]` / `[k: v, …]`); merge uses Java `putIfAbsent` rules.
+    Map(Vec<(Value, Value)>),
 }
 
 impl Value {
+    /// Java `MapLeekValue.mapMerge`: clone `base`, then append entries from `other` whose keys are absent.
+    #[must_use]
+    pub fn map_merge_java(base: &[(Value, Value)], other: &[(Value, Value)]) -> Vec<(Value, Value)> {
+        let mut out: Vec<(Value, Value)> = base.to_vec();
+        for (k, v) in other {
+            if !out.iter().any(|(bk, _)| bk == k) {
+                out.push((k.clone(), v.clone()));
+            }
+        }
+        out
+    }
+
     /// V4 `==` / `equals_equals` for the VM value subset (matches `AI.equals_equals` for null, bool,
     /// number, string only: same Leek type and equal value).
     #[must_use]
@@ -27,6 +41,16 @@ impl Value {
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Array(a), Self::Array(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals_equals_v4(y))
+            }
+            (Self::Map(a), Self::Map(b)) => {
+                if a.len() != b.len() {
+                    return false;
+                }
+                a.iter().all(|(k, v)| {
+                    b.iter()
+                        .find(|(bk, _)| bk == k)
+                        .is_some_and(|(_, bv)| v.equals_equals_v4(bv))
+                })
             }
             _ => false,
         }
@@ -40,6 +64,7 @@ impl Value {
             Self::Bool(b) => f64::from(u8::from(*b)),
             Self::Number(n) => *n,
             Self::Array(a) => a.len() as f64,
+            Self::Map(m) => m.len() as f64,
             Self::String(s) => {
                 if s == "true" {
                     return 1.0;
@@ -66,6 +91,22 @@ impl Value {
                     if i > 0 {
                         out.push_str(", ");
                     }
+                    out.push_str(&v.to_leek_export_string());
+                }
+                out.push(']');
+                out
+            }
+            Self::Map(m) => {
+                if m.is_empty() {
+                    return "[:]".into();
+                }
+                let mut out = String::from("[");
+                for (i, (k, v)) in m.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&k.to_leek_export_string());
+                    out.push_str(" : ");
                     out.push_str(&v.to_leek_export_string());
                 }
                 out.push(']');
@@ -99,6 +140,11 @@ impl Value {
             Self::Number(_) => 1,
             Self::String(s) => 1u64.saturating_add(((s.len() as u64).saturating_add(7)) / 8),
             Self::Array(a) => 1u64.saturating_add(a.iter().map(Self::ram_quads).sum()),
+            Self::Map(m) => 1u64.saturating_add(
+                m.iter()
+                    .map(|(k, v)| k.ram_quads().saturating_add(v.ram_quads()))
+                    .sum(),
+            ),
         }
     }
 
@@ -134,6 +180,22 @@ impl Value {
                     if i > 0 {
                         out.push_str(", ");
                     }
+                    out.push_str(&v.to_leek_coerce_string());
+                }
+                out.push(']');
+                out
+            }
+            Self::Map(m) => {
+                if m.is_empty() {
+                    return "[:]".into();
+                }
+                let mut out = String::from("[");
+                for (i, (k, v)) in m.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&k.to_leek_coerce_string());
+                    out.push_str(" : ");
                     out.push_str(&v.to_leek_coerce_string());
                 }
                 out.push(']');
