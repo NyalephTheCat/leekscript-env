@@ -68,6 +68,12 @@ impl BytecodeBuilder {
         self.code.extend_from_slice(&v.to_le_bytes());
     }
 
+    /// [`Opcode::ChargeOps`](Opcode::ChargeOps) followed by little-endian `u32`.
+    pub fn emit_charge_ops(&mut self, n: u32) {
+        self.emit_opcode(Opcode::ChargeOps);
+        self.code.extend_from_slice(&n.to_le_bytes());
+    }
+
     pub fn emit_push_const(&mut self, v: Value) {
         let idx = self.intern_const(v);
         self.emit_opcode(Opcode::PushConst);

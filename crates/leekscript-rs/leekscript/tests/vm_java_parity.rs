@@ -155,3 +155,13 @@ fn parity_if_stmt() {
         "false"
     );
 }
+
+#[test]
+fn parity_index_ternary_compound_export() {
+    assert_eq!(run_export("return [1, 2][0];"), "1");
+    assert_eq!(run_export("return [:]['missing'];"), "null");
+    assert_eq!(run_export("var m = ['a': 9]; return m.a;"), "9");
+    assert_eq!(run_export("return true ? 'yes' : 'no';"), "'yes'");
+    assert_eq!(run_export("return false ? 'yes' : 'no';"), "'no'");
+    assert_eq!(run_export("var x = 10; x -= 3; return x;"), "7");
+}

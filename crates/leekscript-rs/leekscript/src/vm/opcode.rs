@@ -46,4 +46,9 @@ pub enum Opcode {
     ArrayBuild = 25,
     /// Pop `n` key/value pairs (last pushed = last value); push [`Value::Map`](super::value::Value::Map) in source order. Followed by `u16` pair count `n`.
     MapBuild = 26,
+    /// Pop **key**, then **container**; push element (`null` if out of range / missing key / bad container).
+    GetElem = 27,
+    /// Add `u32` to the operation budget (Java `AI.ops(int)` at control-flow boundaries). No `+1`
+    /// dispatch tick — the operand is the full semantic charge for this instruction.
+    ChargeOps = 28,
 }

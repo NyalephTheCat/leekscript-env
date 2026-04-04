@@ -52,6 +52,8 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::Not as usize] = op_not;
     table[Opcode::ArrayBuild as usize] = op_array_build;
     table[Opcode::MapBuild as usize] = op_map_build;
+    table[Opcode::GetElem as usize] = op_get_elem;
+    table[Opcode::ChargeOps as usize] = op_charge_ops;
     table
 };
 
@@ -65,7 +67,9 @@ pub struct Vm {
     natives: Vec<NativeFn>,
     /// Last opcode byte dispatched (for [`VmError::IllegalOpcode`]).
     pub current_opcode: u8,
-    /// Instructions executed (one increment per opcode dispatch after the handler succeeds).
+    /// Java `AI.mOperations`-style budget: increments from [`Opcode::ChargeOps`](Opcode::ChargeOps) and
+    /// from runtime extras that mirror Java (e.g. string/array `+` in [`op_add`](fn@op_add)), not from
+    /// a generic per-opcode tick.
     pub operations: u64,
     /// `None` = no limit.
     pub max_operations: Option<u64>,
@@ -128,7 +132,6 @@ impl Vm {
             let op = self.read_u8()?;
             self.current_opcode = op;
             DISPATCH[op as usize](self)?;
-            self.charge_ops(1)?;
             if op == Opcode::Return as u8 {
                 return Ok(self.take_return_value());
             }
@@ -242,6 +245,11 @@ pub fn op_illegal(vm: &mut Vm) -> Result<(), VmError> {
 
 fn op_nop(_vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
+}
+
+fn op_charge_ops(vm: &mut Vm) -> Result<(), VmError> {
+    let n = vm.read_u32()? as u64;
+    vm.charge_ops(n)
 }
 
 fn op_push_const(vm: &mut Vm) -> Result<(), VmError> {
@@ -427,6 +435,8 @@ fn op_call_native(vm: &mut Vm) -> Result<(), VmError> {
     }
     let out = native(&args)?;
     vm.push_stack(out)?;
+    // Java charges each standard function from `LeekFunctions.mOperations`; use 1 as a minimal stub.
+    vm.charge_ops(1)?;
     Ok(())
 }
 
@@ -507,5 +517,36 @@ fn op_map_build(vm: &mut Vm) -> Result<(), VmError> {
     }
     pairs.reverse();
     vm.push_stack(Value::Map(pairs))?;
+    Ok(())
+}
+
+fn array_get(arr: &[Value], key: &Value) -> Value {
+    let Some(n) = key.as_number() else {
+        return Value::Null;
+    };
+    if !n.is_finite() {
+        return Value::Null;
+    }
+    let i = n as i64;
+    if i < 0 {
+        return Value::Null;
+    }
+    let u = i as usize;
+    arr.get(u).cloned().unwrap_or(Value::Null)
+}
+
+fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
+    let key = vm.pop_stack()?;
+    let container = vm.pop_stack()?;
+    let out = match &container {
+        Value::Array(arr) => array_get(arr, &key),
+        Value::Map(pairs) => pairs
+            .iter()
+            .find(|(k, _)| k == &key)
+            .map(|(_, v)| v.clone())
+            .unwrap_or(Value::Null),
+        _ => Value::Null,
+    };
+    vm.push_stack(out)?;
     Ok(())
 }

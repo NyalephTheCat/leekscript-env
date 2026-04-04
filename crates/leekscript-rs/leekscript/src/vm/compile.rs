@@ -1,12 +1,19 @@
 //! Compile a tiny LeekScript subset from the CST into [`Bytecode`](super::bytecode::Bytecode).
 //!
 //! Covers numeric expressions, `null` / `true` / `false`, string literals, array / map literals
-//! (`[]`, `[:]`, `[k: v]`), Java-style `+` (string / array / map merge, `real` sum; `AI.add`-style
-//! operation charges for concat), V4-style `==` / `!=` / `===` / `!==`,
-//! ordered comparisons (`AI.real` subset), `!`, short-circuit `&&` / `||` / `and` / `or`, `if`,
-//! `while` / `do`-`while` / `for` (`for (;;)` / `for (var i = 0; …; …)`), `break` / `continue`,
-//! simple assignment `name = expr` as an expression, `var` with comma-separated declarators,
-//! `return`, empty `;`, and expression statements.
+//! (`[]`, `[:]`, `[k: v]`), indexing `a[i]` and map member `m.field` (via `GetElem`), Java-style
+//! `+` (string / array / map merge, `real` sum; `AI.add`-style operation charges for concat),
+//! V4-style `==` / `!=` / `===` / `!==`, ordered comparisons (`AI.real` subset), `!`, short-circuit
+//! `&&` / `||` / `and` / `or`, ternary `?:`, `if`, `while` / `do`-`while` / `for` (`for (;;)` /
+//! `for (var i = 0; …; …)` — lowered on top of the same back-edge loop kernel as `while`, with a
+//! for-only tail so `continue` hits the step before the condition), `break` / `continue`, simple assignment `name = expr` and compound
+//! `+=` / `-=` / `*=` / `/=` / `%=` (plain identifier LHS only), `var` with comma-separated
+//! declarators, `return`, empty `;`, and expression statements.
+//!
+//! **Operation budget:** matches Java `AI.mOperations` — no generic per-opcode tick. Costs come from
+//! [`Opcode::ChargeOps`](super::opcode::Opcode::ChargeOps) at statement boundaries (`if` / `while` /
+//! `for` / `do`-`while` conditions, `return`, expression statements, `var`, assignments, `break` /
+//! `continue`, for-step), plus runtime extras in the interpreter (e.g. string/array `+`, native calls).
 //!
 use std::collections::HashMap;
 use std::fmt;
@@ -16,14 +23,16 @@ use sipha::tree::red::{SyntaxElement, SyntaxNode, SyntaxToken};
 use sipha::types::{FromSyntaxKind, IntoSyntaxKind};
 
 use crate::ast::{
-    ArrayExpr, BinaryExpr, BracketMapExpr, DoWhileStmt, Expr, ForStmt, IfStmt, IntervalExpr, LitStr,
-    ParenExpr, Root, Stmt, StmtBlock, UnaryExpr, VarDecl, WhileStmt,
+    ArrayExpr, BinaryExpr, BracketMapExpr, DoWhileStmt, Expr, ForStmt, IfStmt, IndexExpr,
+    IntervalExpr, LitStr, MemberExpr, ParenExpr, Root, Stmt, StmtBlock, TernaryExpr, UnaryExpr,
+    VarDecl, WhileStmt,
 };
 use crate::syntax::kinds::K;
 use crate::syntax::syntax_el_is_trivia;
 use crate::{ParseError, Version, parse_doc};
 
 use super::bytecode::{Bytecode, BytecodeBuilder};
+use super::java_ops;
 use super::opcode::Opcode;
 use super::value::Value;
 
@@ -251,10 +260,56 @@ fn try_simple_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String,
     Some((name, rhs))
 }
 
+fn compound_assign_binop(k: K) -> Option<K> {
+    match k {
+        K::PlusEq => Some(K::Plus),
+        K::MinusEq => Some(K::Minus),
+        K::StarEq => Some(K::Star),
+        K::SlashEq => Some(K::Slash),
+        K::PercentEq => Some(K::Percent),
+        _ => None,
+    }
+}
+
+/// Plain `ident += rhs` (and related); same shape as [`try_simple_assign_from_expr_parts`].
+fn try_compound_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, K, Expr)> {
+    if parts.len() != 3 {
+        return None;
+    }
+    let SyntaxElement::Token(t) = &parts[1] else {
+        return None;
+    };
+    let Some(assign_k) = K::from_syntax_kind(t.kind()) else {
+        return None;
+    };
+    compound_assign_binop(assign_k)?;
+    let SyntaxElement::Node(rhs_n) = &parts[2] else {
+        return None;
+    };
+    let rhs = Expr::cast(rhs_n.clone())?;
+    let name = expr_element_as_plain_ident(&parts[0])?;
+    Some((name, assign_k, rhs))
+}
+
 #[derive(Default)]
 struct LoopCtx {
     break_fixups: Vec<usize>,
     continue_fixups: Vec<usize>,
+}
+
+/// Shared loop lowering: one loop head (optional condition + exit jump), one body, then either a
+/// `while`-style back-edge (`continue` → head) or a `for`-style tail (`continue` → step, then jump
+/// to head). Keeps opcode sequences identical to the previous per-statement compilers so operation
+/// counts stay the same (one charge per opcode dispatch, plus opcode-internal extras like string
+/// `+`).
+enum LoopTail {
+    /// `while (cond)`: `continue` re-enters at the condition.
+    WhileStyle,
+    /// `for (; …; step)`: `continue` runs `step` (if any) before the condition; `step == None` is
+    /// an empty step (same PCs as before).
+    ForStyle {
+        step: Option<Expr>,
+    },
 }
 
 impl CompileCtx {
@@ -303,6 +358,11 @@ impl CompileCtx {
         match stmt {
             Stmt::Return(r) => {
                 if let Some(e) = r.expr() {
+                    // `LeekReturnInstruction`: `ops(getOperations());` before evaluating the value.
+                    let o = java_ops::java_analyzed_ops(&e);
+                    if o > 0 {
+                        self.builder.emit_charge_ops(o);
+                    }
                     self.compile_expr(e)?;
                 } else {
                     self.builder.emit_opcode(Opcode::PushNull);
@@ -311,7 +371,12 @@ impl CompileCtx {
             }
             Stmt::Expr(es) => {
                 if let Some(e) = es.expr() {
-                    self.compile_expr(e)?;
+                    // `LeekExpressionInstruction`: `ops(expr, getOperations())` — eval then charge.
+                    self.compile_expr(e.clone())?;
+                    let o = java_ops::java_analyzed_ops(&e);
+                    if o > 0 {
+                        self.builder.emit_charge_ops(o);
+                    }
                     self.builder.emit_opcode(Opcode::Pop);
                 }
             }
@@ -347,6 +412,7 @@ impl CompileCtx {
     }
 
     fn compile_break_stmt(&mut self) -> Result<(), CompileError> {
+        self.builder.emit_charge_ops(1);
         let frame = self.loops.last_mut().ok_or(CompileError::Unsupported(
             "break outside any loop",
         ))?;
@@ -356,6 +422,7 @@ impl CompileCtx {
     }
 
     fn compile_continue_stmt(&mut self) -> Result<(), CompileError> {
+        self.builder.emit_charge_ops(1);
         let frame = self.loops.last_mut().ok_or(CompileError::Unsupported(
             "continue outside any loop",
         ))?;
@@ -377,33 +444,202 @@ impl CompileCtx {
         frame.continue_fixups.clear();
     }
 
-    fn compile_while_stmt(&mut self, w: WhileStmt) -> Result<(), CompileError> {
-        let Some(cond) = w.condition() else {
-            return Err(CompileError::Unsupported("while without condition"));
-        };
-        let body = w
-            .body()
-            .ok_or(CompileError::Unsupported("while without body"))?;
+    fn peel_loop_cond_syntax(&self, mut n: SyntaxNode) -> SyntaxNode {
+        loop {
+            if n.kind() == K::Expr.into_syntax_kind() {
+                let non_triv: Vec<_> = n
+                    .children()
+                    .filter(|e| !syntax_el_is_trivia(e))
+                    .collect();
+                if non_triv.len() == 1 {
+                    if let SyntaxElement::Node(c) = &non_triv[0] {
+                        n = c.clone();
+                        continue;
+                    }
+                }
+            }
+            if let Some(p) = ParenExpr::cast(n.clone()) {
+                if let Ok(inner) = paren_expr_inner_elements(p.syntax()) {
+                    if inner.len() == 1 {
+                        if let SyntaxElement::Node(c) = &inner[0] {
+                            n = c.clone();
+                            continue;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        n
+    }
 
-        let loop_head = self.builder.len();
+    fn compile_cond_chain_lhs(&mut self, parts: &[SyntaxElement]) -> Result<(), CompileError> {
+        if parts.len() >= 2 && self.try_compile_infix_chain_on_parts(parts)? {
+            return Ok(());
+        }
+        if parts.len() == 1 {
+            return self.compile_suffix_atom(&parts[0]);
+        }
+        Err(CompileError::Unsupported("loop condition left-hand side"))
+    }
+
+    fn emit_loop_logical_chain(
+        &mut self,
+        op: K,
+        lhs_parts: &[SyntaxElement],
+        bin: &SyntaxNode,
+    ) -> Result<bool, CompileError> {
+        let suff = java_ops::suffix_after_first_binary_op(bin);
+        match op {
+            K::AndAnd => {
+                self.compile_cond_chain_lhs(lhs_parts)?;
+                let lo = java_ops::java_ops_expr_flat(lhs_parts);
+                self.builder.emit_charge_ops(lo.saturating_add(1));
+                self.builder.emit_opcode(Opcode::Dup);
+                let jif = self.builder.emit_jump_if_false_placeholder();
+                self.builder.emit_opcode(Opcode::Pop);
+                self.compile_infix_suffix(&suff)?;
+                let ro = java_ops::java_ops_infix_suffix(&suff);
+                if ro > 0 {
+                    self.builder.emit_charge_ops(ro);
+                }
+                let merge_pc = self.builder.len();
+                let after_jif = jif + 4;
+                self.builder
+                    .patch_i32_operand_at(jif, merge_pc as i32 - after_jif as i32);
+                Ok(true)
+            }
+            K::OrOr => {
+                self.compile_cond_chain_lhs(lhs_parts)?;
+                let lo = java_ops::java_ops_expr_flat(lhs_parts);
+                self.builder.emit_charge_ops(lo.saturating_add(1));
+                self.builder.emit_opcode(Opcode::Dup);
+                let jif = self.builder.emit_jump_if_false_placeholder();
+                let jmp = self.builder.emit_jump_placeholder();
+                let l_rhs = self.builder.len();
+                self.builder.emit_opcode(Opcode::Pop);
+                self.compile_infix_suffix(&suff)?;
+                let ro = java_ops::java_ops_infix_suffix(&suff);
+                if ro > 0 {
+                    self.builder.emit_charge_ops(ro);
+                }
+                let merge_pc = self.builder.len();
+                let after_jif = jif + 4;
+                self.builder
+                    .patch_i32_operand_at(jif, l_rhs as i32 - after_jif as i32);
+                let after_jmp = jmp + 4;
+                self.builder
+                    .patch_i32_operand_at(jmp, merge_pc as i32 - after_jmp as i32);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn try_compile_loop_short_circuit_cond(&mut self, n: &SyntaxNode) -> Result<bool, CompileError> {
+        if BinaryExpr::can_cast(n.kind()) {
+            let Some(op) = java_ops::first_binary_op_token(n) else {
+                return Ok(false);
+            };
+            if matches!(op, K::AndAnd | K::OrOr) {
+                let lhs = java_ops::prefix_before_first_binary_op(n);
+                if lhs.is_empty() {
+                    return Ok(false);
+                }
+                return self.emit_loop_logical_chain(op, &lhs, n);
+            }
+        }
+        if n.kind() == K::Expr.into_syntax_kind() {
+            let parts: Vec<_> = n
+                .children()
+                .filter(|e| !syntax_el_is_trivia(e))
+                .collect();
+            if parts.len() < 2 {
+                return Ok(false);
+            }
+            let SyntaxElement::Node(bin) = parts.last().expect("len >= 2") else {
+                return Ok(false);
+            };
+            if !BinaryExpr::can_cast(bin.kind()) {
+                return Ok(false);
+            }
+            let Some(op) = java_ops::first_binary_op_token(bin) else {
+                return Ok(false);
+            };
+            if !matches!(op, K::AndAnd | K::OrOr) {
+                return Ok(false);
+            }
+            let lhs_parts = &parts[..parts.len() - 1];
+            return self.emit_loop_logical_chain(op, lhs_parts, bin);
+        }
+        Ok(false)
+    }
+
+    /// Boolean condition for `if` / `while` / `for` / `do`-`while`: Java `ops(bool(e), e.getOperations())`
+    /// (with `&&` / `||` split like `LeekExpression.writeJavaCode`).
+    fn compile_boolean_condition_header(&mut self, cond: Expr) -> Result<(), CompileError> {
+        let n = self.peel_loop_cond_syntax(cond.syntax().clone());
+        if self.try_compile_loop_short_circuit_cond(&n)? {
+            return Ok(());
+        }
+        self.compile_expr_from_syntax(n.clone())?;
+        let charge = java_ops::java_analyzed_ops_syntax(&n);
+        if charge > 0 {
+            self.builder.emit_charge_ops(charge);
+        }
+        Ok(())
+    }
+
+    /// `while` and `for` share this layout; see [`LoopTail`].
+    fn compile_back_edge_loop(
+        &mut self,
+        head_check: Option<Expr>,
+        body: StmtBlock,
+        tail: LoopTail,
+    ) -> Result<(), CompileError> {
+        let head_pc = self.builder.len();
         self.loops.push(LoopCtx::default());
 
-        self.compile_expr(cond)?;
-        let j_exit = self.builder.emit_jump_if_false_placeholder();
+        let j_exit = if let Some(cond) = head_check {
+            self.compile_boolean_condition_header(cond)?;
+            Some(self.builder.emit_jump_if_false_placeholder())
+        } else {
+            None
+        };
+
+        self.builder.emit_charge_ops(1);
 
         self.compile_stmt_block(&body)?;
 
-        self.patch_continue_fixups(loop_head);
+        match tail {
+            LoopTail::WhileStyle => {
+                self.patch_continue_fixups(head_pc);
+            }
+            LoopTail::ForStyle { step } => {
+                let step_start = self.builder.len();
+                self.patch_continue_fixups(step_start);
+                if let Some(e) = step {
+                    self.compile_expr(e.clone())?;
+                    self.builder.emit_opcode(Opcode::Pop);
+                    let co = java_ops::java_analyzed_ops(&e);
+                    if co > 0 {
+                        self.builder.emit_charge_ops(co);
+                    }
+                }
+            }
+        }
 
         let j_back = self.builder.emit_jump_placeholder();
         self.builder.patch_i32_operand_at(
             j_back,
-            loop_head as i32 - (j_back + 4) as i32,
+            head_pc as i32 - (j_back + 4) as i32,
         );
 
         let after = self.builder.len();
-        self.builder
-            .patch_i32_operand_at(j_exit, after as i32 - (j_exit + 4) as i32);
+        if let Some(j) = j_exit {
+            self.builder
+                .patch_i32_operand_at(j, after as i32 - (j + 4) as i32);
+        }
 
         let frame = self.loops.pop().expect("loop stack");
         for off in frame.break_fixups {
@@ -411,6 +647,16 @@ impl CompileCtx {
                 .patch_i32_operand_at(off, after as i32 - (off + 4) as i32);
         }
         Ok(())
+    }
+
+    fn compile_while_stmt(&mut self, w: WhileStmt) -> Result<(), CompileError> {
+        let Some(cond) = w.condition() else {
+            return Err(CompileError::Unsupported("while without condition"));
+        };
+        let body = w
+            .body()
+            .ok_or(CompileError::Unsupported("while without body"))?;
+        self.compile_back_edge_loop(Some(cond), body, LoopTail::WhileStyle)
     }
 
     fn compile_do_while_stmt(&mut self, d: DoWhileStmt) -> Result<(), CompileError> {
@@ -424,12 +670,13 @@ impl CompileCtx {
         let body_start = self.builder.len();
         self.loops.push(LoopCtx::default());
 
+        self.builder.emit_charge_ops(1);
         self.compile_stmt_block(&body)?;
 
         let cond_pc = self.builder.len();
         self.patch_continue_fixups(cond_pc);
 
-        self.compile_expr(cond)?;
+        self.compile_boolean_condition_header(cond)?;
         let j_exit = self.builder.emit_jump_if_false_placeholder();
         let j_repeat = self.builder.emit_jump_placeholder();
         self.builder.patch_i32_operand_at(
@@ -453,56 +700,32 @@ impl CompileCtx {
         if let Some(name) = ident_before_eq_in_for_header(f.syntax()) {
             if let Some(init_e) = f.init_expr() {
                 let slot = self.alloc_local(&name);
-                self.compile_expr(init_e)?;
+                self.compile_expr(init_e.clone())?;
+                self.builder.emit_charge_ops(
+                    1u32.saturating_add(java_ops::java_analyzed_ops(&init_e)),
+                );
                 self.builder.emit_opcode(Opcode::SetLocal);
                 self.builder.emit_u16_operand(slot);
             }
         } else if let Some(init_e) = f.init_expr() {
-            self.compile_expr(init_e)?;
+            self.compile_expr(init_e.clone())?;
+            let o = java_ops::java_analyzed_ops(&init_e);
+            if o > 0 {
+                self.builder.emit_charge_ops(o);
+            }
             self.builder.emit_opcode(Opcode::Pop);
         }
-
-        let loop_cond = self.builder.len();
-        self.loops.push(LoopCtx::default());
-
-        let j_exit_opt = if let Some(cond) = f.condition_expr() {
-            self.compile_expr(cond)?;
-            Some(self.builder.emit_jump_if_false_placeholder())
-        } else {
-            None
-        };
 
         let body = f
             .body()
             .ok_or(CompileError::Unsupported("for without body"))?;
-        self.compile_stmt_block(&body)?;
-
-        let step_start = self.builder.len();
-        self.patch_continue_fixups(step_start);
-
-        if let Some(step) = f.step_expr() {
-            self.compile_expr(step)?;
-            self.builder.emit_opcode(Opcode::Pop);
-        }
-
-        let jmp_back = self.builder.emit_jump_placeholder();
-        self.builder.patch_i32_operand_at(
-            jmp_back,
-            loop_cond as i32 - (jmp_back + 4) as i32,
-        );
-
-        let after = self.builder.len();
-        if let Some(j) = j_exit_opt {
-            self.builder
-                .patch_i32_operand_at(j, after as i32 - (j + 4) as i32);
-        }
-
-        let frame = self.loops.pop().expect("loop stack");
-        for off in frame.break_fixups {
-            self.builder
-                .patch_i32_operand_at(off, after as i32 - (off + 4) as i32);
-        }
-        Ok(())
+        self.compile_back_edge_loop(
+            f.condition_expr(),
+            body,
+            LoopTail::ForStyle {
+                step: f.step_expr(),
+            },
+        )
     }
 
     fn compile_assign_local(&mut self, name: &str, rhs: Expr) -> Result<(), CompileError> {
@@ -510,11 +733,229 @@ impl CompileCtx {
             .locals
             .get(name)
             .ok_or(CompileError::Unsupported("undefined variable"))?;
-        self.compile_expr(rhs)?;
+        self.compile_expr(rhs.clone())?;
+        let o = java_ops::java_analyzed_ops(&rhs);
+        if o > 0 {
+            self.builder.emit_charge_ops(o);
+        }
         self.builder.emit_opcode(Opcode::Dup);
         self.builder.emit_opcode(Opcode::SetLocal);
         self.builder.emit_u16_operand(slot);
         Ok(())
+    }
+
+    fn compile_compound_assign_local(
+        &mut self,
+        name: &str,
+        assign_op: K,
+        rhs: Expr,
+    ) -> Result<(), CompileError> {
+        let bin = compound_assign_binop(assign_op).ok_or(CompileError::Unsupported(
+            "compound assignment operator not supported by VM",
+        ))?;
+        let slot = *self
+            .locals
+            .get(name)
+            .ok_or(CompileError::Unsupported("undefined variable"))?;
+        self.builder.emit_opcode(Opcode::GetLocal);
+        self.builder.emit_u16_operand(slot);
+        self.compile_expr(rhs.clone())?;
+        self.emit_binop(bin)?;
+        self.builder.emit_opcode(Opcode::Dup);
+        self.builder.emit_opcode(Opcode::SetLocal);
+        self.builder.emit_u16_operand(slot);
+        let c = java_ops::java_analyzed_ops(&rhs)
+            .saturating_add(java_ops::compound_assign_bin_extra(assign_op));
+        if c > 0 {
+            self.builder.emit_charge_ops(c);
+        }
+        Ok(())
+    }
+
+    /// Emit the left operand of an infix chain or postfix receiver. `Ok(None)` means this element
+    /// cannot start such a chain (caller should try another strategy).
+    fn emit_expr_head_operand(
+        &mut self,
+        el: &SyntaxElement,
+    ) -> Result<Option<()>, CompileError> {
+        match el {
+            SyntaxElement::Token(t) => {
+                if self.push_literal_token(t)? {
+                    return Ok(Some(()));
+                }
+                if t.kind() == K::Ident.into_syntax_kind() {
+                    let name = t.text().to_string();
+                    let slot = *self
+                        .locals
+                        .get(&name)
+                        .ok_or(CompileError::Unsupported("undefined variable"))?;
+                    self.builder.emit_opcode(Opcode::GetLocal);
+                    self.builder.emit_u16_operand(slot);
+                    return Ok(Some(()));
+                }
+                Ok(None)
+            }
+            SyntaxElement::Node(first) => {
+                if BinaryExpr::can_cast(first.kind()) {
+                    return Ok(None);
+                }
+                self.compile_expr_from_syntax(first.clone())?;
+                Ok(Some(()))
+            }
+        }
+    }
+
+    fn try_compile_expr_parts_dispatch(&mut self, parts: &[SyntaxElement]) -> Result<bool, CompileError> {
+        if let Some((name, rhs)) = try_simple_assign_from_expr_parts(parts) {
+            self.compile_assign_local(&name, rhs)?;
+            return Ok(true);
+        }
+        if let Some((name, op, rhs)) = try_compound_assign_from_expr_parts(parts) {
+            self.compile_compound_assign_local(&name, op, rhs)?;
+            return Ok(true);
+        }
+        if self.try_compile_ternary_suffix(parts)? {
+            return Ok(true);
+        }
+        if self.try_compile_postfix_chain_on_parts(parts)? {
+            return Ok(true);
+        }
+        if parts.len() >= 2 && self.try_compile_infix_chain_on_parts(parts)? {
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    fn compile_subexpr_from_parts(&mut self, parts: &[SyntaxElement]) -> Result<(), CompileError> {
+        if parts.is_empty() {
+            return Err(CompileError::Unsupported("empty expression"));
+        }
+        if self.try_compile_expr_parts_dispatch(parts)? {
+            return Ok(());
+        }
+        if parts.len() == 1 {
+            return self.compile_suffix_atom(&parts[0]);
+        }
+        Err(CompileError::Unsupported("expression shape not supported"))
+    }
+
+    fn try_compile_ternary_suffix(&mut self, parts: &[SyntaxElement]) -> Result<bool, CompileError> {
+        let Some(SyntaxElement::Node(tn)) = parts.last() else {
+            return Ok(false);
+        };
+        if !TernaryExpr::can_cast(tn.kind()) {
+            return Ok(false);
+        }
+        if parts.len() < 2 {
+            return Err(CompileError::Unsupported("ternary without condition"));
+        }
+        let tern = TernaryExpr::cast(tn.clone()).ok_or(CompileError::Unsupported("ternary"))?;
+        let arms: Vec<Expr> = AstNodeExt::children::<Expr>(tern.syntax()).collect();
+        if arms.len() != 2 {
+            return Err(CompileError::Unsupported("ternary"));
+        }
+        let cond_parts = &parts[..parts.len() - 1];
+        self.compile_subexpr_from_parts(cond_parts)?;
+        let jelse = self.builder.emit_jump_if_false_placeholder();
+        self.compile_expr(arms[0].clone())?;
+        let jend = self.builder.emit_jump_placeholder();
+        let else_pc = self.builder.len();
+        self.builder.patch_i32_operand_at(
+            jelse,
+            else_pc as i32 - (jelse + 4) as i32,
+        );
+        self.compile_expr(arms[1].clone())?;
+        let end_pc = self.builder.len();
+        self.builder.patch_i32_operand_at(
+            jend,
+            end_pc as i32 - (jend + 4) as i32,
+        );
+        Ok(true)
+    }
+
+    fn index_expr_single_subscript(ix: &IndexExpr) -> Result<Expr, CompileError> {
+        let syn = ix.syntax();
+        for el in syn.children() {
+            if syntax_el_is_trivia(&el) {
+                continue;
+            }
+            if let SyntaxElement::Token(t) = &el {
+                if t.kind() == K::Colon.into_syntax_kind() {
+                    return Err(CompileError::Unsupported("slice index"));
+                }
+            }
+        }
+        let exprs: Vec<Expr> = AstNodeExt::children::<Expr>(syn).collect();
+        match exprs.len() {
+            0 => Err(CompileError::Unsupported("empty index")),
+            1 => Ok(exprs[0].clone()),
+            _ => Err(CompileError::Unsupported("multi-part index")),
+        }
+    }
+
+    fn member_expr_field_name(m: &MemberExpr) -> Result<String, CompileError> {
+        for el in m.syntax().children() {
+            if syntax_el_is_trivia(&el) {
+                continue;
+            }
+            if let SyntaxElement::Token(t) = &el {
+                if t.kind() == K::Ident.into_syntax_kind() {
+                    return Ok(t.text().to_string());
+                }
+            }
+        }
+        Err(CompileError::Unsupported(
+            "member access needs a simple identifier field",
+        ))
+    }
+
+    fn compile_index_suffix(&mut self, ix: &IndexExpr) -> Result<(), CompileError> {
+        let sub = Self::index_expr_single_subscript(ix)?;
+        self.compile_expr(sub)?;
+        self.builder.emit_opcode(Opcode::GetElem);
+        Ok(())
+    }
+
+    fn compile_member_suffix(&mut self, m: &MemberExpr) -> Result<(), CompileError> {
+        let field = Self::member_expr_field_name(m)?;
+        self.builder.emit_push_const(Value::String(field));
+        self.builder.emit_opcode(Opcode::GetElem);
+        Ok(())
+    }
+
+    fn try_compile_postfix_chain_on_parts(
+        &mut self,
+        parts: &[SyntaxElement],
+    ) -> Result<bool, CompileError> {
+        if parts.len() < 2 {
+            return Ok(false);
+        }
+        for p in &parts[1..] {
+            let SyntaxElement::Node(n) = p else {
+                return Ok(false);
+            };
+            let k = n.kind();
+            if !IndexExpr::can_cast(k) && !MemberExpr::can_cast(k) {
+                return Ok(false);
+            }
+        }
+        match self.emit_expr_head_operand(&parts[0])? {
+            None => return Ok(false),
+            Some(()) => {}
+        }
+        for p in &parts[1..] {
+            let SyntaxElement::Node(n) = p else {
+                unreachable!("validated");
+            };
+            if let Some(ix) = IndexExpr::cast(n.clone()) {
+                self.compile_index_suffix(&ix)?;
+            } else if let Some(mx) = MemberExpr::cast(n.clone()) {
+                self.compile_member_suffix(&mx)?;
+            } else {
+                unreachable!("validated");
+            }
+        }
+        Ok(true)
     }
 
     fn compile_stmt_block(&mut self, sb: &StmtBlock) -> Result<(), CompileError> {
@@ -533,7 +974,7 @@ impl CompileCtx {
         let Some(cond) = i.condition() else {
             return Err(CompileError::Unsupported("if without condition"));
         };
-        self.compile_expr(cond)?;
+        self.compile_boolean_condition_header(cond)?;
         let jif_op = self.builder.emit_jump_if_false_placeholder();
         let then_sb = i
             .then_branch()
@@ -609,7 +1050,10 @@ impl CompileCtx {
                         let expr = Expr::cast(n.clone()).ok_or(CompileError::Unsupported(
                             "var decl malformed initializer",
                         ))?;
-                        self.compile_expr(expr)?;
+                        self.compile_expr(expr.clone())?;
+                        self.builder.emit_charge_ops(
+                            1u32.saturating_add(java_ops::java_analyzed_ops(&expr)),
+                        );
                         i += 1;
                         initialized = true;
                     }
@@ -617,6 +1061,7 @@ impl CompileCtx {
             }
             if !initialized {
                 self.builder.emit_opcode(Opcode::PushNull);
+                self.builder.emit_charge_ops(1);
             }
             self.builder.emit_opcode(Opcode::SetLocal);
             self.builder.emit_u16_operand(slot);
@@ -690,10 +1135,7 @@ impl CompileCtx {
                 .children()
                 .filter(|e| !syntax_el_is_trivia(e))
                 .collect();
-            if let Some((name, rhs)) = try_simple_assign_from_expr_parts(&parts) {
-                return self.compile_assign_local(&name, rhs);
-            }
-            if parts.len() >= 2 && self.try_compile_infix_chain_on_parts(&parts)? {
+            if self.try_compile_expr_parts_dispatch(&parts)? {
                 return Ok(());
             }
             for el in n.children() {
@@ -710,7 +1152,9 @@ impl CompileCtx {
             return Ok(());
         }
         if BinaryExpr::can_cast(n.kind()) {
-            return self.compile_binary_fragment(&n);
+            let lhs = java_ops::prefix_before_first_binary_op(&n);
+            let lhs_o = java_ops::java_ops_expr_flat(&lhs);
+            return self.compile_binary_fragment(&n, lhs_o);
         }
         if let Some(arr) = ArrayExpr::cast(n.clone()) {
             return self.compile_array_literal(&arr);
@@ -721,7 +1165,7 @@ impl CompileCtx {
         if let Some(p) = ParenExpr::cast(n.clone()) {
             let inner = paren_expr_inner_elements(p.syntax())?;
             let flat = flatten_one_expr_layer(&inner);
-            if flat.len() >= 2 && self.try_compile_infix_chain_on_parts(&flat)? {
+            if self.try_compile_expr_parts_dispatch(&flat)? {
                 return Ok(());
             }
             if flat.len() == 1 {
@@ -793,28 +1237,9 @@ impl CompileCtx {
         if parts.len() < 2 {
             return Ok(false);
         }
-        match &parts[0] {
-            SyntaxElement::Token(t) => {
-                if self.push_literal_token(t)? {
-                    // ok
-                } else if t.kind() == K::Ident.into_syntax_kind() {
-                    let name = t.text().to_string();
-                    let slot = *self
-                        .locals
-                        .get(&name)
-                        .ok_or(CompileError::Unsupported("undefined variable"))?;
-                    self.builder.emit_opcode(Opcode::GetLocal);
-                    self.builder.emit_u16_operand(slot);
-                } else {
-                    return Ok(false);
-                }
-            }
-            SyntaxElement::Node(first) => {
-                if BinaryExpr::can_cast(first.kind()) {
-                    return Ok(false);
-                }
-                self.compile_expr_from_syntax(first.clone())?;
-            }
+        match self.emit_expr_head_operand(&parts[0])? {
+            None => return Ok(false),
+            Some(()) => {}
         }
         for p in parts.iter().skip(1) {
             let SyntaxElement::Node(node) = p else {
@@ -824,6 +1249,7 @@ impl CompileCtx {
                 return Ok(false);
             }
         }
+        let mut prefix_len = 1usize;
         for p in parts.iter().skip(1) {
             let SyntaxElement::Node(bin) = p else {
                 unreachable!("validated above");
@@ -831,21 +1257,28 @@ impl CompileCtx {
             let Some(be) = BinaryExpr::cast(bin.clone()) else {
                 return Err(CompileError::Unsupported("infix chain BinaryExpr"));
             };
-            self.compile_binary_fragment(be.syntax())?;
+            let lhs_ops = java_ops::java_ops_expr_flat(&parts[..prefix_len]);
+            self.compile_binary_fragment(be.syntax(), lhs_ops)?;
+            prefix_len += 1;
         }
         Ok(true)
     }
 
     /// One [`BinaryExpr`](BinaryExpr): stack already holds its left operand; emit the suffix after
-    /// the operator token, then the opcode.
-    fn compile_binary_fragment(&mut self, bin: &SyntaxNode) -> Result<(), CompileError> {
-        let op = first_binary_op_token(bin).ok_or(CompileError::Unsupported(
+    /// the operator token, then the opcode. `lhs_ops` is Java `getOperations()` for the value
+    /// already on the stack (prefix of the infix chain, or lhs inside a lone `BinaryExpr`).
+    fn compile_binary_fragment(
+        &mut self,
+        bin: &SyntaxNode,
+        lhs_ops: u32,
+    ) -> Result<(), CompileError> {
+        let op = java_ops::first_binary_op_token(bin).ok_or(CompileError::Unsupported(
             "binary expression missing operator",
         ))?;
-        let suff = suffix_after_first_binary_op(bin);
+        let suff = java_ops::suffix_after_first_binary_op(bin);
         match op {
-            K::AndAnd => self.compile_short_circuit_and(&suff),
-            K::OrOr => self.compile_short_circuit_or(&suff),
+            K::AndAnd => self.compile_short_circuit_and(&suff, lhs_ops),
+            K::OrOr => self.compile_short_circuit_or(&suff, lhs_ops),
             _ => {
                 self.compile_infix_suffix(&suff)?;
                 self.emit_binop(op)
@@ -853,11 +1286,21 @@ impl CompileCtx {
         }
     }
 
-    fn compile_short_circuit_and(&mut self, rhs: &[SyntaxElement]) -> Result<(), CompileError> {
+    fn compile_short_circuit_and(
+        &mut self,
+        rhs: &[SyntaxElement],
+        lhs_ops: u32,
+    ) -> Result<(), CompileError> {
+        self.builder
+            .emit_charge_ops(lhs_ops.saturating_add(1));
         self.builder.emit_opcode(Opcode::Dup);
         let jif_op = self.builder.emit_jump_if_false_placeholder();
         self.builder.emit_opcode(Opcode::Pop);
         self.compile_infix_suffix(rhs)?;
+        let ro = java_ops::java_ops_infix_suffix(rhs);
+        if ro > 0 {
+            self.builder.emit_charge_ops(ro);
+        }
         let merge_pc = self.builder.len();
         let after_jif = jif_op + 4;
         self.builder
@@ -865,13 +1308,23 @@ impl CompileCtx {
         Ok(())
     }
 
-    fn compile_short_circuit_or(&mut self, rhs: &[SyntaxElement]) -> Result<(), CompileError> {
+    fn compile_short_circuit_or(
+        &mut self,
+        rhs: &[SyntaxElement],
+        lhs_ops: u32,
+    ) -> Result<(), CompileError> {
+        self.builder
+            .emit_charge_ops(lhs_ops.saturating_add(1));
         self.builder.emit_opcode(Opcode::Dup);
         let jif_op = self.builder.emit_jump_if_false_placeholder();
         let jmp_op = self.builder.emit_jump_placeholder();
         let l_rhs = self.builder.len();
         self.builder.emit_opcode(Opcode::Pop);
         self.compile_infix_suffix(rhs)?;
+        let ro = java_ops::java_ops_infix_suffix(rhs);
+        if ro > 0 {
+            self.builder.emit_charge_ops(ro);
+        }
         let merge_pc = self.builder.len();
         let after_jif = jif_op + 4;
         self.builder
@@ -925,6 +1378,7 @@ impl CompileCtx {
                 return Err(CompileError::Unsupported("infix suffix tail must be BinaryExpr"));
             }
         }
+        let mut prefix_len = 1usize;
         for p in parts.iter().skip(1) {
             let SyntaxElement::Node(bin) = p else {
                 unreachable!("validated above");
@@ -932,7 +1386,9 @@ impl CompileCtx {
             let Some(be) = BinaryExpr::cast(bin.clone()) else {
                 return Err(CompileError::Unsupported("infix suffix BinaryExpr"));
             };
-            self.compile_binary_fragment(be.syntax())?;
+            let lhs_ops = java_ops::java_ops_expr_flat(&parts[..prefix_len]);
+            self.compile_binary_fragment(be.syntax(), lhs_ops)?;
+            prefix_len += 1;
         }
         Ok(())
     }
@@ -1048,62 +1504,3 @@ impl CompileCtx {
     }
 }
 
-fn binary_op_kind(k: K) -> bool {
-    matches!(
-        k,
-        K::Plus
-            | K::Minus
-            | K::Star
-            | K::Slash
-            | K::Percent
-            | K::EqEq
-            | K::NotEq
-            | K::EqEqEq
-            | K::NotEqEq
-            | K::Lt
-            | K::Lte
-            | K::Gt
-            | K::Gte
-            | K::AndAnd
-            | K::OrOr
-    )
-}
-
-fn first_binary_op_token(bin: &SyntaxNode) -> Option<K> {
-    for el in bin.children() {
-        if syntax_el_is_trivia(&el) {
-            continue;
-        }
-        if let SyntaxElement::Token(t) = &el {
-            if let Some(k) = K::from_syntax_kind(t.kind()) {
-                if binary_op_kind(k) {
-                    return Some(k);
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Non-trivia [`SyntaxElement`](SyntaxElement)s after the first binary operator token under `bin`.
-fn suffix_after_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxElement> {
-    let mut after_op = false;
-    let mut out = Vec::new();
-    for el in bin.children() {
-        if syntax_el_is_trivia(&el) {
-            continue;
-        }
-        if !after_op {
-            if let SyntaxElement::Token(t) = &el {
-                if let Some(k) = K::from_syntax_kind(t.kind()) {
-                    if binary_op_kind(k) {
-                        after_op = true;
-                    }
-                }
-            }
-            continue;
-        }
-        out.push(el.clone());
-    }
-    out
-}

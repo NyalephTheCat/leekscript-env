@@ -6,6 +6,18 @@ use leekscript::vm::{
 };
 
 #[test]
+fn loop_bytecode_includes_charge_ops_for_java_style_budget() {
+    let chunk = compile_chunk_v4("var i = 0; while (i < 2) { i = i + 1; } return i;").unwrap();
+    assert!(
+        chunk.bytecode.code.contains(&(Opcode::ChargeOps as u8)),
+        "expected ChargeOps in while loop lowering"
+    );
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::Number(2.0));
+}
+
+#[test]
 fn numeric_eq_in_var_initializer_compiles() {
     let chunk = compile_chunk_v4("var r = 1 == 2; return r;").expect("compile");
     assert!(chunk.bytecode.code.contains(&(Opcode::EqEquals as u8)));
@@ -42,13 +54,13 @@ fn array_literal_with_more_than_255_elements_runs() {
 
 #[test]
 fn string_concat_charges_ops_like_java_ai_add() {
-    // `AI.add` charges `string(a).length() + string(b).length()` on top of per-line/step costs.
-    // VM charges +1 per opcode after the handler; `Add` on two strings adds len sum inside `op_add`.
+    // Java-style budget: return pre-charges analyzed ops for the value expr; string `+` adds
+    // `len(lhs) + len(rhs)` at runtime (same idea as `AI.add` string concat cost).
     let chunk = compile_chunk_v4("return 'ab' + 'cde';").expect("compile");
     let mut vm = Vm::new(chunk.bytecode);
     vm.set_local_count(chunk.local_slots).expect("locals");
     vm.run().expect("run");
-    assert_eq!(vm.operations, 9, "4 opcode ticks + 2 + 3 string concat ops");
+    assert_eq!(vm.operations, 6, "return expr ops + 2 + 3 string concat ops");
 }
 
 #[test]
@@ -159,9 +171,9 @@ fn unsupported_stmt_is_compile_error() {
 #[test]
 fn operation_limit_enforced() {
     let mut b = BytecodeBuilder::new();
-    b.emit_opcode(Opcode::Nop);
-    b.emit_opcode(Opcode::Nop);
-    b.emit_opcode(Opcode::Nop);
+    b.emit_charge_ops(1);
+    b.emit_charge_ops(1);
+    b.emit_charge_ops(1);
     b.emit_return();
     let mut vm = Vm::new(b.finish());
     vm.max_operations = Some(2);
@@ -246,6 +258,67 @@ fn continue_skips_rest_of_while_body() {
     vm.set_local_count(chunk.local_slots).expect("locals");
     // 1 + 3 + 4 = 8 (skip adding when i is 2)
     assert_eq!(vm.run().expect("run"), Value::Number(8.0));
+}
+
+#[test]
+fn get_elem_opcode_emitted_for_index() {
+    let chunk = compile_chunk_v4("return [10][0];").expect("compile");
+    assert!(chunk.bytecode.code.contains(&(Opcode::GetElem as u8)));
+}
+
+#[test]
+fn array_index_and_oob_null() {
+    let chunk = compile_chunk_v4("return [7, 8][1];").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(8.0));
+
+    let chunk = compile_chunk_v4("return [1][9];").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Null);
+}
+
+#[test]
+fn map_subscript_and_dot_member() {
+    let chunk = compile_chunk_v4("return [1: 2][1];").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(2.0));
+
+    let chunk = compile_chunk_v4("var m = ['k': 5]; return m.k;").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(5.0));
+}
+
+#[test]
+fn ternary_expression() {
+    let chunk = compile_chunk_v4("return 1 ? 2 : 3;").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(2.0));
+
+    let chunk = compile_chunk_v4("return 0 ? 2 : 3;").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(3.0));
+
+    let chunk = compile_chunk_v4("return 1 + 2 ? 30 : 40;").expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(30.0));
+}
+
+#[test]
+fn compound_assign_in_loop() {
+    let chunk = compile_chunk_v4(
+        "var i = 0; var s = 0; while (i < 3) { i += 1; s += i; } return s;",
+    )
+    .expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(6.0));
 }
 
 

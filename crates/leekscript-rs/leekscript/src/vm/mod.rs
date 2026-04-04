@@ -11,12 +11,15 @@
 //!   per possible opcode byte). Unused tags still resolve to [`op_illegal`](interpreter::op_illegal).
 //! - [`Vm`](interpreter::Vm) — stack machine, constant pool, locals, optional [`NativeFn`](interpreter::NativeFn) table.
 //! - [`compile_chunk_v4`](compile::compile_chunk_v4) — CST → bytecode (`var`, `if`, `while` / `do`-`while` /
-//!   `for`, `break` / `continue`, `;`, simple `x = expr` assignments, expressions, `return`).
+//!   `for`, `break` / `continue`, `;`, `a[i]` / `m.field`, ternary `?:`, `+=` / `-=` / …, simple
+//!   `x = expr`, expressions, `return`). Loops also emit [`Opcode::ChargeOps`](Opcode::ChargeOps) to
+//!   mirror Java `AI.ops` / `addCounter` at headers (see `compile` module docs).
 
 mod bytecode;
 mod compile;
 mod error;
 mod interpreter;
+mod java_ops;
 mod opcode;
 mod value;
 
