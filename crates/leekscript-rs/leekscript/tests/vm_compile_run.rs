@@ -194,4 +194,58 @@ fn operations_and_ram_counters_after_run() {
     assert_eq!(vm.ram_quads, 0);
 }
 
+#[test]
+fn while_loop_and_assign_expr() {
+    let chunk = compile_chunk_v4(
+        "var i = 0; while (i < 3) { i = i + 1; } return i;",
+    )
+    .expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(3.0));
+}
+
+#[test]
+fn for_loop_var_init() {
+    let chunk = compile_chunk_v4(
+        "for (var i = 0; i < 4; i = i + 1) { } return i;",
+    )
+    .expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(4.0));
+}
+
+#[test]
+fn do_while_runs_body_once() {
+    let chunk = compile_chunk_v4("var n = 0; do { n = n + 1; } while (false); return n;")
+        .expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(1.0));
+}
+
+#[test]
+fn break_exits_while() {
+    let chunk = compile_chunk_v4(
+        "var i = 0; while (i < 100) { if (i == 5) { break; } i = i + 1; } return i;",
+    )
+    .expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    assert_eq!(vm.run().expect("run"), Value::Number(5.0));
+}
+
+#[test]
+fn continue_skips_rest_of_while_body() {
+    let chunk = compile_chunk_v4(
+        "var i = 0; var s = 0; while (i < 4) { i = i + 1; if (i == 2) { continue; } s = s + i; } return s;",
+    )
+    .expect("compile");
+    let mut vm = Vm::new(chunk.bytecode);
+    vm.set_local_count(chunk.local_slots).expect("locals");
+    // 1 + 3 + 4 = 8 (skip adding when i is 2)
+    assert_eq!(vm.run().expect("run"), Value::Number(8.0));
+}
+
 

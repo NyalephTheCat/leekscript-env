@@ -4,7 +4,9 @@
 //! (`[]`, `[:]`, `[k: v]`), Java-style `+` (string / array / map merge, `real` sum; `AI.add`-style
 //! operation charges for concat), V4-style `==` / `!=` / `===` / `!==`,
 //! ordered comparisons (`AI.real` subset), `!`, short-circuit `&&` / `||` / `and` / `or`, `if`,
-//! `var` with comma-separated declarators, `return`, and expression statements.
+//! `while` / `do`-`while` / `for` (`for (;;)` / `for (var i = 0; …; …)`), `break` / `continue`,
+//! simple assignment `name = expr` as an expression, `var` with comma-separated declarators,
+//! `return`, empty `;`, and expression statements.
 //!
 use std::collections::HashMap;
 use std::fmt;
@@ -14,8 +16,8 @@ use sipha::tree::red::{SyntaxElement, SyntaxNode, SyntaxToken};
 use sipha::types::{FromSyntaxKind, IntoSyntaxKind};
 
 use crate::ast::{
-    ArrayExpr, BinaryExpr, BracketMapExpr, Expr, IfStmt, IntervalExpr, LitStr, ParenExpr, Root,
-    Stmt, StmtBlock, UnaryExpr, VarDecl,
+    ArrayExpr, BinaryExpr, BracketMapExpr, DoWhileStmt, Expr, ForStmt, IfStmt, IntervalExpr, LitStr,
+    ParenExpr, Root, Stmt, StmtBlock, UnaryExpr, VarDecl, WhileStmt,
 };
 use crate::syntax::kinds::K;
 use crate::syntax::syntax_el_is_trivia;
@@ -79,6 +81,7 @@ struct CompileCtx {
     builder: BytecodeBuilder,
     locals: HashMap<String, u16>,
     next_local: u16,
+    loops: Vec<LoopCtx>,
 }
 
 /// Elements between `(` and `)` in a [`K::ParenExpr`] (excluding the bracket tokens).
@@ -190,6 +193,70 @@ fn try_extract_map_literal_pairs(
     Ok(None)
 }
 
+/// `for (… ident = …)` — name token immediately before `=` in the header.
+fn ident_before_eq_in_for_header(syn: &SyntaxNode) -> Option<String> {
+    let v: Vec<_> = syn
+        .children()
+        .filter(|e| !syntax_el_is_trivia(e))
+        .collect();
+    for i in 1..v.len() {
+        if let SyntaxElement::Token(t) = &v[i] {
+            if t.kind() == K::Eq.into_syntax_kind() {
+                if let SyntaxElement::Token(prev) = &v[i - 1] {
+                    if prev.kind() == K::Ident.into_syntax_kind() {
+                        return Some(prev.text().to_string());
+                    }
+                }
+                return None;
+            }
+        }
+    }
+    None
+}
+
+fn expr_element_as_plain_ident(el: &SyntaxElement) -> Option<String> {
+    match el {
+        SyntaxElement::Token(t) if t.kind() == K::Ident.into_syntax_kind() => {
+            Some(t.text().to_string())
+        }
+        SyntaxElement::Node(n) => {
+            let mut it = n.children().filter(|e| !syntax_el_is_trivia(e));
+            let only = it.next()?;
+            if it.next().is_some() {
+                return None;
+            }
+            expr_element_as_plain_ident(&only)
+        }
+        _ => None,
+    }
+}
+
+/// Plain `ident = rhs` assignment (no `+=`, no chained `a = b = c`).
+fn try_simple_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, Expr)> {
+    let len = parts.len();
+    if len != 3 {
+        return None;
+    }
+    let SyntaxElement::Token(t) = &parts[1] else {
+        return None;
+    };
+    if t.kind() != K::Eq.into_syntax_kind() {
+        return None;
+    }
+    let SyntaxElement::Node(rhs_n) = &parts[2] else {
+        return None;
+    };
+    let rhs = Expr::cast(rhs_n.clone())?;
+    let name = expr_element_as_plain_ident(&parts[0])?;
+    Some((name, rhs))
+}
+
+#[derive(Default)]
+struct LoopCtx {
+    break_fixups: Vec<usize>,
+    continue_fixups: Vec<usize>,
+}
+
 impl CompileCtx {
     fn alloc_local(&mut self, name: &str) -> u16 {
         if let Some(&i) = self.locals.get(name) {
@@ -254,12 +321,199 @@ impl CompileCtx {
             Stmt::If(i) => {
                 self.compile_if_stmt(i)?;
             }
+            Stmt::While(w) => {
+                self.compile_while_stmt(w)?;
+            }
+            Stmt::DoWhile(d) => {
+                self.compile_do_while_stmt(d)?;
+            }
+            Stmt::For(f) => {
+                self.compile_for_stmt(f)?;
+            }
+            Stmt::Break(_) => {
+                self.compile_break_stmt()?;
+            }
+            Stmt::Continue(_) => {
+                self.compile_continue_stmt()?;
+            }
+            Stmt::Empty(_) => {}
             _ => {
                 return Err(CompileError::Unsupported(
                     "statement kind not supported by VM compiler",
                 ));
             }
         }
+        Ok(())
+    }
+
+    fn compile_break_stmt(&mut self) -> Result<(), CompileError> {
+        let frame = self.loops.last_mut().ok_or(CompileError::Unsupported(
+            "break outside any loop",
+        ))?;
+        let off = self.builder.emit_jump_placeholder();
+        frame.break_fixups.push(off);
+        Ok(())
+    }
+
+    fn compile_continue_stmt(&mut self) -> Result<(), CompileError> {
+        let frame = self.loops.last_mut().ok_or(CompileError::Unsupported(
+            "continue outside any loop",
+        ))?;
+        let off = self.builder.emit_jump_placeholder();
+        frame.continue_fixups.push(off);
+        Ok(())
+    }
+
+    fn patch_continue_fixups(&mut self, target_pc: usize) {
+        let Some(frame) = self.loops.last_mut() else {
+            return;
+        };
+        for &off in &frame.continue_fixups {
+            self.builder.patch_i32_operand_at(
+                off,
+                target_pc as i32 - (off + 4) as i32,
+            );
+        }
+        frame.continue_fixups.clear();
+    }
+
+    fn compile_while_stmt(&mut self, w: WhileStmt) -> Result<(), CompileError> {
+        let Some(cond) = w.condition() else {
+            return Err(CompileError::Unsupported("while without condition"));
+        };
+        let body = w
+            .body()
+            .ok_or(CompileError::Unsupported("while without body"))?;
+
+        let loop_head = self.builder.len();
+        self.loops.push(LoopCtx::default());
+
+        self.compile_expr(cond)?;
+        let j_exit = self.builder.emit_jump_if_false_placeholder();
+
+        self.compile_stmt_block(&body)?;
+
+        self.patch_continue_fixups(loop_head);
+
+        let j_back = self.builder.emit_jump_placeholder();
+        self.builder.patch_i32_operand_at(
+            j_back,
+            loop_head as i32 - (j_back + 4) as i32,
+        );
+
+        let after = self.builder.len();
+        self.builder
+            .patch_i32_operand_at(j_exit, after as i32 - (j_exit + 4) as i32);
+
+        let frame = self.loops.pop().expect("loop stack");
+        for off in frame.break_fixups {
+            self.builder
+                .patch_i32_operand_at(off, after as i32 - (off + 4) as i32);
+        }
+        Ok(())
+    }
+
+    fn compile_do_while_stmt(&mut self, d: DoWhileStmt) -> Result<(), CompileError> {
+        let body = d
+            .body()
+            .ok_or(CompileError::Unsupported("do-while without body"))?;
+        let Some(cond) = d.condition() else {
+            return Err(CompileError::Unsupported("do-while without condition"));
+        };
+
+        let body_start = self.builder.len();
+        self.loops.push(LoopCtx::default());
+
+        self.compile_stmt_block(&body)?;
+
+        let cond_pc = self.builder.len();
+        self.patch_continue_fixups(cond_pc);
+
+        self.compile_expr(cond)?;
+        let j_exit = self.builder.emit_jump_if_false_placeholder();
+        let j_repeat = self.builder.emit_jump_placeholder();
+        self.builder.patch_i32_operand_at(
+            j_repeat,
+            body_start as i32 - (j_repeat + 4) as i32,
+        );
+
+        let after = self.builder.len();
+        self.builder
+            .patch_i32_operand_at(j_exit, after as i32 - (j_exit + 4) as i32);
+
+        let frame = self.loops.pop().expect("loop stack");
+        for off in frame.break_fixups {
+            self.builder
+                .patch_i32_operand_at(off, after as i32 - (off + 4) as i32);
+        }
+        Ok(())
+    }
+
+    fn compile_for_stmt(&mut self, f: ForStmt) -> Result<(), CompileError> {
+        if let Some(name) = ident_before_eq_in_for_header(f.syntax()) {
+            if let Some(init_e) = f.init_expr() {
+                let slot = self.alloc_local(&name);
+                self.compile_expr(init_e)?;
+                self.builder.emit_opcode(Opcode::SetLocal);
+                self.builder.emit_u16_operand(slot);
+            }
+        } else if let Some(init_e) = f.init_expr() {
+            self.compile_expr(init_e)?;
+            self.builder.emit_opcode(Opcode::Pop);
+        }
+
+        let loop_cond = self.builder.len();
+        self.loops.push(LoopCtx::default());
+
+        let j_exit_opt = if let Some(cond) = f.condition_expr() {
+            self.compile_expr(cond)?;
+            Some(self.builder.emit_jump_if_false_placeholder())
+        } else {
+            None
+        };
+
+        let body = f
+            .body()
+            .ok_or(CompileError::Unsupported("for without body"))?;
+        self.compile_stmt_block(&body)?;
+
+        let step_start = self.builder.len();
+        self.patch_continue_fixups(step_start);
+
+        if let Some(step) = f.step_expr() {
+            self.compile_expr(step)?;
+            self.builder.emit_opcode(Opcode::Pop);
+        }
+
+        let jmp_back = self.builder.emit_jump_placeholder();
+        self.builder.patch_i32_operand_at(
+            jmp_back,
+            loop_cond as i32 - (jmp_back + 4) as i32,
+        );
+
+        let after = self.builder.len();
+        if let Some(j) = j_exit_opt {
+            self.builder
+                .patch_i32_operand_at(j, after as i32 - (j + 4) as i32);
+        }
+
+        let frame = self.loops.pop().expect("loop stack");
+        for off in frame.break_fixups {
+            self.builder
+                .patch_i32_operand_at(off, after as i32 - (off + 4) as i32);
+        }
+        Ok(())
+    }
+
+    fn compile_assign_local(&mut self, name: &str, rhs: Expr) -> Result<(), CompileError> {
+        let slot = *self
+            .locals
+            .get(name)
+            .ok_or(CompileError::Unsupported("undefined variable"))?;
+        self.compile_expr(rhs)?;
+        self.builder.emit_opcode(Opcode::Dup);
+        self.builder.emit_opcode(Opcode::SetLocal);
+        self.builder.emit_u16_operand(slot);
         Ok(())
     }
 
@@ -436,6 +690,9 @@ impl CompileCtx {
                 .children()
                 .filter(|e| !syntax_el_is_trivia(e))
                 .collect();
+            if let Some((name, rhs)) = try_simple_assign_from_expr_parts(&parts) {
+                return self.compile_assign_local(&name, rhs);
+            }
             if parts.len() >= 2 && self.try_compile_infix_chain_on_parts(&parts)? {
                 return Ok(());
             }

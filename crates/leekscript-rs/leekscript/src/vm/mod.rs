@@ -10,7 +10,8 @@
 //! - [`DISPATCH`](interpreter::DISPATCH) — a full **256-entry** function-pointer table (one handler
 //!   per possible opcode byte). Unused tags still resolve to [`op_illegal`](interpreter::op_illegal).
 //! - [`Vm`](interpreter::Vm) — stack machine, constant pool, locals, optional [`NativeFn`](interpreter::NativeFn) table.
-//! - [`compile_chunk_v4`](compile::compile_chunk_v4) — minimal CST → bytecode (extend as you add language coverage).
+//! - [`compile_chunk_v4`](compile::compile_chunk_v4) — CST → bytecode (`var`, `if`, `while` / `do`-`while` /
+//!   `for`, `break` / `continue`, `;`, simple `x = expr` assignments, expressions, `return`).
 
 mod bytecode;
 mod compile;
