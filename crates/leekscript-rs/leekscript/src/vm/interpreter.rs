@@ -7,6 +7,7 @@
 use std::vec::Vec;
 
 use super::bytecode::Bytecode;
+use super::compile::FunctionEntry;
 use super::error::VmError;
 use super::opcode::Opcode;
 use super::value::Value;
@@ -54,6 +55,13 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::MapBuild as usize] = op_map_build;
     table[Opcode::GetElem as usize] = op_get_elem;
     table[Opcode::ChargeOps as usize] = op_charge_ops;
+    table[Opcode::ArrayLen as usize] = op_array_len;
+    table[Opcode::MapLen as usize] = op_map_len;
+    table[Opcode::MapEntryAt as usize] = op_map_entry_at;
+    table[Opcode::CallFunction as usize] = op_call_function;
+    table[Opcode::TryBegin as usize] = op_try_begin;
+    table[Opcode::TryEnd as usize] = op_try_end;
+    table[Opcode::Throw as usize] = op_throw;
     table
 };
 
@@ -65,6 +73,10 @@ pub struct Vm {
     stack: Vec<Value>,
     locals: Vec<Value>,
     natives: Vec<NativeFn>,
+    /// User functions from [`super::compile::CompiledChunk::functions`](super::compile::CompiledChunk).
+    pub functions: Vec<FunctionEntry>,
+    return_pcs: Vec<usize>,
+    try_catch_pcs: Vec<usize>,
     /// Last opcode byte dispatched (for [`VmError::IllegalOpcode`]).
     pub current_opcode: u8,
     /// Java `AI.mOperations`-style budget: increments from [`Opcode::ChargeOps`](Opcode::ChargeOps) and
@@ -80,6 +92,15 @@ pub struct Vm {
 }
 
 impl Vm {
+    /// Build a VM from [`super::compile::CompiledChunk`](super::compile::CompiledChunk): bytecode,
+    /// [`Self::set_local_count`](Self::set_local_count), and [`Self::set_functions`](Self::set_functions).
+    pub fn from_compiled_chunk(chunk: super::compile::CompiledChunk) -> Result<Self, VmError> {
+        let mut vm = Self::new(chunk.bytecode);
+        vm.set_functions(chunk.functions);
+        vm.set_local_count(chunk.local_slots)?;
+        Ok(vm)
+    }
+
     /// New VM with empty native table; register callables before `run` if you emit [`Opcode::CallNative`](Opcode::CallNative).
     ///
     /// Initializes [`Self::max_operations`] and [`Self::max_ram_quads`] to the same defaults as Java `AI`.
@@ -92,6 +113,9 @@ impl Vm {
             stack: Vec::new(),
             locals: Vec::new(),
             natives: Vec::new(),
+            functions: Vec::new(),
+            return_pcs: Vec::new(),
+            try_catch_pcs: Vec::new(),
             current_opcode: 0,
             operations: 0,
             max_operations: Some(DEFAULT_MAX_OPERATIONS),
@@ -103,6 +127,11 @@ impl Vm {
     /// Replace the native function table (index = id used in [`Opcode::CallNative`](Opcode::CallNative)).
     pub fn set_natives(&mut self, natives: Vec<NativeFn>) {
         self.natives = natives;
+    }
+
+    /// Install the function table from [`super::compile::compile_chunk_v4`](super::compile::compile_chunk_v4).
+    pub fn set_functions(&mut self, functions: Vec<FunctionEntry>) {
+        self.functions = functions;
     }
 
     /// Grow or shrink locals. New slots are [`Value::Null`](Value::Null). Charges/releases RAM per slot.
@@ -362,8 +391,29 @@ fn op_neg(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+fn store_local(vm: &mut Vm, i: u16, v: Value) -> Result<(), VmError> {
+    let (old_q, new_q) = {
+        let slot = vm
+            .locals
+            .get_mut(usize::from(i))
+            .ok_or(VmError::BadLocal(i))?;
+        let old = core::mem::replace(slot, v);
+        (old.ram_quads(), slot.ram_quads())
+    };
+    vm.release_ram(old_q);
+    vm.charge_ram(new_q)?;
+    Ok(())
+}
+
 fn op_return(vm: &mut Vm) -> Result<(), VmError> {
-    vm.pc = vm.code.len();
+    let ret = vm.pop_stack()?;
+    if let Some(ret_pc) = vm.return_pcs.pop() {
+        vm.pc = ret_pc;
+        vm.push_stack(ret)?;
+    } else {
+        vm.push_stack(ret)?;
+        vm.pc = vm.code.len();
+    }
     Ok(())
 }
 
@@ -381,17 +431,7 @@ fn op_get_local(vm: &mut Vm) -> Result<(), VmError> {
 fn op_set_local(vm: &mut Vm) -> Result<(), VmError> {
     let i = vm.read_u16()?;
     let v = vm.pop_stack()?;
-    let (old_q, new_q) = {
-        let slot = vm
-            .locals
-            .get_mut(usize::from(i))
-            .ok_or(VmError::BadLocal(i))?;
-        let old = core::mem::replace(slot, v);
-        (old.ram_quads(), slot.ram_quads())
-    };
-    vm.release_ram(old_q);
-    vm.charge_ram(new_q)?;
-    Ok(())
+    store_local(vm, i, v)
 }
 
 fn apply_pc_delta(vm: &mut Vm, delta: i32) -> Result<(), VmError> {
@@ -548,5 +588,102 @@ fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
         _ => Value::Null,
     };
     vm.push_stack(out)?;
+    Ok(())
+}
+
+fn op_array_len(vm: &mut Vm) -> Result<(), VmError> {
+    let v = vm.pop_stack()?;
+    let n = match &v {
+        Value::Array(a) => a.len() as f64,
+        _ => 0.0,
+    };
+    vm.push_stack(Value::Number(n))?;
+    Ok(())
+}
+
+fn op_map_len(vm: &mut Vm) -> Result<(), VmError> {
+    let v = vm.pop_stack()?;
+    let n = match &v {
+        Value::Map(m) => m.len() as f64,
+        _ => 0.0,
+    };
+    vm.push_stack(Value::Number(n))?;
+    Ok(())
+}
+
+fn op_map_entry_at(vm: &mut Vm) -> Result<(), VmError> {
+    let idx_v = vm.pop_stack()?;
+    let map_v = vm.pop_stack()?;
+    let (k, val) = match (&map_v, idx_v.as_number()) {
+        (Value::Map(m), Some(n)) if n.is_finite() && n >= 0.0 => {
+            let i = n as usize;
+            m.get(i)
+                .map(|p| (p.0.clone(), p.1.clone()))
+                .unwrap_or((Value::Null, Value::Null))
+        }
+        _ => (Value::Null, Value::Null),
+    };
+    vm.push_stack(k)?;
+    vm.push_stack(val)?;
+    Ok(())
+}
+
+fn op_call_function(vm: &mut Vm) -> Result<(), VmError> {
+    let fid = vm.read_u16()?;
+    let argc = vm.read_u8()?;
+    let meta = vm
+        .functions
+        .get(fid as usize)
+        .cloned()
+        .ok_or(VmError::BadFunctionIndex(fid))?;
+    if argc != meta.argc {
+        return Err(VmError::BadFunctionArity {
+            expected: meta.argc,
+            got: argc,
+        });
+    }
+    let base = usize::from(meta.slot_base);
+    let total = usize::from(meta.slot_count);
+    if base.saturating_add(total) > vm.locals.len() {
+        return Err(VmError::BadLocal(meta.slot_base.saturating_add(meta.slot_count).saturating_sub(1)));
+    }
+    let mut args = vec![Value::Null; argc as usize];
+    for slot in (0..argc as usize).rev() {
+        args[slot] = vm.pop_stack()?;
+    }
+    vm.return_pcs.push(vm.pc);
+    for (i, v) in args.into_iter().enumerate() {
+        let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+        store_local(vm, li, v)?;
+    }
+    for i in (argc as usize)..total {
+        let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+        store_local(vm, li, Value::Null)?;
+    }
+    vm.pc = meta.entry_pc;
+    Ok(())
+}
+
+fn op_try_begin(vm: &mut Vm) -> Result<(), VmError> {
+    let catch_pc = vm.read_u32()? as usize;
+    if catch_pc > vm.code.len() {
+        return Err(VmError::UnexpectedEof);
+    }
+    vm.try_catch_pcs.push(catch_pc);
+    Ok(())
+}
+
+fn op_try_end(vm: &mut Vm) -> Result<(), VmError> {
+    vm.try_catch_pcs.pop().ok_or(VmError::TryStackUnderflow)?;
+    Ok(())
+}
+
+fn op_throw(vm: &mut Vm) -> Result<(), VmError> {
+    let v = vm.pop_stack()?;
+    let Some(catch_pc) = vm.try_catch_pcs.pop() else {
+        return Err(VmError::UncaughtThrow(v));
+    };
+    vm.pc = catch_pc;
+    vm.push_stack(v)?;
     Ok(())
 }

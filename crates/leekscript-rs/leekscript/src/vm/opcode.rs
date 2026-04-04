@@ -51,4 +51,18 @@ pub enum Opcode {
     /// Add `u32` to the operation budget (Java `AI.ops(int)` at control-flow boundaries). No `+1`
     /// dispatch tick — the operand is the full semantic charge for this instruction.
     ChargeOps = 28,
+    /// Pop one value; push its array length as a number (`0` if not an array).
+    ArrayLen = 29,
+    /// Pop map; push pair count as a number (`0` if not a map).
+    MapLen = 30,
+    /// Pop index then map; push key then value for that pair (`null`, `null` if out of range / not a map).
+    MapEntryAt = 31,
+    /// Call user function: `u16` function id, `u8` argc. Pops args (last pushed = last param).
+    CallFunction = 32,
+    /// Push active `try` handler: `u32` absolute bytecode offset of the `catch` entry.
+    TryBegin = 33,
+    /// Pop one `try` frame (normal completion of `try` body).
+    TryEnd = 34,
+    /// Pop thrown value; jump to innermost `catch` with that value pushed, or error if none.
+    Throw = 35,
 }

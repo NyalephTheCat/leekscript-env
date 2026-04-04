@@ -33,6 +33,14 @@ pub enum VmError {
         limit: u64,
         attempted_total: u64,
     },
+    /// [`Opcode::CallFunction`](super::opcode::Opcode::CallFunction) id out of range.
+    BadFunctionIndex(u16),
+    /// Call arity does not match the compiled function.
+    BadFunctionArity { expected: u8, got: u8 },
+    /// [`Opcode::Throw`](super::opcode::Opcode::Throw) with no enclosing [`Opcode::TryBegin`](super::opcode::Opcode::TryBegin).
+    UncaughtThrow(super::value::Value),
+    /// [`Opcode::TryEnd`](super::opcode::Opcode::TryEnd) without a matching [`Opcode::TryBegin`](super::opcode::Opcode::TryBegin).
+    TryStackUnderflow,
 }
 
 impl fmt::Display for VmError {
@@ -63,6 +71,12 @@ impl fmt::Display for VmError {
                 f,
                 "RAM limit exceeded (limit {limit} quads, would be {attempted_total})"
             ),
+            Self::BadFunctionIndex(i) => write!(f, "function index {i} out of range"),
+            Self::BadFunctionArity { expected, got } => {
+                write!(f, "function call expected {expected} args, got {got}")
+            }
+            Self::UncaughtThrow(_) => write!(f, "uncaught throw"),
+            Self::TryStackUnderflow => write!(f, "`TryEnd` without matching `TryBegin`"),
         }
     }
 }

@@ -1,16 +1,15 @@
 //! Behavioural parity with the Java LeekScript test suite (`leek-wars-generator/leekscript`).
 //!
 //! Expected strings are taken from `src/test/java/test/TestOperators.java` and `TestBoolean.java`
-//! (`.equals("…")` assertions, V4 / unversioned cases). Run the Java tests locally to re-validate
-//! when changing semantics.
+//! (`.equals("…")` assertions, V4 / unversioned cases), plus hand-checked `TopLevel` / `AI.string`
+//! export shapes for control flow and collections. Run the Java tests locally to re-validate when
+//! changing semantics.
 
 use leekscript::vm::{Vm, compile_chunk_v4};
 
 fn run_export(source: &str) -> String {
     let chunk = compile_chunk_v4(source).unwrap_or_else(|e| panic!("compile {source:?}: {e}"));
-    let mut vm = Vm::new(chunk.bytecode);
-    vm.set_local_count(chunk.local_slots)
-        .unwrap_or_else(|e| panic!("locals {source:?}: {e}"));
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap_or_else(|e| panic!("vm {source:?}: {e}"));
     vm.run()
         .unwrap_or_else(|e| panic!("run {source:?}: {e}"))
         .to_leek_export_string()
@@ -164,4 +163,131 @@ fn parity_index_ternary_compound_export() {
     assert_eq!(run_export("return true ? 'yes' : 'no';"), "'yes'");
     assert_eq!(run_export("return false ? 'yes' : 'no';"), "'no'");
     assert_eq!(run_export("var x = 10; x -= 3; return x;"), "7");
+}
+
+#[test]
+fn parity_not_equals_v4() {
+    // `!=` / `!==` both lower to the same inequality as `==` / `===` in this VM (V4 `equals_equals`).
+    assert_eq!(run_export("return 1 !== 2;"), "true");
+    assert_eq!(run_export("return 1 !== 1;"), "false");
+    assert_eq!(run_export("return null !== null;"), "false");
+    assert_eq!(run_export("return 'a' != 'b';"), "true");
+    assert_eq!(run_export("return 'a' != 'a';"), "false");
+}
+
+#[test]
+fn parity_map_equality_v4() {
+    assert_eq!(run_export("return [:] == [:];"), "true");
+    assert_eq!(run_export("return [:] != [:];"), "false");
+    assert_eq!(run_export("return [1: 2] == [1: 2];"), "true");
+    assert_eq!(run_export("return [1: 2] == [1: 3];"), "false");
+    assert_eq!(run_export("return [1: 2] != [1: 3];"), "true");
+}
+
+#[test]
+fn parity_modulo_and_increment_style_loop() {
+    assert_eq!(run_export("return 17 % 5;"), "2");
+    assert_eq!(
+        run_export(
+            "var s = 0; var i = 0; while (i < 4) { s = s + i; i = i + 1; } return s;"
+        ),
+        "6"
+    );
+}
+
+#[test]
+fn parity_do_while_export() {
+    assert_eq!(
+        run_export("var n = 0; do { n = n + 1; } while (n < 3); return n;"),
+        "3"
+    );
+}
+
+#[test]
+fn parity_switch_default_and_break() {
+    assert_eq!(
+        run_export(
+            "var x = 3; var r = 0; switch (x) { case 1: r = 10; break; case 2: r = 20; break; default: r = 99; } return r;"
+        ),
+        "99"
+    );
+    assert_eq!(
+        run_export(
+            "var x = 2; var r = 0; switch (x) { case 1: r = 10; break; case 2: r = 20; break; default: r = 99; } return r;"
+        ),
+        "20"
+    );
+}
+
+#[test]
+fn parity_function_decl_call_and_cross_call() {
+    assert_eq!(
+        run_export(
+            "function dbl(n) { return n + n; } return dbl(21);"
+        ),
+        "42"
+    );
+    assert_eq!(
+        run_export(
+            "function one() { return 1; } function two() { return one(); } return two();"
+        ),
+        "1"
+    );
+}
+
+#[test]
+fn parity_try_catch_throw_export() {
+    assert_eq!(
+        run_export(
+            "var r = 0; try { throw 7; r = 1; } catch (integer e) { r = e + 1; } return r;"
+        ),
+        "8"
+    );
+    assert_eq!(
+        run_export(
+            "var r = 0; try { r = 5; } catch (integer e) { r = 99; } return r;"
+        ),
+        "5"
+    );
+}
+
+#[test]
+fn parity_foreach_array_and_map_pairs() {
+    assert_eq!(
+        run_export(
+            "var s = 0; var a = [1, 2, 3]; for (v in a) { s = s + v; } return s;"
+        ),
+        "6"
+    );
+    assert_eq!(
+        run_export(
+            "var s = 0; var m = [10: 1, 20: 2]; for (k : v in m) { s = s + v; } return s;"
+        ),
+        "3"
+    );
+    assert_eq!(
+        run_export(
+            "var s = 0; var m = [10: 1, 20: 2]; for (k : v in m) { s = s + k; } return s;"
+        ),
+        "30"
+    );
+}
+
+#[test]
+fn parity_for_loop_classic_sum() {
+    assert_eq!(
+        run_export(
+            "var s = 0; for (var i = 0; i < 5; i = i + 1) { s = s + i; } return s;"
+        ),
+        "10"
+    );
+}
+
+#[test]
+fn parity_nested_ternary_associativity() {
+    // Binds outermost `?:` loosest: `true ? false ? 1 : 2 : 3` → `(true ? (false ? 1 : 2) : 3)` → 2.
+    assert_eq!(
+        run_export("return true ? false ? 1 : 2 : 3;"),
+        "2"
+    );
 }

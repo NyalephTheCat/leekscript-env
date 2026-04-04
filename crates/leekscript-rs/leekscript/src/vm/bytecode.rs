@@ -60,6 +60,40 @@ impl BytecodeBuilder {
         self.emit_u16_operand(pair_count);
     }
 
+    pub fn emit_array_len(&mut self) {
+        self.emit_opcode(Opcode::ArrayLen);
+    }
+
+    pub fn emit_map_len(&mut self) {
+        self.emit_opcode(Opcode::MapLen);
+    }
+
+    pub fn emit_map_entry_at(&mut self) {
+        self.emit_opcode(Opcode::MapEntryAt);
+    }
+
+    pub fn emit_call_function(&mut self, func_id: u16, argc: u8) {
+        self.emit_opcode(Opcode::CallFunction);
+        self.emit_u16_operand(func_id);
+        self.emit_u8(argc);
+    }
+
+    /// [`Opcode::TryBegin`](Opcode::TryBegin) with placeholder `u32` catch PC; patch via [`Self::patch_u32_at`].
+    pub fn emit_try_begin_placeholder(&mut self) -> usize {
+        self.emit_opcode(Opcode::TryBegin);
+        let off = self.code.len();
+        self.code.extend_from_slice(&0u32.to_le_bytes());
+        off
+    }
+
+    pub fn emit_try_end(&mut self) {
+        self.emit_opcode(Opcode::TryEnd);
+    }
+
+    pub fn emit_throw(&mut self) {
+        self.emit_opcode(Opcode::Throw);
+    }
+
     pub fn emit_u16_operand(&mut self, v: u16) {
         self.code.extend_from_slice(&v.to_le_bytes());
     }
