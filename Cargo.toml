@@ -4,6 +4,7 @@ members = [
   "crates/sipha/sipha",
   "crates/leekscript-rs/leekscript",
   "crates/leekscript-rs/leekscript-cli",
+  "crates/leekscript-rs/leekscript-lsp",
 ]
 
 [workspace.lints]

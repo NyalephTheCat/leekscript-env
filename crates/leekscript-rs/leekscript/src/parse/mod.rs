@@ -3,12 +3,13 @@ mod lang_directive;
 mod recovery;
 pub(crate) mod version;
 
-pub use error::ParseError;
+pub use error::{ParseError, ParseErrorInner};
 #[cfg(feature = "partial-reparse")]
 pub use recovery::parse_rule_at_offset;
 pub use recovery::{
     ParsedWithRecovery, parse_doc_or_recover, parse_doc_with_recovery,
-    parse_doc_with_recovery_limited,
+    parse_doc_with_recovery_limited, parse_signature_doc_with_recovery,
+    parse_signature_doc_with_recovery_limited,
 };
 pub use lang_directive::language_options_with_source_directives;
 pub use version::{

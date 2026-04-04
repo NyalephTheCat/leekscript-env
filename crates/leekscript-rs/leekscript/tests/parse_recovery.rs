@@ -3,12 +3,25 @@
 use leekscript::ast::{Root, Stmt};
 use leekscript::syntax::kinds::K;
 use leekscript::visit::{AstNodeExt, AstNodeTrait};
-use leekscript::{Version, parse_doc, parse_doc_with_recovery, parse_rule_at_offset};
+use leekscript::{
+    Version, parse_doc, parse_doc_with_recovery, parse_rule_at_offset, parse_signature_doc_with_recovery,
+};
 
 #[test]
 fn strict_parse_fails_bad_top_level() {
     let src = "function f() {}\n???\nfunction g() {}\n";
     assert!(parse_doc(src, Version::V4).is_err());
+}
+
+#[test]
+fn signature_recovery_parses_function_stub() {
+    let src = "function abs(integer|real a) => integer|real;\n";
+    let r = parse_signature_doc_with_recovery(src, Version::V4).expect("signature recover parse");
+    let root = Root::cast(r.doc.root().clone()).expect("root");
+    let fn_count = AstNodeExt::children::<Stmt>(root.syntax())
+        .filter(|s| s.syntax().kind_as::<K>() == Some(K::FunctionDecl))
+        .count();
+    assert_eq!(fn_count, 1, "expected one function stub decl");
 }
 
 #[test]

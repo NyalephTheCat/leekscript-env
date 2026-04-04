@@ -71,6 +71,51 @@ pub fn parse_doc_with_recovery_limited(
     }
 }
 
+/// Parse a signature / stub document with recovery (like [`parse_doc_with_recovery`], but
+/// [`LanguageOptions::signature_parse_context`] so `function … => T;` stubs parse).
+#[must_use]
+pub fn parse_signature_doc_with_recovery(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+) -> Result<ParsedWithRecovery, ParseError> {
+    parse_signature_doc_with_recovery_limited(src, lang, DEFAULT_MAX_RECOVERY_ERRORS)
+}
+
+/// Like [`parse_signature_doc_with_recovery`], with an explicit cap on collected parse errors.
+pub fn parse_signature_doc_with_recovery_limited(
+    src: &str,
+    lang: impl Into<LanguageOptions>,
+    max_errors: usize,
+) -> Result<ParsedWithRecovery, ParseError> {
+    let built = grammar::built_graph();
+    let graph = built.as_graph();
+    let mut engine = Engine::new();
+    let opts = language_options_with_source_directives(src, lang);
+    let ctx = opts
+        .signature_parse_context()
+        .with_set(super::version::FLAG_PARSE_RECOVERY)
+        .with_error_node_kind(K::ErrorStmt as sipha::types::SyntaxKind);
+
+    let bytes = src.as_bytes();
+    match engine.parse_recovering_multi_with_context(&graph, bytes, &ctx, max_errors.max(1)) {
+        Ok(out) => {
+            let doc = ParsedDoc::from_slice(bytes, &out).ok_or(ParseError::NoSyntaxRoot)?;
+            Ok(ParsedWithRecovery {
+                doc,
+                errors: vec![],
+            })
+        }
+        Err(multi) => {
+            let doc =
+                ParsedDoc::from_slice(bytes, &multi.partial).ok_or(ParseError::NoSyntaxRoot)?;
+            Ok(ParsedWithRecovery {
+                doc,
+                errors: multi.errors.into_iter().map(ParseError::from).collect(),
+            })
+        }
+    }
+}
+
 /// Parse a grammar rule starting at `byte_offset` in `src` (fragment / partial input).
 ///
 /// The rule name must exist in the built graph (e.g. `"stmt"`, `"expr"`). Requires the

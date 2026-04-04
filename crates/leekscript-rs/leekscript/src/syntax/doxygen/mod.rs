@@ -15,6 +15,33 @@ use commands::apply_segments;
 use scan::split_command_segments;
 use sipha_parse::split_via_sipha;
 
+/// Byte ranges `[start, end)` of each `\command` or `@command` token in a Doxygen **body**
+/// (no `/**` / `*/` or `///` line prefixes — pass the slice your highlighter uses, e.g. a full
+/// `/// …` line).
+///
+/// Uses the same command detection as [`parse_doxygen`].
+#[must_use]
+pub fn doxygen_command_byte_ranges(body: &str) -> Vec<(usize, usize)> {
+    use scan::{find_next_command, skip_arg_start};
+
+    let mut out = Vec::new();
+    let Some((cmd_pos, _name, after_name)) = find_next_command(body, 0) else {
+        return out;
+    };
+    out.push((cmd_pos, after_name));
+    let mut pos = skip_arg_start(body, after_name);
+    loop {
+        match find_next_command(body, pos) {
+            None => break,
+            Some((i, _n, na)) => {
+                out.push((i, na));
+                pos = skip_arg_start(body, na);
+            }
+        }
+    }
+    out
+}
+
 /// Parse a single Doxygen comment body (no `/**` / `*/` delimiters).
 #[must_use]
 pub fn parse_doxygen(body: &str) -> ParsedDoxygen {
@@ -74,6 +101,16 @@ mod tests {
         assert_eq!(p.params[0].name, "dst");
         assert_eq!(p.params[1].direction.as_deref(), Some("out"));
         assert_eq!(p.params[1].name, "err");
+    }
+
+    #[test]
+    fn command_byte_ranges_match_commands() {
+        let s = r"@brief A \param x one \param y two";
+        let r = doxygen_command_byte_ranges(s);
+        assert_eq!(r.len(), 3);
+        assert_eq!(&s[r[0].0..r[0].1], "@brief");
+        assert_eq!(&s[r[1].0..r[1].1], r"\param");
+        assert_eq!(&s[r[2].0..r[2].1], r"\param");
     }
 
     #[test]

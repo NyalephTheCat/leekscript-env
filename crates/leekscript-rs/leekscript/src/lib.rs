@@ -61,9 +61,10 @@ pub use include::{
 pub use parse::parse_rule_at_offset;
 pub use parse::{
     ExperimentalFeatures, LanguageOptions, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, ParseError,
-    ParsedWithRecovery, Version, is_signature_stub_path, language_options_with_source_directives,
-    parse_doc, parse_doc_or_recover, parse_doc_with_recovery, parse_doc_with_recovery_limited,
-    parse_signature_doc, parse_syntax_root,
+    ParseErrorInner, ParsedWithRecovery, Version, is_signature_stub_path,
+    language_options_with_source_directives, parse_doc, parse_doc_or_recover, parse_doc_with_recovery,
+    parse_doc_with_recovery_limited, parse_signature_doc, parse_signature_doc_with_recovery,
+    parse_signature_doc_with_recovery_limited, parse_syntax_root,
 };
 pub use sipha::types::{Pos, Span};
 
