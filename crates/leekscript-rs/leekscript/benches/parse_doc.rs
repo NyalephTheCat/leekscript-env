@@ -65,7 +65,11 @@ fn bench_parse_doc_ai_previous_main(c: &mut Criterion) {
 }
 
 fn bench_parse_signature_std_functions(c: &mut Criterion) {
-    let src = include_str!("../../../../sig/std.sig.functions.leek");
+    let src = concat!(
+        include_str!("../../../../sig/core/stdlib.sig.functions.leek"),
+        "\n",
+        include_str!("../../../../sig/leekwars/leekwars.sig.functions.leek"),
+    );
     let mut pool = Vec::with_capacity(src.len());
     c.bench_function("parse_signature_doc/std_functions_sig", |b| {
         b.iter(|| {

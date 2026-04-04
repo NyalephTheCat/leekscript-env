@@ -1,0 +1,394 @@
+// leeklang: version=v4 experimental-templates=true
+// sig/leekwars/leekwars.sig.const.leek — Leek Wars API constants (same values as generate_leek_api_signatures.py).
+
+// BULB
+global integer BULB_FIRE = 2;
+global integer BULB_HEALER = 3;
+global integer BULB_ICED = 5;
+global integer BULB_LIGHTNING = 6;
+global integer BULB_METALLIC = 7;
+global integer BULB_PUNY = 1;
+global integer BULB_ROCKY = 4;
+global integer BULB_SAVANT = 12;
+global integer BULB_TACTICIAN = 11;
+global integer BULB_WIZARD = 8;
+
+// EFFECT
+global integer EFFECT_ABSOLUTE_SHIELD = 6;
+global integer EFFECT_ABSOLUTE_VULNERABILITY = 27;
+global integer EFFECT_ADD_STATE = 59;
+global integer EFFECT_AFTEREFFECT = 25;
+global integer EFFECT_ALLY_KILLED_TO_AGILITY = 55;
+global integer EFFECT_ANTIDOTE = 23;
+global integer EFFECT_ATTRACT = 46;
+global integer EFFECT_BOOST_MAX_LIFE = 12;
+global integer EFFECT_BUFF_AGILITY = 4;
+global integer EFFECT_BUFF_FORCE = 3;
+global integer EFFECT_BUFF_MP = 7;
+global integer EFFECT_BUFF_RESISTANCE = 21;
+global integer EFFECT_BUFF_STRENGTH = 3;
+global integer EFFECT_BUFF_TP = 8;
+global integer EFFECT_BUFF_WISDOM = 22;
+global integer EFFECT_CRITICAL_TO_HEAL = 58;
+global integer EFFECT_DAMAGE = 1;
+global integer EFFECT_DAMAGE_RETURN = 20;
+global integer EFFECT_DAMAGE_TO_ABSOLUTE_SHIELD = 34;
+global integer EFFECT_DAMAGE_TO_STRENGTH = 35;
+global integer EFFECT_DEBUFF = 9;
+global integer EFFECT_HEAL = 2;
+global integer EFFECT_INVERT = 11;
+global integer EFFECT_KILL = 16;
+global integer EFFECT_KILL_TO_TP = 56;
+global integer EFFECT_LIFE_DAMAGE = 28;
+global integer EFFECT_MODIFIER_IRREDUCTIBLE = 16;
+global integer EFFECT_MODIFIER_MULTIPLIED_BY_TARGETS = 2;
+global integer EFFECT_MODIFIER_NOT_REPLACEABLE = 8;
+global integer EFFECT_MODIFIER_ON_CASTER = 4;
+global integer EFFECT_MODIFIER_STACKABLE = 1;
+global integer EFFECT_MOVED_TO_MP = 50;
+global integer EFFECT_NOVA_DAMAGE = 30;
+global integer EFFECT_NOVA_DAMAGE_TO_MAGIC = 36;
+global integer EFFECT_NOVA_VITALITY = 45;
+global integer EFFECT_POISON = 13;
+global integer EFFECT_POISON_TO_SCIENCE = 33;
+global integer EFFECT_PROPAGATION = 43;
+global integer EFFECT_PUSH = 51;
+global integer EFFECT_RAW_ABSOLUTE_SHIELD = 37;
+global integer EFFECT_RAW_BUFF_AGILITY = 41;
+global integer EFFECT_RAW_BUFF_MAGIC = 39;
+global integer EFFECT_RAW_BUFF_MP = 31;
+global integer EFFECT_RAW_BUFF_POWER = 52;
+global integer EFFECT_RAW_BUFF_RESISTANCE = 42;
+global integer EFFECT_RAW_BUFF_SCIENCE = 40;
+global integer EFFECT_RAW_BUFF_STRENGTH = 38;
+global integer EFFECT_RAW_BUFF_TP = 32;
+global integer EFFECT_RAW_BUFF_WISDOM = 44;
+global integer EFFECT_RAW_HEAL = 57;
+global integer EFFECT_RAW_RELATIVE_SHIELD = 54;
+global integer EFFECT_RELATIVE_SHIELD = 5;
+global integer EFFECT_REMOVE_SHACKLES = 49;
+global integer EFFECT_REPEL = 53;
+global integer EFFECT_RESURRECT = 15;
+global integer EFFECT_SHACKLE_AGILITY = 47;
+global integer EFFECT_SHACKLE_MAGIC = 24;
+global integer EFFECT_SHACKLE_MP = 17;
+global integer EFFECT_SHACKLE_STRENGTH = 19;
+global integer EFFECT_SHACKLE_TP = 18;
+global integer EFFECT_SHACKLE_WISDOM = 48;
+global integer EFFECT_SLIDE_TO = 46;
+global integer EFFECT_STEAL_ABSOLUTE_SHIELD = 29;
+global integer EFFECT_SUMMON = 14;
+global integer EFFECT_TARGET_ALLIES = 2;
+global integer EFFECT_TARGET_ALWAYS_CASTER = 32;
+global integer EFFECT_TARGET_CASTER = 4;
+global integer EFFECT_TARGET_ENEMIES = 1;
+global integer EFFECT_TARGET_NON_SUMMONS = 8;
+global integer EFFECT_TARGET_NOT_CASTER = 0;
+global integer EFFECT_TARGET_SUMMONS = 16;
+global integer EFFECT_TELEPORT = 10;
+global integer EFFECT_VULNERABILITY = 26;
+
+// ENTITY
+global integer ENTITY_BULB = 2;
+global integer ENTITY_CHEST = 4;
+global integer ENTITY_LEEK = 1;
+global integer ENTITY_MOB = 5;
+global integer ENTITY_TURRET = 3;
+
+// MOB
+global integer MOB_BLUE_CRYSTAL = 7;
+global integer MOB_EVIL_PUMPKIN = 3;
+global integer MOB_FENNEL_KING = 2;
+global integer MOB_FENNEL_KNIGHT = 16;
+global integer MOB_FENNEL_SCRIBE = 18;
+global integer MOB_FENNEL_SQUIRE = 17;
+global integer MOB_GRAAL = 4;
+global integer MOB_GREEN_CRYSTAL = 6;
+global integer MOB_HUBBARD = 11;
+global integer MOB_NASU_RONIN = 15;
+global integer MOB_NASU_SAMURAI = 1;
+global integer MOB_NASU_SEITO = 13;
+global integer MOB_NASU_WARRIOR = 14;
+global integer MOB_OFFSPRING = 12;
+global integer MOB_RED_CRYSTAL = 5;
+global integer MOB_TURBAN = 9;
+global integer MOB_WARTY = 10;
+global integer MOB_YELLOW_CRYSTAL = 8;
+
+// STATE
+global integer STATE_INVINCIBLE = 3;
+
+// STAT
+global integer STAT_ABSOLUTE_SHIELD = 9;
+global integer STAT_AGILITY = 4;
+global integer STAT_CORES = 16;
+global integer STAT_DAMAGE_RETURN = 14;
+global integer STAT_FREQUENCY = 5;
+global integer STAT_LIFE = 0;
+global integer STAT_MAGIC = 13;
+global integer STAT_MP = 2;
+global integer STAT_POWER = 15;
+global integer STAT_RAM = 17;
+global integer STAT_RELATIVE_SHIELD = 10;
+global integer STAT_RESISTANCE = 11;
+global integer STAT_SCIENCE = 12;
+global integer STAT_STRENGTH = 3;
+global integer STAT_TP = 1;
+global integer STAT_WISDOM = 6;
+
+// USE
+global integer USE_CRITICAL = 2;
+global integer USE_FAILED = 0;
+global integer USE_INVALID_COOLDOWN = -3;
+global integer USE_INVALID_POSITION = -4;
+global integer USE_INVALID_TARGET = -1;
+global integer USE_MAX_USES = -7;
+global integer USE_NOT_ENOUGH_TP = -2;
+global integer USE_SUCCESS = 1;
+global integer USE_TOO_MANY_SUMMONS = -5;
+
+// EFFECT
+global integer EFFECT_STEAL_LIFE = 61;
+global integer EFFECT_TOTAL_DEBUFF = 60;
+
+// WEAPON
+global integer WEAPON_AXE = 109;
+global integer WEAPON_BAZOOKA = 184;
+global integer WEAPON_BROADSWORD = 108;
+global integer WEAPON_B_LASER = 60;
+global integer WEAPON_DARK_KATANA = 187;
+global integer WEAPON_DESTROYER = 40;
+global integer WEAPON_DOUBLE_GUN = 39;
+global integer WEAPON_ELECTRISOR = 44;
+global integer WEAPON_ENHANCED_LIGHTNINGER = 225;
+global integer WEAPON_EXCALIBUR = 409;
+global integer WEAPON_EXPLORER_RIFLE = 175;
+global integer WEAPON_FLAME_THROWER = 46;
+global integer WEAPON_GAZOR = 48;
+global integer WEAPON_GRENADE_LAUNCHER = 43;
+global integer WEAPON_HEAVY_SWORD = 278;
+global integer WEAPON_ILLICIT_GRENADE_LAUNCHER = 116;
+global integer WEAPON_J_LASER = 115;
+global integer WEAPON_KATANA = 107;
+global integer WEAPON_LASER = 42;
+global integer WEAPON_LIGHTNINGER = 180;
+global integer WEAPON_MACHINE_GUN = 38;
+global integer WEAPON_MAGNUM = 45;
+global integer WEAPON_MYSTERIOUS_ELECTRISOR = 117;
+global integer WEAPON_M_LASER = 47;
+global integer WEAPON_NEUTRINO = 182;
+global integer WEAPON_ODACHI = 408;
+global integer WEAPON_PISTOL = 37;
+global integer WEAPON_QUANTUM_RIFLE = 428;
+global integer WEAPON_REVOKED_M_LASER = 119;
+global integer WEAPON_RHINO = 153;
+global integer WEAPON_RIFLE = 151;
+global integer WEAPON_SCYTHE = 410;
+global integer WEAPON_SHOTGUN = 41;
+global integer WEAPON_SWORD = 277;
+global integer WEAPON_UNBRIDLED_GAZOR = 118;
+global integer WEAPON_UNSTABLE_DESTROYER = 226;
+
+// CHIP
+global integer CHIP_ACCELERATION = 91;
+global integer CHIP_ADRENALINE = 16;
+global integer CHIP_ALTERATION = 141;
+global integer CHIP_ANTIDOTE = 110;
+global integer CHIP_APOCALYPSE = 418;
+global integer CHIP_ARMOR = 22;
+global integer CHIP_ARMORING = 67;
+global integer CHIP_ARSENIC = 171;
+global integer CHIP_AWEKENING = 415;
+global integer CHIP_BALL_AND_CHAIN = 93;
+global integer CHIP_BANDAGE = 3;
+global integer CHIP_BARK = 104;
+global integer CHIP_BOXING_GLOVE = 163;
+global integer CHIP_BRAINWASHING = 170;
+global integer CHIP_BRAMBLE = 172;
+global integer CHIP_BURNING = 105;
+global integer CHIP_CARAPACE = 81;
+global integer CHIP_COLLAR = 103;
+global integer CHIP_COVETOUSNESS = 120;
+global integer CHIP_COVID = 152;
+global integer CHIP_CRUSHING = 169;
+global integer CHIP_CURE = 4;
+global integer CHIP_DESINTEGRATION = 160;
+global integer CHIP_DEVIL_STRIKE = 85;
+global integer CHIP_DIVINE_PROTECTION = 419;
+global integer CHIP_DOME = 173;
+global integer CHIP_DOPING = 26;
+global integer CHIP_DRIP = 10;
+global integer CHIP_ELEVATION = 154;
+global integer CHIP_FEROCITY = 102;
+global integer CHIP_FERTILIZER = 90;
+global integer CHIP_FIRE_BULB = 74;
+global integer CHIP_FLAME = 5;
+global integer CHIP_FLASH = 6;
+global integer CHIP_FORTRESS = 29;
+global integer CHIP_FRACTURE = 106;
+global integer CHIP_GRAPPLE = 162;
+global integer CHIP_HEALER_BULB = 75;
+global integer CHIP_HELMET = 21;
+global integer CHIP_ICE = 2;
+global integer CHIP_ICEBERG = 31;
+global integer CHIP_ICED_BULB = 77;
+global integer CHIP_INVERSION = 68;
+global integer CHIP_JUMP = 144;
+global integer CHIP_KILL = 417;
+global integer CHIP_KNOWLEDGE = 155;
+global integer CHIP_LEATHER_BOOTS = 14;
+global integer CHIP_LIBERATION = 34;
+global integer CHIP_LIGHTNING = 33;
+global integer CHIP_LIGHTNING_BULB = 78;
+global integer CHIP_LOAM = 89;
+global integer CHIP_MANUMISSION = 174;
+global integer CHIP_METALLIC_BULB = 79;
+global integer CHIP_METEORITE = 36;
+global integer CHIP_MIRROR = 101;
+global integer CHIP_MOTIVATION = 15;
+global integer CHIP_MUTATION = 159;
+global integer CHIP_PEBBLE = 19;
+global integer CHIP_PLAGUE = 99;
+global integer CHIP_PLASMA = 143;
+global integer CHIP_PRECIPITATION = 122;
+global integer CHIP_PRISM = 276;
+global integer CHIP_PROTEIN = 8;
+global integer CHIP_PUNISHMENT = 114;
+global integer CHIP_PUNY_BULB = 73;
+global integer CHIP_RAGE = 17;
+global integer CHIP_RAMPART = 24;
+global integer CHIP_REFLEXES = 27;
+global integer CHIP_REGENERATION = 35;
+global integer CHIP_REMISSION = 80;
+global integer CHIP_REPOTTING = 157;
+global integer CHIP_RESURRECTION = 84;
+global integer CHIP_ROCK = 7;
+global integer CHIP_ROCKFALL = 32;
+global integer CHIP_ROCKY_BULB = 76;
+global integer CHIP_SAVANT_BULB = 167;
+global integer CHIP_SERUM = 168;
+global integer CHIP_SEVEN_LEAGUE_BOOTS = 12;
+global integer CHIP_SHIELD = 20;
+global integer CHIP_SHOCK = 1;
+global integer CHIP_SLOW_DOWN = 92;
+global integer CHIP_SOLIDIFICATION = 96;
+global integer CHIP_SOPORIFIC = 95;
+global integer CHIP_SPARK = 18;
+global integer CHIP_STALACTITE = 30;
+global integer CHIP_STEROID = 25;
+global integer CHIP_STRETCHING = 9;
+global integer CHIP_TACTICIAN_BULB = 166;
+global integer CHIP_TELEPORTATION = 59;
+global integer CHIP_THERAPY = 158;
+global integer CHIP_THORN = 100;
+global integer CHIP_TOXIN = 98;
+global integer CHIP_TRANQUILIZER = 94;
+global integer CHIP_TRANSMUTATION = 161;
+global integer CHIP_VACCINE = 11;
+global integer CHIP_VAMPIRIZATION = 121;
+global integer CHIP_VENOM = 97;
+global integer CHIP_WALL = 23;
+global integer CHIP_WARM_UP = 28;
+global integer CHIP_WHIP = 88;
+global integer CHIP_WINGED_BOOTS = 13;
+global integer CHIP_WIZARDRY = 156;
+global integer CHIP_WIZARD_BULB = 142;
+
+// USE
+global integer USE_RESURRECT_INVALID_ENTITY = -6;
+
+// CELL
+global integer CELL_EMPTY = 0;
+global integer CELL_ENTITY = 1;
+global integer CELL_OBSTACLE = 2;
+global integer CELL_PLAYER = 1;
+
+// CRITICAL
+global real CRITICAL_FACTOR = 1.3;
+
+// MAP
+global integer MAP_BEACH = 6;
+global integer MAP_CASTLE = 9;
+global integer MAP_CEMETERY = 10;
+global integer MAP_DESERT = 3;
+global integer MAP_FACTORY = 2;
+global integer MAP_FOREST = 4;
+global integer MAP_GLACIER = 5;
+global integer MAP_NEXUS = 1;
+global integer MAP_TEIEN = 8;
+global integer MAP_TEMPLE = 7;
+
+// AREA
+global integer AREA_ALLIES = 15;
+global integer AREA_CIRCLE_1 = 3;
+global integer AREA_CIRCLE_2 = 4;
+global integer AREA_CIRCLE_3 = 5;
+global integer AREA_ENEMIES = 14;
+global integer AREA_FIRST_INLINE = 13;
+global integer AREA_LASER_LINE = 2;
+global integer AREA_PLUS_1 = 3;
+global integer AREA_PLUS_2 = 6;
+global integer AREA_PLUS_3 = 7;
+global integer AREA_POINT = 1;
+global integer AREA_SQUARE_1 = 11;
+global integer AREA_SQUARE_2 = 12;
+global integer AREA_X_1 = 8;
+global integer AREA_X_2 = 9;
+global integer AREA_X_3 = 10;
+
+// BOSS
+global integer BOSS_EVIL_PUMPKIN = 3;
+global integer BOSS_FENNEL_KING = 2;
+global integer BOSS_NASU_SAMURAI = 1;
+
+// FIGHT
+global integer FIGHT_CONTEXT_BATTLE_ROYALE = 5;
+global integer FIGHT_CONTEXT_CHALLENGE = 1;
+global integer FIGHT_CONTEXT_GARDEN = 2;
+global integer FIGHT_CONTEXT_TEST = 0;
+global integer FIGHT_CONTEXT_TOURNAMENT = 3;
+global integer FIGHT_TYPE_BATTLE_ROYALE = 3;
+global integer FIGHT_TYPE_BOSS = 4;
+global integer FIGHT_TYPE_CHEST_HUNT = 6;
+global integer FIGHT_TYPE_COLOSSUS = 7;
+global integer FIGHT_TYPE_FARMER = 1;
+global integer FIGHT_TYPE_SOLO = 0;
+global integer FIGHT_TYPE_TEAM = 2;
+global integer FIGHT_TYPE_WAR = 5;
+
+// LAUNCH
+global integer LAUNCH_TYPE_CIRCLE = 7;
+global integer LAUNCH_TYPE_DIAGONAL = 2;
+global integer LAUNCH_TYPE_DIAGONAL_INVERTED = 5;
+global integer LAUNCH_TYPE_LINE = 1;
+global integer LAUNCH_TYPE_LINE_INVERTED = 6;
+global integer LAUNCH_TYPE_STAR = 3;
+global integer LAUNCH_TYPE_STAR_INVERTED = 4;
+
+// MAX
+global integer MAX_TURNS = 64;
+
+// SUMMON
+global integer SUMMON_LIMIT = 8;
+
+// INSTRUCTIONS
+global integer INSTRUCTIONS_LIMIT = 300000;
+
+// OPERATIONS
+global integer OPERATIONS_LIMIT = 20000000;
+
+
+// MESSAGE
+global integer MESSAGE_ATTACK = 2;
+global integer MESSAGE_BUFF_AGILITY = 8;
+global integer MESSAGE_BUFF_FORCE = 7;
+global integer MESSAGE_BUFF_MP = 5;
+global integer MESSAGE_BUFF_TP = 6;
+global integer MESSAGE_CUSTOM = 13;
+global integer MESSAGE_DEBUFF = 3;
+global integer MESSAGE_HEAL = 1;
+global integer MESSAGE_MOVE_AWAY = 10;
+global integer MESSAGE_MOVE_AWAY_CELL = 12;
+global integer MESSAGE_MOVE_TOWARD = 9;
+global integer MESSAGE_MOVE_TOWARD_CELL = 11;
+global integer MESSAGE_SHIELD = 4;
