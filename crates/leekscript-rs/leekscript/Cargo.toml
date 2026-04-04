@@ -50,4 +50,8 @@ sipha = { path = "../../sipha/sipha", default-features = false, features = ["std
 
 [dev-dependencies]
 # Keep tests simple for now; use sipha's S-expression helpers.
+criterion = { version = "0.5", features = ["html_reports"] }
 
+[[bench]]
+name = "parse_doc"
+harness = false
