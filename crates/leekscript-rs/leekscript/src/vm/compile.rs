@@ -863,11 +863,22 @@ impl CompileCtx {
 
         let mut to_next_arm: Vec<usize> = Vec::new();
         let mut to_merge: Vec<usize> = Vec::new();
+        let nondefault_arm_count = arms
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != default_ix)
+            .count();
+        let mut nondefault_arm_index = 0usize;
+        let mut pending_fallthrough: Option<usize> = None;
+        let mut fallthrough_to_default: Vec<usize> = Vec::new();
 
         for (i, arm) in arms.iter().enumerate() {
             if Some(i) == default_ix {
                 continue;
             }
+            nondefault_arm_index += 1;
+            let is_last_nondefault = nondefault_arm_index == nondefault_arm_count;
+
             for off in to_next_arm.drain(..) {
                 self.builder
                     .patch_i32_operand_at(off, self.builder.len() as i32 - (off + 4) as i32);
@@ -899,15 +910,33 @@ impl CompileCtx {
                 self.builder
                     .patch_i32_operand_at(h, body_pc as i32 - (h + 4) as i32);
             }
+            if let Some(ft) = pending_fallthrough.take() {
+                self.builder
+                    .patch_i32_operand_at(ft, body_pc as i32 - (ft + 4) as i32);
+            }
             for st in arm.stmts() {
                 self.compile_stmt(st)?;
             }
-            to_merge.push(self.builder.emit_jump_placeholder());
+            if is_last_nondefault {
+                if default_ix.is_some() {
+                    fallthrough_to_default.push(self.builder.emit_jump_placeholder());
+                } else {
+                    to_merge.push(self.builder.emit_jump_placeholder());
+                }
+            } else {
+                pending_fallthrough = Some(self.builder.emit_jump_placeholder());
+            }
         }
 
         for off in to_next_arm.drain(..) {
             self.builder
                 .patch_i32_operand_at(off, self.builder.len() as i32 - (off + 4) as i32);
+        }
+
+        let default_body_pc = self.builder.len();
+        for off in fallthrough_to_default {
+            self.builder
+                .patch_i32_operand_at(off, default_body_pc as i32 - (off + 4) as i32);
         }
 
         if let Some(dix) = default_ix {
