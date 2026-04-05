@@ -130,7 +130,10 @@ impl Default for LanguageOptions {
 impl LanguageOptions {
     #[must_use]
     pub fn new(version: Version, experimental: ExperimentalFeatures) -> Self {
-        Self { version, experimental }
+        Self {
+            version,
+            experimental,
+        }
     }
 
     /// LeekScript 4 with every experimental parse feature enabled (replaces the old `v-next` dialect).
@@ -177,10 +180,6 @@ impl From<Version> for LanguageOptions {
 
 /// Language dialect for parsing (v1–v4). Experimental syntax is enabled separately via
 /// [`ExperimentalFeatures`] on [`LanguageOptions`].
-///
-/// When the `grammar-v4-only` Cargo feature is enabled on the `leekscript` crate, only
-/// [`Version::V4`] matches the compiled grammar for base flags; do not use [`Version::V1`]–[`Version::V3`]
-/// in that configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Version {
     V1,

@@ -8,7 +8,7 @@ use sipha::tree::red::SyntaxNode;
 use crate::ast::{Block, IfStmt, Stmt, StmtBlock, WhileStmt};
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::SymbolId;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 
 use super::analyzer::Analyzer;
 use super::condition::{
@@ -17,8 +17,8 @@ use super::condition::{
 };
 
 pub(crate) fn should_track_narrowing(a: &Analyzer, node: &SyntaxNode) -> bool {
-    match node.kind_as::<K>() {
-        Some(K::Block) => !is_class_body_block_for_narrowing(a, node),
+    match node.kind_as::<Node>() {
+        Some(Node::Block) => !is_class_body_block_for_narrowing(a, node),
         _ => {
             node_is_direct_if_or_while_branch_body(node, a)
                 || stmt_is_direct_block_child_statement(node, a)
@@ -46,7 +46,7 @@ fn node_is_direct_if_or_while_branch_body(node: &SyntaxNode, a: &Analyzer) -> bo
     let Some(parent) = a.syntax_parent_of(node) else {
         return false;
     };
-    if parent.kind_as::<K>() == Some(K::IfStmt) {
+    if parent.kind_as::<Node>() == Some(Node::IfStmt) {
         let Some(ifs) = IfStmt::cast(parent.clone()) else {
             return false;
         };
@@ -62,7 +62,7 @@ fn node_is_direct_if_or_while_branch_body(node: &SyntaxNode, a: &Analyzer) -> bo
         }
         return false;
     }
-    if parent.kind_as::<K>() == Some(K::WhileStmt) {
+    if parent.kind_as::<Node>() == Some(Node::WhileStmt) {
         let Some(ws) = WhileStmt::cast(parent.clone()) else {
             return false;
         };
@@ -79,7 +79,7 @@ fn stmt_is_direct_block_child_statement(node: &SyntaxNode, a: &Analyzer) -> bool
         let Some(parent) = a.syntax_parent_of(node) else {
             return false;
         };
-        parent.kind_as::<K>() == Some(K::Block) && !is_class_body_block_for_narrowing(a, &parent)
+        parent.kind_as::<Node>() == Some(Node::Block) && !is_class_body_block_for_narrowing(a, &parent)
     })
 }
 
@@ -162,7 +162,10 @@ fn narrowing_after_guard_if(
     let then_br = ifs.then_branch()?;
     let then_ab = stmt_block_always_abrupt(&then_br);
     let else_br = ifs.else_branch();
-    let else_ab = else_br.as_ref().map(stmt_block_always_abrupt).unwrap_or(false);
+    let else_ab = else_br
+        .as_ref()
+        .map(stmt_block_always_abrupt)
+        .unwrap_or(false);
     let has_else = else_br.is_some();
     let cond_expr = ifs.condition()?;
     let cond = cond_expr.syntax();
@@ -224,10 +227,10 @@ pub(crate) fn accumulated_narrowing_maps(
     let mut acc = HashMap::new();
     for anc in
         a.syntax_node_stack.iter().rev().skip(1).filter(|n| {
-            n.kind_as::<K>() == Some(K::IfStmt) || n.kind_as::<K>() == Some(K::WhileStmt)
+            n.kind_as::<Node>() == Some(Node::IfStmt) || n.kind_as::<Node>() == Some(Node::WhileStmt)
         })
     {
-        if anc.kind_as::<K>() == Some(K::IfStmt) {
+        if anc.kind_as::<Node>() == Some(Node::IfStmt) {
             let Some(ifs) = IfStmt::cast(anc.clone()) else {
                 continue;
             };

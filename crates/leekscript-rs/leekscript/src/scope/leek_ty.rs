@@ -197,7 +197,10 @@ impl LeekTy {
     pub fn normalize_null_in_union(self) -> Self {
         match self {
             Self::Union(parts) => {
-                let parts: Vec<Self> = parts.into_iter().map(Self::normalize_null_in_union).collect();
+                let parts: Vec<Self> = parts
+                    .into_iter()
+                    .map(Self::normalize_null_in_union)
+                    .collect();
                 let mut non_null = Vec::new();
                 let mut saw_null = false;
                 for p in parts {
@@ -231,9 +234,14 @@ impl LeekTy {
                 Box::new((*k).clone().normalize_null_in_union()),
                 Box::new((*v).clone().normalize_null_in_union()),
             ),
-            Self::Interval(inner) => Self::Interval(Box::new((*inner).clone().normalize_null_in_union())),
+            Self::Interval(inner) => {
+                Self::Interval(Box::new((*inner).clone().normalize_null_in_union()))
+            }
             Self::Function { params, ret } => Self::Function {
-                params: params.into_iter().map(Self::normalize_null_in_union).collect(),
+                params: params
+                    .into_iter()
+                    .map(Self::normalize_null_in_union)
+                    .collect(),
                 ret: Box::new((*ret).clone().normalize_null_in_union()),
             },
             other => other,
@@ -507,12 +515,8 @@ mod tests {
             LeekTy::Nullable(Box::new(LeekTy::String))
         );
         assert_eq!(
-            LeekTy::Union(vec![
-                LeekTy::Integer,
-                LeekTy::String,
-                LeekTy::Null,
-            ])
-            .normalize_null_in_union(),
+            LeekTy::Union(vec![LeekTy::Integer, LeekTy::String, LeekTy::Null,])
+                .normalize_null_in_union(),
             LeekTy::Nullable(Box::new(LeekTy::Union(vec![
                 LeekTy::Integer,
                 LeekTy::String,

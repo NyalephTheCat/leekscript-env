@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 
 use crate::ast::{Root, Stmt};
 use crate::parse::{
-    LanguageOptions, ParseError, is_signature_stub_path, language_options_with_source_directives, parse_doc,
-    parse_signature_doc,
+    LanguageOptions, ParseError, is_signature_stub_path, language_options_with_source_directives,
+    parse_doc, parse_signature_doc,
 };
 
 /// Resolved project: entry file and all transitively included sources, in **depth-first preorder**
@@ -451,36 +451,25 @@ fn load_file_recursive(
             continue;
         };
         let arg = lit.value();
-        let resolved = match try_resolve_include_file_with_overlay(
-            root_dir,
-            &current_dir,
-            &arg,
-            open_overlay,
-        ) {
-            Ok(p) => p,
-            Err(ResolveError::EmptyPath) => {
-                return Err(IncludeLoadError::Resolve(
-                    file_path.to_path_buf(),
-                    ResolveError::EmptyPath,
-                ));
-            }
-            Err(ResolveError::NoMatchingFile { logical }) => {
-                return Err(IncludeLoadError::NotFound {
-                    from_file: file_path.to_path_buf(),
-                    include_argument: arg,
-                    resolved: logical,
-                });
-            }
-        };
-        load_file_recursive(
-            &resolved,
-            root_dir,
-            lang,
-            limits,
-            seen,
-            out,
-            open_overlay,
-        )?;
+        let resolved =
+            match try_resolve_include_file_with_overlay(root_dir, &current_dir, &arg, open_overlay)
+            {
+                Ok(p) => p,
+                Err(ResolveError::EmptyPath) => {
+                    return Err(IncludeLoadError::Resolve(
+                        file_path.to_path_buf(),
+                        ResolveError::EmptyPath,
+                    ));
+                }
+                Err(ResolveError::NoMatchingFile { logical }) => {
+                    return Err(IncludeLoadError::NotFound {
+                        from_file: file_path.to_path_buf(),
+                        include_argument: arg,
+                        resolved: logical,
+                    });
+                }
+            };
+        load_file_recursive(&resolved, root_dir, lang, limits, seen, out, open_overlay)?;
     }
 
     Ok(())
@@ -551,18 +540,16 @@ pub fn prepare_merged_check_unit(
         )
         .map_err(MergedCheckPrepError::Load)?
     } else {
-        load_project_with_includes(project_root, entry_path, lang).map_err(MergedCheckPrepError::Load)?
+        load_project_with_includes(project_root, entry_path, lang)
+            .map_err(MergedCheckPrepError::Load)?
     };
 
-    let (merged, map) = merge_included_sources_to_single_file_mapped_with_overlay(
-        project_root,
-        &project,
-        overlay,
-    )
-    .map_err(MergedCheckPrepError::Merge)?;
+    let (merged, map) =
+        merge_included_sources_to_single_file_mapped_with_overlay(project_root, &project, overlay)
+            .map_err(MergedCheckPrepError::Merge)?;
 
-    let (combined, mapping) =
-        prepend_signatures_to_merged(lang, signature_files, &merged, map).map_err(MergedCheckPrepError::Prelude)?;
+    let (combined, mapping) = prepend_signatures_to_merged(lang, signature_files, &merged, map)
+        .map_err(MergedCheckPrepError::Prelude)?;
 
     let resolved = language_options_with_source_directives(&combined, lang);
     let use_signature_grammar = !signature_files.is_empty() || is_signature_stub_path(entry_path);

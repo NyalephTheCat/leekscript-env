@@ -14,13 +14,10 @@ walk = ["sipha/walk"]
 emit = ["sipha/emit"]
 diff = ["sipha/diff"]
 
-# Performance / parsing modes
-#
-# Build lexer/parser graphs specialized for [`Version::V4`]: omits `if_flag` /
-# `if_not_flag` branches for older dialects (smaller / faster bytecode when you never parse V1–V3).
-# Experimental parse flags stay in the bytecode. Parsing with `Version::V1`–`V3`
-# is then unsupported / incorrect.
-grammar-v4-only = []
+# build.rs fingerprints grammar sources + Cargo.toml, sets cfg(leekscript_compile_time_grammar),
+# exposes grammar::GRAMMAR_SOURCE_FINGERPRINT. Run: cargo test -p leekscript --features compile-time-grammar
+# (Embedding a frozen BuiltGraph in the binary would need sipha serialization/codegen.)
+compile-time-grammar = []
 
 incremental = ["sipha/incremental"]
 parallel = ["sipha/parallel"]

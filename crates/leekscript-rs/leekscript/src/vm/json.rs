@@ -85,7 +85,10 @@ fn encode_string(s: &str) -> String {
 
 /// Parse JSON into a [`Value`] (subset used by LeekScript tests).
 pub fn decode(s: &str) -> Result<Value, ()> {
-    let mut p = Parser { bytes: s.as_bytes(), i: 0 };
+    let mut p = Parser {
+        bytes: s.as_bytes(),
+        i: 0,
+    };
     let v = p.parse_value()?;
     p.skip_ws();
     if p.i != p.bytes.len() {

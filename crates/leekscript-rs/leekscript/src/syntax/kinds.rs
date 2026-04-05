@@ -1,109 +1,13 @@
 use std::fmt;
 
-use sipha::SyntaxKinds;
+use sipha::LexKinds;
+use sipha::RuleKinds;
+use sipha::types::{FromSyntaxKind, LexKind, RuleKind, SyntaxKind};
 
-/// CST node and token kinds for LeekScript.
-///
-/// Declaration order defines `SyntaxKind` discriminants; do not rely on numeric values across releases.
-///
-/// [`Display`](std::fmt::Display) and [`K::as_str`](K::as_str) use the same stable `SCREAMING_SNAKE`
-/// names as sipha S-expression / diff output for this grammar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, SyntaxKinds)]
+/// Lexical token and trivia kinds (low `SyntaxKind` range).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, LexKinds)]
 #[repr(u16)]
-pub enum K {
-    // Grammar roots
-    Root,
-    Stmt,
-    Expr,
-
-    // CST — structure
-    TokenTree,
-    ParenExpr,
-    Block,
-
-    // CST — statements (jumps / inclusion)
-    ReturnStmt,
-    BreakStmt,
-    ContinueStmt,
-    IncludeStmt,
-    /// Lone `;` (empty statement), e.g. `;;` or `for (;; )`.
-    EmptyStmt,
-    /// Zero-width placeholder from sipha recovery (`parse_doc_with_recovery`); marks a parse error.
-    ErrorStmt,
-
-    // CST — declarations
-    VarDecl,
-    FunctionDecl,
-    GlobalDecl,
-    /// Not implemented in leekscript-java `WordCompiler` (lexer `CONST` only).
-    ConstDecl,
-    /// Not implemented in leekscript-java `WordCompiler` (lexer `PACKAGE` only).
-    PackageStmt,
-    /// Not implemented in leekscript-java `WordCompiler` (lexer `IMPORT` only).
-    ImportStmt,
-    /// Not implemented in leekscript-java `WordCompiler` (lexer `EXPORT` only).
-    ExportStmt,
-    ClassDecl,
-    ClassMember,
-    /// One formal parameter: `T name`, `@name`, or `name` (see grammar `fn_param_core`).
-    FnParam,
-    /// Template parameter list: `<T, U>` on declarations (experimental).
-    TemplateParams,
-
-    // CST — control flow
-    IfStmt,
-    IfExpr,
-    ElseStmt,
-    WhileStmt,
-    DoWhileStmt,
-    ForStmt,
-    ForeachStmt,
-    /// Not in Java `LexicalParser`; leekscript-rs extension (parsed only when v4).
-    MatchStmt,
-    SwitchStmt,
-    SwitchArm,
-
-    // CST — try / throw / goto (mostly CST-only vs leekscript-java `WordCompiler`)
-    /// `try` / `catch` / `finally` — CST only; not implemented in leekscript-java `WordCompiler`.
-    TryStmt,
-    CatchClause,
-    /// Not implemented in leekscript-java `WordCompiler` (lexer `THROW` only).
-    ThrowStmt,
-    /// Not implemented in leekscript-java `WordCompiler` (lexer `GOTO` only).
-    GotoStmt,
-
-    // CST — expressions
-    TypeExpr,
-    /// `T | U | …` — child `TypeNullableType` nodes and `|` tokens.
-    TypeUnionType,
-    /// `T` or `T?` — child `TypePrimaryType`, optional `?`.
-    TypeNullableType,
-    /// One type primary: keyword / `ident` / `Array<…>` / … — see grammar `type_primary`.
-    TypePrimaryType,
-    BracketMapExpr,
-    IntervalExpr,
-    AnonFunctionExpr,
-    CastExpr,
-    CallExpr,
-    IndexExpr,
-    ArrayExpr,
-    ObjectExpr,
-    MemberExpr,
-    TernaryExpr,
-    LambdaExpr,
-    NewExpr,
-    SetExpr,
-    ThisExpr,
-    SuperExpr,
-    ClassRefExpr,
-    /// `Class` / `Array` / `Array<T>` as expression operands (e.g. `instanceof Class`).
-    BuiltinTypeNameExpr,
-    /// Lowercase `string` as the built-in stringify callable (`string(x)`), distinct from type `string`.
-    BuiltinStringifyExpr,
-    BinaryExpr,
-    UnaryExpr,
-
-    // Tokens — extended operators (see leekscript-java `Operators`)
+pub enum Lex {
     Coalesce,
     CoalesceEq,
     StarStar,
@@ -116,9 +20,7 @@ pub enum K {
     ShlEq,
     ShrEq,
     UShrEq,
-    /// `<<<` — present in leekscript-java `LexicalParser` operator list (no `Operators` mapping).
     TripleShl,
-    /// `<<<=` — same as above.
     TripleShlEq,
     BitAnd,
     BitOr,
@@ -130,8 +32,6 @@ pub enum K {
     InstanceofKw,
     XorKw,
     NotKw,
-
-    // Tokens — literals
     Ident,
     Number,
     String,
@@ -140,8 +40,6 @@ pub enum K {
     TrueKw,
     FalseKw,
     NullKw,
-
-    // Tokens — language keywords
     VarKw,
     LetKw,
     BreakKw,
@@ -185,11 +83,7 @@ pub enum K {
     SetTypeKw,
     MapKw,
     FunctionTypeKw,
-    /// Type `Interval<T>` (`T` is `integer` or `real` for bounds).
     IntervalKw,
-
-    // Java `LexicalParser` v3 reserved words — mostly lexer-only in leekscript-java (no
-    // `WordCompiler` support yet); included here for token/CST parity.
     AbstractKw,
     AwaitKw,
     ByteKw,
@@ -220,8 +114,6 @@ pub enum K {
     VolatileKw,
     WithKw,
     YieldKw,
-
-    // Tokens — punctuation / operators
     Semi,
     Comma,
     Colon,
@@ -260,80 +152,15 @@ pub enum K {
     LBrace,
     RBrace,
     Operator,
-
-    // Trivia
-    Trivia,
     Ws,
     LineComment,
     BlockComment,
 }
 
-impl K {
-    /// Stable uppercase label (matches S-expression / diff output for this grammar).
+impl Lex {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Root => "ROOT",
-            Self::Stmt => "STMT",
-            Self::Expr => "EXPR",
-            Self::TokenTree => "TOKEN_TREE",
-            Self::ParenExpr => "PAREN_EXPR",
-            Self::Block => "BLOCK",
-            Self::ReturnStmt => "RETURN_STMT",
-            Self::BreakStmt => "BREAK_STMT",
-            Self::ContinueStmt => "CONTINUE_STMT",
-            Self::IncludeStmt => "INCLUDE_STMT",
-            Self::EmptyStmt => "EMPTY_STMT",
-            Self::ErrorStmt => "ERROR_STMT",
-            Self::VarDecl => "VAR_DECL",
-            Self::FunctionDecl => "FUNCTION_DECL",
-            Self::GlobalDecl => "GLOBAL_DECL",
-            Self::ConstDecl => "CONST_DECL",
-            Self::PackageStmt => "PACKAGE_STMT",
-            Self::ImportStmt => "IMPORT_STMT",
-            Self::ExportStmt => "EXPORT_STMT",
-            Self::ClassDecl => "CLASS_DECL",
-            Self::ClassMember => "CLASS_MEMBER",
-            Self::FnParam => "FN_PARAM",
-            Self::TemplateParams => "TEMPLATE_PARAMS",
-            Self::IfStmt => "IF_STMT",
-            Self::IfExpr => "IF_EXPR",
-            Self::ElseStmt => "ELSE_STMT",
-            Self::WhileStmt => "WHILE_STMT",
-            Self::DoWhileStmt => "DO_WHILE_STMT",
-            Self::ForStmt => "FOR_STMT",
-            Self::ForeachStmt => "FOREACH_STMT",
-            Self::MatchStmt => "MATCH_STMT",
-            Self::SwitchStmt => "SWITCH_STMT",
-            Self::SwitchArm => "SWITCH_ARM",
-            Self::TryStmt => "TRY_STMT",
-            Self::CatchClause => "CATCH_CLAUSE",
-            Self::ThrowStmt => "THROW_STMT",
-            Self::GotoStmt => "GOTO_STMT",
-            Self::TypeExpr => "TYPE_EXPR",
-            Self::TypeUnionType => "TYPE_UNION_TYPE",
-            Self::TypeNullableType => "TYPE_NULLABLE_TYPE",
-            Self::TypePrimaryType => "TYPE_PRIMARY_TYPE",
-            Self::BracketMapExpr => "BRACKET_MAP_EXPR",
-            Self::IntervalExpr => "INTERVAL_EXPR",
-            Self::AnonFunctionExpr => "ANON_FUNCTION_EXPR",
-            Self::CastExpr => "CAST_EXPR",
-            Self::CallExpr => "CALL_EXPR",
-            Self::IndexExpr => "INDEX_EXPR",
-            Self::ArrayExpr => "ARRAY_EXPR",
-            Self::ObjectExpr => "OBJECT_EXPR",
-            Self::MemberExpr => "MEMBER_EXPR",
-            Self::TernaryExpr => "TERNARY_EXPR",
-            Self::LambdaExpr => "LAMBDA_EXPR",
-            Self::NewExpr => "NEW_EXPR",
-            Self::SetExpr => "SET_EXPR",
-            Self::ThisExpr => "THIS_EXPR",
-            Self::SuperExpr => "SUPER_EXPR",
-            Self::ClassRefExpr => "CLASS_REF_EXPR",
-            Self::BuiltinTypeNameExpr => "BUILTIN_TYPE_NAME_EXPR",
-            Self::BuiltinStringifyExpr => "BUILTIN_STRINGIFY_EXPR",
-            Self::BinaryExpr => "BINARY_EXPR",
-            Self::UnaryExpr => "UNARY_EXPR",
             Self::Coalesce => "COALESCE",
             Self::CoalesceEq => "COALESCE_EQ",
             Self::StarStar => "STARSTAR",
@@ -478,10 +305,187 @@ impl K {
             Self::LBrace => "LBRACE",
             Self::RBrace => "RBRACE",
             Self::Operator => "OPERATOR",
-            Self::Trivia => "TRIVIA",
             Self::Ws => "WS",
             Self::LineComment => "LINE_COMMENT",
             Self::BlockComment => "BLOCK_COMMENT",
+        }
+    }
+}
+
+impl LexKind for Lex {
+    #[inline]
+    fn display_name(self) -> &'static str {
+        self.as_str()
+    }
+}
+
+/// CST node kinds (stored after all [`Lex`] discriminants).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, RuleKinds)]
+#[sipha(lex = Lex)]
+#[repr(u16)]
+pub enum Node {
+    Root,
+    Stmt,
+    Expr,
+    TokenTree,
+    ParenExpr,
+    Block,
+    ReturnStmt,
+    BreakStmt,
+    ContinueStmt,
+    IncludeStmt,
+    EmptyStmt,
+    ErrorStmt,
+    VarDecl,
+    FunctionDecl,
+    GlobalDecl,
+    ConstDecl,
+    PackageStmt,
+    ImportStmt,
+    ExportStmt,
+    ClassDecl,
+    ClassMember,
+    FnParam,
+    TemplateParams,
+    IfStmt,
+    IfExpr,
+    ElseStmt,
+    WhileStmt,
+    DoWhileStmt,
+    ForStmt,
+    ForeachStmt,
+    MatchStmt,
+    SwitchStmt,
+    SwitchArm,
+    TryStmt,
+    CatchClause,
+    ThrowStmt,
+    GotoStmt,
+    TypeExpr,
+    TypeUnionType,
+    TypeNullableType,
+    TypePrimaryType,
+    BracketMapExpr,
+    IntervalExpr,
+    AnonFunctionExpr,
+    CastExpr,
+    CallExpr,
+    IndexExpr,
+    ArrayExpr,
+    ObjectExpr,
+    MemberExpr,
+    TernaryExpr,
+    LambdaExpr,
+    NewExpr,
+    SetExpr,
+    ThisExpr,
+    SuperExpr,
+    ClassRefExpr,
+    BuiltinTypeNameExpr,
+    BuiltinStringifyExpr,
+    BinaryExpr,
+    UnaryExpr,
+    Trivia,
+}
+
+impl Node {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Root => "ROOT",
+            Self::Stmt => "STMT",
+            Self::Expr => "EXPR",
+            Self::TokenTree => "TOKEN_TREE",
+            Self::ParenExpr => "PAREN_EXPR",
+            Self::Block => "BLOCK",
+            Self::ReturnStmt => "RETURN_STMT",
+            Self::BreakStmt => "BREAK_STMT",
+            Self::ContinueStmt => "CONTINUE_STMT",
+            Self::IncludeStmt => "INCLUDE_STMT",
+            Self::EmptyStmt => "EMPTY_STMT",
+            Self::ErrorStmt => "ERROR_STMT",
+            Self::VarDecl => "VAR_DECL",
+            Self::FunctionDecl => "FUNCTION_DECL",
+            Self::GlobalDecl => "GLOBAL_DECL",
+            Self::ConstDecl => "CONST_DECL",
+            Self::PackageStmt => "PACKAGE_STMT",
+            Self::ImportStmt => "IMPORT_STMT",
+            Self::ExportStmt => "EXPORT_STMT",
+            Self::ClassDecl => "CLASS_DECL",
+            Self::ClassMember => "CLASS_MEMBER",
+            Self::FnParam => "FN_PARAM",
+            Self::TemplateParams => "TEMPLATE_PARAMS",
+            Self::IfStmt => "IF_STMT",
+            Self::IfExpr => "IF_EXPR",
+            Self::ElseStmt => "ELSE_STMT",
+            Self::WhileStmt => "WHILE_STMT",
+            Self::DoWhileStmt => "DO_WHILE_STMT",
+            Self::ForStmt => "FOR_STMT",
+            Self::ForeachStmt => "FOREACH_STMT",
+            Self::MatchStmt => "MATCH_STMT",
+            Self::SwitchStmt => "SWITCH_STMT",
+            Self::SwitchArm => "SWITCH_ARM",
+            Self::TryStmt => "TRY_STMT",
+            Self::CatchClause => "CATCH_CLAUSE",
+            Self::ThrowStmt => "THROW_STMT",
+            Self::GotoStmt => "GOTO_STMT",
+            Self::TypeExpr => "TYPE_EXPR",
+            Self::TypeUnionType => "TYPE_UNION_TYPE",
+            Self::TypeNullableType => "TYPE_NULLABLE_TYPE",
+            Self::TypePrimaryType => "TYPE_PRIMARY_TYPE",
+            Self::BracketMapExpr => "BRACKET_MAP_EXPR",
+            Self::IntervalExpr => "INTERVAL_EXPR",
+            Self::AnonFunctionExpr => "ANON_FUNCTION_EXPR",
+            Self::CastExpr => "CAST_EXPR",
+            Self::CallExpr => "CALL_EXPR",
+            Self::IndexExpr => "INDEX_EXPR",
+            Self::ArrayExpr => "ARRAY_EXPR",
+            Self::ObjectExpr => "OBJECT_EXPR",
+            Self::MemberExpr => "MEMBER_EXPR",
+            Self::TernaryExpr => "TERNARY_EXPR",
+            Self::LambdaExpr => "LAMBDA_EXPR",
+            Self::NewExpr => "NEW_EXPR",
+            Self::SetExpr => "SET_EXPR",
+            Self::ThisExpr => "THIS_EXPR",
+            Self::SuperExpr => "SUPER_EXPR",
+            Self::ClassRefExpr => "CLASS_REF_EXPR",
+            Self::BuiltinTypeNameExpr => "BUILTIN_TYPE_NAME_EXPR",
+            Self::BuiltinStringifyExpr => "BUILTIN_STRINGIFY_EXPR",
+            Self::BinaryExpr => "BINARY_EXPR",
+            Self::UnaryExpr => "UNARY_EXPR",
+            Self::Trivia => "TRIVIA",
+        }
+    }
+}
+
+impl RuleKind for Node {
+    #[inline]
+    fn display_name(self) -> &'static str {
+        self.as_str()
+    }
+}
+
+/// Unified kind for pattern-matching when the lex/node partition is unknown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum K {
+    Lex(Lex),
+    Node(Node),
+}
+
+impl FromSyntaxKind for K {
+    fn from_syntax_kind(k: SyntaxKind) -> Option<Self> {
+        Lex::from_syntax_kind(k)
+            .map(K::Lex)
+            .or_else(|| Node::from_syntax_kind(k).map(K::Node))
+    }
+}
+
+impl K {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            K::Lex(l) => l.as_str(),
+            K::Node(n) => n.as_str(),
         }
     }
 }

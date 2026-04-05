@@ -131,9 +131,18 @@ fn parity_array_equals_v4() {
     assert_eq!(run_export("return [] == [];"), "true");
     assert_eq!(run_export("return ([] == []);"), "true");
     assert_eq!(run_export("var a = []; var b = []; return a == b;"), "true");
-    assert_eq!(run_export("var a = [0]; var b = [0]; return a == b;"), "true");
-    assert_eq!(run_export("var a = [0, 1]; var b = [0, 1]; return a == b;"), "true");
-    assert_eq!(run_export("var a = [0, 1]; var b = [0]; return a == b;"), "false");
+    assert_eq!(
+        run_export("var a = [0]; var b = [0]; return a == b;"),
+        "true"
+    );
+    assert_eq!(
+        run_export("var a = [0, 1]; var b = [0, 1]; return a == b;"),
+        "true"
+    );
+    assert_eq!(
+        run_export("var a = [0, 1]; var b = [0]; return a == b;"),
+        "false"
+    );
     assert_eq!(
         run_export("var a = ['Chaine1']; var b = ['Chaine2']; return a == b;"),
         "false"
@@ -193,9 +202,7 @@ fn parity_map_equality_v4() {
 fn parity_modulo_and_increment_style_loop() {
     assert_eq!(run_export("return 17 % 5;"), "2");
     assert_eq!(
-        run_export(
-            "var s = 0; var i = 0; while (i < 4) { s = s + i; i = i + 1; } return s;"
-        ),
+        run_export("var s = 0; var i = 0; while (i < 4) { s = s + i; i = i + 1; } return s;"),
         "6"
     );
 }
@@ -227,15 +234,11 @@ fn parity_switch_default_and_break() {
 #[test]
 fn parity_function_decl_call_and_cross_call() {
     assert_eq!(
-        run_export(
-            "function dbl(n) { return n + n; } return dbl(21);"
-        ),
+        run_export("function dbl(n) { return n + n; } return dbl(21);"),
         "42"
     );
     assert_eq!(
-        run_export(
-            "function one() { return 1; } function two() { return one(); } return two();"
-        ),
+        run_export("function one() { return 1; } function two() { return one(); } return two();"),
         "1"
     );
 }
@@ -243,15 +246,11 @@ fn parity_function_decl_call_and_cross_call() {
 #[test]
 fn parity_try_catch_throw_export() {
     assert_eq!(
-        run_export(
-            "var r = 0; try { throw 7; r = 1; } catch (integer e) { r = e + 1; } return r;"
-        ),
+        run_export("var r = 0; try { throw 7; r = 1; } catch (integer e) { r = e + 1; } return r;"),
         "8"
     );
     assert_eq!(
-        run_export(
-            "var r = 0; try { r = 5; } catch (integer e) { r = 99; } return r;"
-        ),
+        run_export("var r = 0; try { r = 5; } catch (integer e) { r = 99; } return r;"),
         "5"
     );
 }
@@ -259,21 +258,15 @@ fn parity_try_catch_throw_export() {
 #[test]
 fn parity_foreach_array_and_map_pairs() {
     assert_eq!(
-        run_export(
-            "var s = 0; var a = [1, 2, 3]; for (v in a) { s = s + v; } return s;"
-        ),
+        run_export("var s = 0; var a = [1, 2, 3]; for (v in a) { s = s + v; } return s;"),
         "6"
     );
     assert_eq!(
-        run_export(
-            "var s = 0; var m = [10: 1, 20: 2]; for (k : v in m) { s = s + v; } return s;"
-        ),
+        run_export("var s = 0; var m = [10: 1, 20: 2]; for (k : v in m) { s = s + v; } return s;"),
         "3"
     );
     assert_eq!(
-        run_export(
-            "var s = 0; var m = [10: 1, 20: 2]; for (k : v in m) { s = s + k; } return s;"
-        ),
+        run_export("var s = 0; var m = [10: 1, 20: 2]; for (k : v in m) { s = s + k; } return s;"),
         "30"
     );
 }
@@ -281,9 +274,7 @@ fn parity_foreach_array_and_map_pairs() {
 #[test]
 fn parity_for_loop_classic_sum() {
     assert_eq!(
-        run_export(
-            "var s = 0; for (var i = 0; i < 5; i = i + 1) { s = s + i; } return s;"
-        ),
+        run_export("var s = 0; for (var i = 0; i < 5; i = i + 1) { s = s + i; } return s;"),
         "10"
     );
 }
@@ -291,8 +282,5 @@ fn parity_for_loop_classic_sum() {
 #[test]
 fn parity_nested_ternary_associativity() {
     // Binds outermost `?:` loosest: `true ? false ? 1 : 2 : 3` → `(true ? (false ? 1 : 2) : 3)` → 2.
-    assert_eq!(
-        run_export("return true ? false ? 1 : 2 : 3;"),
-        "2"
-    );
+    assert_eq!(run_export("return true ? false ? 1 : 2 : 3;"), "2");
 }

@@ -30,15 +30,9 @@ pub enum VmError {
     /// Local slot index out of range for the current frame.
     BadLocal(u16),
     /// [`Vm::max_operations`](super::Vm::max_operations) exceeded (Leek Wars `Error.TOO_MUCH_OPERATIONS`).
-    TooManyOperations {
-        limit: u64,
-        attempted_total: u64,
-    },
+    TooManyOperations { limit: u64, attempted_total: u64 },
     /// [`Vm::max_ram_quads`](super::Vm::max_ram_quads) exceeded (Leek Wars `Error.OUT_OF_MEMORY`).
-    OutOfMemory {
-        limit: u64,
-        attempted_total: u64,
-    },
+    OutOfMemory { limit: u64, attempted_total: u64 },
     /// [`Opcode::CallFunction`](super::opcode::Opcode::CallFunction) id out of range.
     BadFunctionIndex(u16),
     /// Call arity does not match the compiled function.

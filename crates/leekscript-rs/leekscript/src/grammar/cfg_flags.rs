@@ -1,42 +1,25 @@
-//! Emits `GrammarBuilder` parse-context flag checks unless Cargo feature `grammar-v4-only` is on.
-//!
-//! With that feature, the built graph assumes [`Version::V4`](crate::parse::Version::V4); these
-//! become no-ops so lexer/parser bytecode avoids runtime flag branches.
+//! Emits `GrammarBuilder` parse-context flag checks for version and experimental gates.
 
 use crate::parse::version::{
     FLAG_EXP_EXCEPTIONS, FLAG_EXP_FN_OPTIONAL_PARAMS, FLAG_EXP_GOTO, FLAG_EXP_LET,
     FLAG_EXP_LEXICAL_CONST, FLAG_EXP_LOOP_LEVELS, FLAG_EXP_MATCH, FLAG_EXP_MODULES,
-    FLAG_EXP_TEMPLATES,
+    FLAG_EXP_TEMPLATES, FLAG_V1, FLAG_V2, FLAG_V3, FLAG_V4,
 };
-#[cfg(not(feature = "grammar-v4-only"))]
-use crate::parse::version::{FLAG_V1, FLAG_V2, FLAG_V3, FLAG_V4};
 use sipha::prelude::*;
 
-pub(crate) fn v2(
-    #[cfg_attr(feature = "grammar-v4-only", allow(unused_variables))] g: &mut GrammarBuilder,
-) {
-    #[cfg(not(feature = "grammar-v4-only"))]
+pub(crate) fn v2(g: &mut GrammarBuilder) {
     g.if_flag(FLAG_V2);
 }
 
-pub(crate) fn v3(
-    #[cfg_attr(feature = "grammar-v4-only", allow(unused_variables))] g: &mut GrammarBuilder,
-) {
-    #[cfg(not(feature = "grammar-v4-only"))]
+pub(crate) fn v3(g: &mut GrammarBuilder) {
     g.if_flag(FLAG_V3);
 }
 
-pub(crate) fn v4(
-    #[cfg_attr(feature = "grammar-v4-only", allow(unused_variables))] g: &mut GrammarBuilder,
-) {
-    #[cfg(not(feature = "grammar-v4-only"))]
+pub(crate) fn v4(g: &mut GrammarBuilder) {
     g.if_flag(FLAG_V4);
 }
 
-pub(crate) fn not_v1(
-    #[cfg_attr(feature = "grammar-v4-only", allow(unused_variables))] g: &mut GrammarBuilder,
-) {
-    #[cfg(not(feature = "grammar-v4-only"))]
+pub(crate) fn not_v1(g: &mut GrammarBuilder) {
     g.if_not_flag(FLAG_V1);
 }
 

@@ -178,7 +178,10 @@ fn string_concat_charges_ops_like_java_ai_add() {
     let chunk = compile_chunk_v4("return 'ab' + 'cde';").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     vm.run().expect("run");
-    assert_eq!(vm.operations, 6, "return expr ops + 2 + 3 string concat ops");
+    assert_eq!(
+        vm.operations, 6,
+        "return expr ops + 2 + 3 string concat ops"
+    );
 }
 
 #[test]
@@ -249,8 +252,14 @@ fn unary_minus() {
 #[test]
 fn native_call_roundtrip() {
     fn add_two(_vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
-        let a = args.first().and_then(|v| v.as_number()).ok_or(VmError::ExpectedNumber)?;
-        let b = args.get(1).and_then(|v| v.as_number()).ok_or(VmError::ExpectedNumber)?;
+        let a = args
+            .first()
+            .and_then(|v| v.as_number())
+            .ok_or(VmError::ExpectedNumber)?;
+        let b = args
+            .get(1)
+            .and_then(|v| v.as_number())
+            .ok_or(VmError::ExpectedNumber)?;
         Ok(Value::Number(NumberBits::coerce_integerish_f64(a + b)))
     }
     let n: NativeFn = add_two;
@@ -321,33 +330,32 @@ fn operations_and_ram_counters_after_run() {
     let prelude_ram: u64 = stdlib_global_constant_init()
         .map(|(_, v)| v.ram_quads())
         .sum();
-    assert_eq!(vm.ram_quads, prelude_ram, "locals still hold stdlib constants");
+    assert_eq!(
+        vm.ram_quads, prelude_ram,
+        "locals still hold stdlib constants"
+    );
 }
 
 #[test]
 fn while_loop_and_assign_expr() {
-    let chunk = compile_chunk_v4(
-        "var i = 0; while (i < 3) { i = i + 1; } return i;",
-    )
-    .expect("compile");
+    let chunk =
+        compile_chunk_v4("var i = 0; while (i < 3) { i = i + 1; } return i;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     assert_eq!(vm.run().expect("run"), Value::num_int(3));
 }
 
 #[test]
 fn for_loop_var_init() {
-    let chunk = compile_chunk_v4(
-        "for (var i = 0; i < 4; i = i + 1) { } return i;",
-    )
-    .expect("compile");
+    let chunk =
+        compile_chunk_v4("for (var i = 0; i < 4; i = i + 1) { } return i;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     assert_eq!(vm.run().expect("run"), Value::num_int(4));
 }
 
 #[test]
 fn do_while_runs_body_once() {
-    let chunk = compile_chunk_v4("var n = 0; do { n = n + 1; } while (false); return n;")
-        .expect("compile");
+    let chunk =
+        compile_chunk_v4("var n = 0; do { n = n + 1; } while (false); return n;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     assert_eq!(vm.run().expect("run"), Value::num_int(1));
 }
@@ -418,10 +426,9 @@ fn ternary_expression() {
 
 #[test]
 fn compound_assign_in_loop() {
-    let chunk = compile_chunk_v4(
-        "var i = 0; var s = 0; while (i < 3) { i += 1; s += i; } return s;",
-    )
-    .expect("compile");
+    let chunk =
+        compile_chunk_v4("var i = 0; var s = 0; while (i < 3) { i += 1; s += i; } return s;")
+            .expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     assert_eq!(vm.run().expect("run"), Value::num_int(6));
 }
@@ -454,19 +461,14 @@ fn stdlib_natives_from_sig_core() {
         ("return sqrt(4);", Value::num_int(2)),
         ("return length('ab');", Value::num_int(2)),
         ("return count([1, 2]);", Value::num_int(2)),
-        (
-            "return join(['a', 'b'], '-');",
-            Value::String("a-b".into()),
-        ),
+        ("return join(['a', 'b'], '-');", Value::String("a-b".into())),
         ("return indexOf('abc', 'b');", Value::num_int(1)),
         ("return abs(-2) + 1;", Value::num_int(3)),
     ];
     for (src, want) in cases {
-        let chunk =
-            compile_chunk_v4(src).unwrap_or_else(|e| panic!("compile {src:?}: {e}"));
+        let chunk = compile_chunk_v4(src).unwrap_or_else(|e| panic!("compile {src:?}: {e}"));
         let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
         let got = vm.run().unwrap_or_else(|e| panic!("run {src:?}: {e}"));
         assert_eq!(got, want, "src={src:?}");
     }
 }
-

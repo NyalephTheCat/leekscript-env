@@ -3,7 +3,7 @@
 use crate::Span;
 use crate::ast::binding_name::function_decl_name_token;
 use crate::ast::{CatchClause, ClassDecl, ForeachStmt, FunctionDecl, GlobalDecl, VarDecl};
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Lex;
 use sipha::tree::ast::AstNode;
 use sipha::tree::red::SyntaxNode;
 use sipha::tree::red::SyntaxToken;
@@ -15,29 +15,29 @@ pub(crate) fn function_name_span(fd: &FunctionDecl) -> Option<Span> {
 pub(crate) fn class_name_span(cd: &ClassDecl) -> Option<Span> {
     cd.syntax()
         .child_tokens()
-        .take_while(|t| t.kind_as::<K>() != Some(K::ExtendsKw))
-        .find(|t| t.kind_as::<K>() == Some(K::Ident))
+        .take_while(|t| t.kind_as::<Lex>() != Some(Lex::ExtendsKw))
+        .find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
         .map(|t| t.text_range())
 }
 
 pub(crate) fn var_decl_name_span(vd: &VarDecl) -> Option<Span> {
     vd.syntax()
         .child_tokens()
-        .find(|t| t.kind_as::<K>() == Some(K::Ident))
+        .find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
         .map(|t| t.text_range())
 }
 
 pub(crate) fn global_name_span(g: &GlobalDecl) -> Option<Span> {
     g.syntax()
         .child_tokens()
-        .find(|t| t.kind_as::<K>() == Some(K::Ident))
+        .find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
         .map(|t| t.text_range())
 }
 
 pub(crate) fn catch_param_span(cc: &CatchClause) -> Option<Span> {
     cc.syntax()
         .child_tokens()
-        .find(|t| t.kind_as::<K>() == Some(K::Ident))
+        .find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
         .map(|t| t.text_range())
 }
 
@@ -45,10 +45,10 @@ pub(crate) fn foreach_bind_spans(fe: &ForeachStmt) -> Vec<(String, Span)> {
     let mut out = Vec::new();
     let mut after_for = false;
     for t in fe.syntax().child_tokens() {
-        match t.kind_as::<K>() {
-            Some(K::ForKw) => after_for = true,
-            Some(K::InKw) => break,
-            Some(K::Ident) if after_for => out.push((t.text().to_string(), t.text_range())),
+        match t.kind_as::<Lex>() {
+            Some(Lex::ForKw) => after_for = true,
+            Some(Lex::InKw) => break,
+            Some(Lex::Ident) if after_for => out.push((t.text().to_string(), t.text_range())),
             _ => {}
         }
     }
@@ -63,14 +63,14 @@ fn for_stmt_header_inner_tokens(syntax: &SyntaxNode) -> Vec<SyntaxToken> {
         if t.is_trivia() {
             continue;
         }
-        match t.kind_as::<K>() {
-            Some(K::LParen) => {
+        match t.kind_as::<Lex>() {
+            Some(Lex::LParen) => {
                 if depth >= 1 {
                     header.push(t.clone());
                 }
                 depth += 1;
             }
-            Some(K::RParen) => {
+            Some(Lex::RParen) => {
                 if depth >= 2 {
                     header.push(t.clone());
                 }
@@ -97,16 +97,16 @@ fn for_stmt_init_clause_tokens(header_inner: &[SyntaxToken]) -> Vec<SyntaxToken>
         if t.is_trivia() {
             continue;
         }
-        match t.kind_as::<K>() {
-            Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => {
+        match t.kind_as::<Lex>() {
+            Some(Lex::LParen) | Some(Lex::LBracket) | Some(Lex::LBrace) => {
                 d += 1;
                 out.push(t.clone());
             }
-            Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => {
+            Some(Lex::RParen) | Some(Lex::RBracket) | Some(Lex::RBrace) => {
                 d -= 1;
                 out.push(t.clone());
             }
-            Some(K::Semi) if d == 0 => break,
+            Some(Lex::Semi) if d == 0 => break,
             _ => out.push(t.clone()),
         }
     }
@@ -126,28 +126,28 @@ pub(crate) fn for_stmt_init_var_spans(syntax: &SyntaxNode) -> Vec<(String, Span)
             i += 1;
             continue;
         }
-        match t.kind_as::<K>() {
-            Some(K::Semi) if d == 0 => {
+        match t.kind_as::<Lex>() {
+            Some(Lex::Semi) if d == 0 => {
                 return vec![];
             }
-            Some(K::Eq) if d == 0 => {
+            Some(Lex::Eq) if d == 0 => {
                 let out = last_ident.clone();
                 i += 1;
                 while i < init.len() {
                     let t2 = &init[i];
-                    match t2.kind_as::<K>() {
-                        Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => d += 1,
-                        Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => d -= 1,
-                        Some(K::Semi) if d == 0 => break,
+                    match t2.kind_as::<Lex>() {
+                        Some(Lex::LParen) | Some(Lex::LBracket) | Some(Lex::LBrace) => d += 1,
+                        Some(Lex::RParen) | Some(Lex::RBracket) | Some(Lex::RBrace) => d -= 1,
+                        Some(Lex::Semi) if d == 0 => break,
                         _ => {}
                     }
                     i += 1;
                 }
                 return out.into_iter().collect();
             }
-            Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => d += 1,
-            Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => d -= 1,
-            Some(K::Ident) if d == 0 => {
+            Some(Lex::LParen) | Some(Lex::LBracket) | Some(Lex::LBrace) => d += 1,
+            Some(Lex::RParen) | Some(Lex::RBracket) | Some(Lex::RBrace) => d -= 1,
+            Some(Lex::Ident) if d == 0 => {
                 last_ident = Some((t.text().to_string(), t.text_range()));
             }
             _ => {}
@@ -164,10 +164,10 @@ fn last_ident_outside_generics(tokens: &[SyntaxToken]) -> Option<(String, Span)>
         if t.is_trivia() {
             continue;
         }
-        match t.kind_as::<K>() {
-            Some(K::Lt) => angle += 1,
-            Some(K::Gt) => angle = (angle - 1).max(0),
-            Some(K::Ident) if angle == 0 => {
+        match t.kind_as::<Lex>() {
+            Some(Lex::Lt) => angle += 1,
+            Some(Lex::Gt) => angle = (angle - 1).max(0),
+            Some(Lex::Ident) if angle == 0 => {
                 last = Some((t.text().to_string(), t.text_range()));
             }
             _ => {}
@@ -185,12 +185,12 @@ fn split_comma_top_level(inner: &[SyntaxToken]) -> Vec<&[SyntaxToken]> {
         if t.is_trivia() {
             continue;
         }
-        match t.kind_as::<K>() {
-            Some(K::LParen) | Some(K::LBracket) | Some(K::LBrace) => depth += 1,
-            Some(K::RParen) | Some(K::RBracket) | Some(K::RBrace) => depth -= 1,
-            Some(K::Lt) => angle += 1,
-            Some(K::Gt) => angle = (angle - 1).max(0),
-            Some(K::Comma) if depth == 0 && angle == 0 => {
+        match t.kind_as::<Lex>() {
+            Some(Lex::LParen) | Some(Lex::LBracket) | Some(Lex::LBrace) => depth += 1,
+            Some(Lex::RParen) | Some(Lex::RBracket) | Some(Lex::RBrace) => depth -= 1,
+            Some(Lex::Lt) => angle += 1,
+            Some(Lex::Gt) => angle = (angle - 1).max(0),
+            Some(Lex::Comma) if depth == 0 && angle == 0 => {
                 out.push(&inner[start..i]);
                 start = i + 1;
             }
@@ -207,29 +207,27 @@ pub(crate) fn lambda_param_spans(syntax: &SyntaxNode) -> Vec<(String, Span)> {
         .descendant_tokens()
         .into_iter()
         .filter(|t| !t.is_trivia())
-        .take_while(|t| t.kind_as::<K>() != Some(K::Arrow))
+        .take_while(|t| t.kind_as::<Lex>() != Some(Lex::Arrow))
         .collect();
     if tokens.is_empty() {
         return vec![];
     }
-    let has_paren_params = tokens
-        .iter()
-        .any(|t| t.kind_as::<K>() == Some(K::LParen));
+    let has_paren_params = tokens.iter().any(|t| t.kind_as::<Lex>() == Some(Lex::LParen));
     if !has_paren_params {
         return last_ident_outside_generics(&tokens).into_iter().collect();
     }
     let Some(start) = tokens
         .iter()
-        .position(|t| t.kind_as::<K>() == Some(K::LParen))
+        .position(|t| t.kind_as::<Lex>() == Some(Lex::LParen))
     else {
         return vec![];
     };
     let mut depth = 0i32;
     let mut end = None;
     for (i, t) in tokens.iter().enumerate().skip(start) {
-        match t.kind_as::<K>() {
-            Some(K::LParen) => depth += 1,
-            Some(K::RParen) => {
+        match t.kind_as::<Lex>() {
+            Some(Lex::LParen) => depth += 1,
+            Some(Lex::RParen) => {
                 depth -= 1;
                 if depth == 0 {
                     end = Some(i);

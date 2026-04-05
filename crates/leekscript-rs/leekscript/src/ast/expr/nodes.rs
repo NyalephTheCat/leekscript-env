@@ -1,68 +1,68 @@
 //! Concrete expression CST nodes (one struct per `K::…Expr` syntax kind).
 
 use crate::ast::stmt::TemplateParams;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::AstNode;
 use sipha::prelude::*;
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::BinaryExpr)]
+#[ast(kind = Node::BinaryExpr)]
 pub struct BinaryExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::UnaryExpr)]
+#[ast(kind = Node::UnaryExpr)]
 pub struct UnaryExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::TernaryExpr)]
+#[ast(kind = Node::TernaryExpr)]
 pub struct TernaryExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::CastExpr)]
+#[ast(kind = Node::CastExpr)]
 pub struct CastExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::CallExpr)]
+#[ast(kind = Node::CallExpr)]
 pub struct CallExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::IndexExpr)]
+#[ast(kind = Node::IndexExpr)]
 pub struct IndexExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::MemberExpr)]
+#[ast(kind = Node::MemberExpr)]
 pub struct MemberExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ParenExpr)]
+#[ast(kind = Node::ParenExpr)]
 pub struct ParenExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::LambdaExpr)]
+#[ast(kind = Node::LambdaExpr)]
 pub struct LambdaExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::BracketMapExpr)]
+#[ast(kind = Node::BracketMapExpr)]
 pub struct BracketMapExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ArrayExpr)]
+#[ast(kind = Node::ArrayExpr)]
 pub struct ArrayExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ObjectExpr)]
+#[ast(kind = Node::ObjectExpr)]
 pub struct ObjectExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::SetExpr)]
+#[ast(kind = Node::SetExpr)]
 pub struct SetExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::IntervalExpr)]
+#[ast(kind = Node::IntervalExpr)]
 pub struct IntervalExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::AnonFunctionExpr)]
+#[ast(kind = Node::AnonFunctionExpr)]
 pub struct AnonFunctionExpr(SyntaxNode);
 
 impl AnonFunctionExpr {
@@ -74,25 +74,25 @@ impl AnonFunctionExpr {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::IfExpr)]
+#[ast(kind = Node::IfExpr)]
 pub struct IfExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::NewExpr)]
+#[ast(kind = Node::NewExpr)]
 pub struct NewExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::SuperExpr)]
+#[ast(kind = Node::SuperExpr)]
 pub struct SuperExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ClassRefExpr)]
+#[ast(kind = Node::ClassRefExpr)]
 pub struct ClassRefExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::BuiltinTypeNameExpr)]
+#[ast(kind = Node::BuiltinTypeNameExpr)]
 pub struct BuiltinTypeNameExpr(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::BuiltinStringifyExpr)]
+#[ast(kind = Node::BuiltinStringifyExpr)]
 pub struct BuiltinStringifyExpr(SyntaxNode);

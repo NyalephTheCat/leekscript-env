@@ -5,22 +5,50 @@
 
 use std::sync::OnceLock;
 
-use sipha::SyntaxKinds;
+use sipha::LexKinds;
+use sipha::RuleKinds;
 use sipha::diagnostics::parsed_doc::ParsedDoc;
 use sipha::prelude::*;
 use sipha::tree::red::{SyntaxElement, SyntaxNode};
+use sipha::types::{LexKind, RuleKind};
 
 use super::scan::Segment;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, SyntaxKinds)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, LexKinds)]
 #[repr(u16)]
-enum Dk {
-    Root,
-    Command,
+enum DoxygenLex {
+    Ws,
     SlashCmd,
     AtCmd,
     TextRun,
-    Ws,
+}
+
+impl LexKind for DoxygenLex {
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Ws => "DOXY_WS",
+            Self::SlashCmd => "DOXY_SLASH_CMD",
+            Self::AtCmd => "DOXY_AT_CMD",
+            Self::TextRun => "DOXY_TEXT_RUN",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, RuleKinds)]
+#[sipha(lex = DoxygenLex)]
+#[repr(u16)]
+enum DoxygenNode {
+    Root,
+    Command,
+}
+
+impl RuleKind for DoxygenNode {
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Root => "DOXY_ROOT",
+            Self::Command => "DOXY_COMMAND",
+        }
+    }
 }
 
 static DOXYGEN_GRAPH: OnceLock<BuiltGraph> = OnceLock::new();
@@ -37,7 +65,7 @@ fn build_doxygen_graph() -> BuiltGraph {
     // without consuming (see `grammar/tokens.rs` `lexer_rule("trivia", ...)`).
     g.lexer_rule("doc_ws", |g| {
         g.optional(|g| {
-            g.trivia(Dk::Ws, |g| {
+            g.trivia(DoxygenLex::Ws, |g| {
                 g.one_or_more(|g| {
                     g.class(classes::WHITESPACE);
                 });
@@ -53,7 +81,7 @@ fn build_doxygen_graph() -> BuiltGraph {
     };
 
     g.lexer_rule("slash_cmd_tok", |g| {
-        g.token(Dk::SlashCmd, |g| {
+        g.token(DoxygenLex::SlashCmd, |g| {
             g.byte(b'\\');
             g.neg_lookahead(|g| {
                 g.byte(b'\\');
@@ -66,14 +94,14 @@ fn build_doxygen_graph() -> BuiltGraph {
     });
 
     g.lexer_rule("at_cmd_tok", |g| {
-        g.token(Dk::AtCmd, |g| {
+        g.token(DoxygenLex::AtCmd, |g| {
             g.byte(b'@');
             cmd_ident(g);
         });
     });
 
     g.lexer_rule("text_run_tok", |g| {
-        g.token(Dk::TextRun, |g| {
+        g.token(DoxygenLex::TextRun, |g| {
             g.one_or_more(|g| {
                 sipha::choices!(
                     g,
@@ -100,7 +128,7 @@ fn build_doxygen_graph() -> BuiltGraph {
     });
 
     g.parser_rule("cmd_elt", |g| {
-        g.node(Dk::Command, |g| {
+        g.node(DoxygenNode::Command, |g| {
             g.choice(
                 |g| {
                     g.call("slash_cmd_tok");
@@ -116,7 +144,7 @@ fn build_doxygen_graph() -> BuiltGraph {
     });
 
     g.parser_rule("start", |g| {
-        g.node(Dk::Root, |g| {
+        g.node(DoxygenNode::Root, |g| {
             g.zero_or_more(|g| {
                 g.choice(
                     |g| {
@@ -150,7 +178,7 @@ pub(crate) fn split_via_sipha(body: &str) -> Option<Vec<Segment>> {
 }
 
 fn tree_root_to_segments(root: &SyntaxNode) -> Option<Vec<Segment>> {
-    if root.kind_as::<Dk>() != Some(Dk::Root) {
+    if root.kind_as::<DoxygenNode>() != Some(DoxygenNode::Root) {
         return None;
     }
     let mut segments: Vec<Segment> = Vec::new();
@@ -159,14 +187,14 @@ fn tree_root_to_segments(root: &SyntaxNode) -> Option<Vec<Segment>> {
     for el in root.children() {
         match &el {
             SyntaxElement::Token(t) => {
-                if t.kind_as::<Dk>() == Some(Dk::TextRun) {
+                if t.kind_as::<DoxygenLex>() == Some(DoxygenLex::TextRun) {
                     buf.push_str(t.text());
                 } else if t.is_trivia() {
                     buf.push_str(t.text());
                 }
             }
             SyntaxElement::Node(n) => {
-                if n.kind_as::<Dk>() == Some(Dk::Command) {
+                if n.kind_as::<DoxygenNode>() == Some(DoxygenNode::Command) {
                     if !buf.is_empty() {
                         segments.push(Segment::Leading(std::mem::take(&mut buf)));
                     }
@@ -189,11 +217,11 @@ fn command_node_to_segment(cmd: &SyntaxNode) -> Option<Segment> {
     for el in cmd.children() {
         match &el {
             SyntaxElement::Token(t) => {
-                if t.kind_as::<Dk>() == Some(Dk::SlashCmd) {
+                if t.kind_as::<DoxygenLex>() == Some(DoxygenLex::SlashCmd) {
                     name = Some(cmd_name_from_token(t.text(), b'\\')?);
-                } else if t.kind_as::<Dk>() == Some(Dk::AtCmd) {
+                } else if t.kind_as::<DoxygenLex>() == Some(DoxygenLex::AtCmd) {
                     name = Some(cmd_name_from_token(t.text(), b'@')?);
-                } else if t.kind_as::<Dk>() == Some(Dk::TextRun) {
+                } else if t.kind_as::<DoxygenLex>() == Some(DoxygenLex::TextRun) {
                     arg.push_str(t.text());
                 } else if t.is_trivia() {
                     arg.push_str(t.text());

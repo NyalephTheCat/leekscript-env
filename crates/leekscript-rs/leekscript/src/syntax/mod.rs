@@ -6,14 +6,14 @@ pub use doxygen::{
     parse_doxygen,
 };
 
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 use sipha::tree::red::{SyntaxElement, SyntaxNode, SyntaxToken};
 
-/// True for whitespace / comment tokens and for the lexer’s grouped [`K::Trivia`] node (it only
+/// True for whitespace / comment tokens and for the lexer’s grouped [`Node::Trivia`] node (it only
 /// contains trivia token leaves).
 #[inline]
 pub(crate) fn syntax_el_is_trivia(el: &SyntaxElement) -> bool {
-    el.is_trivia() || el.kind_as::<K>() == Some(K::Trivia)
+    el.is_trivia() || el.kind_as::<Node>() == Some(Node::Trivia)
 }
 
 /// Collect raw Doxygen comment text attached to `node` (see [`attached_docstring`]).
@@ -24,7 +24,7 @@ fn collect_raw_doxygen_body(node: &SyntaxNode) -> Option<String> {
     let mut toks: Vec<SyntaxToken> = node
         .descendant_tokens()
         .into_iter()
-        .filter(|t| matches!(t.kind_as::<K>(), Some(K::LineComment | K::BlockComment)))
+        .filter(|t| matches!(t.kind_as::<Lex>(), Some(Lex::LineComment | Lex::BlockComment)))
         .filter(|t| {
             let r = t.text_range();
             r.start >= node_start && r.end <= cutoff
@@ -69,9 +69,9 @@ pub fn attached_parsed_doxygen(node: &SyntaxNode) -> Option<ParsedDoxygen> {
 }
 
 fn doxygen_from_comment_token(tok: &SyntaxToken) -> Option<String> {
-    match tok.kind_as::<K>()? {
-        K::LineComment => doxygen_from_line_comment(tok.text()),
-        K::BlockComment => doxygen_from_block_comment(tok.text()),
+    match tok.kind_as::<Lex>()? {
+        Lex::LineComment => doxygen_from_line_comment(tok.text()),
+        Lex::BlockComment => doxygen_from_block_comment(tok.text()),
         _ => None,
     }
 }

@@ -21,62 +21,62 @@ pub use misc::{
 pub use params::{FnParam, fn_param_children};
 pub use template_params::TemplateParams;
 
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::AstEnum;
 
 #[derive(Debug, Clone, AstEnum)]
 pub enum Stmt {
-    #[ast(kind = K::IncludeStmt)]
+    #[ast(kind = Node::IncludeStmt)]
     Include(IncludeStmt),
-    #[ast(kind = K::ReturnStmt)]
+    #[ast(kind = Node::ReturnStmt)]
     Return(ReturnStmt),
-    #[ast(kind = K::BreakStmt)]
+    #[ast(kind = Node::BreakStmt)]
     Break(BreakStmt),
-    #[ast(kind = K::ContinueStmt)]
+    #[ast(kind = Node::ContinueStmt)]
     Continue(ContinueStmt),
-    #[ast(kind = K::VarDecl)]
+    #[ast(kind = Node::VarDecl)]
     VarDecl(VarDecl),
-    #[ast(kind = K::FunctionDecl)]
+    #[ast(kind = Node::FunctionDecl)]
     Function(FunctionDecl),
-    #[ast(kind = K::Stmt)]
+    #[ast(kind = Node::Stmt)]
     Expr(ExprStmt),
-    #[ast(kind = K::GlobalDecl)]
+    #[ast(kind = Node::GlobalDecl)]
     Global(GlobalDecl),
-    #[ast(kind = K::ElseStmt)]
+    #[ast(kind = Node::ElseStmt)]
     Else(ElseStmt),
-    #[ast(kind = K::SwitchStmt)]
+    #[ast(kind = Node::SwitchStmt)]
     Switch(SwitchStmt),
-    #[ast(kind = K::ClassDecl)]
+    #[ast(kind = Node::ClassDecl)]
     Class(ClassDecl),
-    #[ast(kind = K::IfStmt)]
+    #[ast(kind = Node::IfStmt)]
     If(IfStmt),
-    #[ast(kind = K::ForStmt)]
+    #[ast(kind = Node::ForStmt)]
     For(ForStmt),
-    #[ast(kind = K::ForeachStmt)]
+    #[ast(kind = Node::ForeachStmt)]
     Foreach(ForeachStmt),
-    #[ast(kind = K::DoWhileStmt)]
+    #[ast(kind = Node::DoWhileStmt)]
     DoWhile(DoWhileStmt),
-    #[ast(kind = K::WhileStmt)]
+    #[ast(kind = Node::WhileStmt)]
     While(WhileStmt),
-    #[ast(kind = K::TryStmt)]
+    #[ast(kind = Node::TryStmt)]
     Try(TryStmt),
-    #[ast(kind = K::ThrowStmt)]
+    #[ast(kind = Node::ThrowStmt)]
     Throw(ThrowStmt),
-    #[ast(kind = K::ImportStmt)]
+    #[ast(kind = Node::ImportStmt)]
     Import(ImportStmt),
-    #[ast(kind = K::ExportStmt)]
+    #[ast(kind = Node::ExportStmt)]
     Export(ExportStmt),
-    #[ast(kind = K::GotoStmt)]
+    #[ast(kind = Node::GotoStmt)]
     Goto(GotoStmt),
-    #[ast(kind = K::PackageStmt)]
+    #[ast(kind = Node::PackageStmt)]
     Package(PackageStmt),
-    #[ast(kind = K::ConstDecl)]
+    #[ast(kind = Node::ConstDecl)]
     Const(ConstDecl),
-    #[ast(kind = K::MatchStmt)]
+    #[ast(kind = Node::MatchStmt)]
     Match(MatchStmt),
-    #[ast(kind = K::EmptyStmt)]
+    #[ast(kind = Node::EmptyStmt)]
     Empty(EmptyStmt),
-    #[ast(kind = K::ErrorStmt)]
+    #[ast(kind = Node::ErrorStmt)]
     Error(ErrorStmt),
 }
 

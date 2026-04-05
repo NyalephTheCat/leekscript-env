@@ -1,14 +1,14 @@
 //! Recovering and partial-rule parsing on top of sipha.
 
 use crate::grammar;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::prelude::*;
 
 use super::{LanguageOptions, ParseError, language_options_with_source_directives};
 
 /// Successful parse with optional recovery diagnostics.
 ///
-/// When [`Self::errors`] is non-empty, the CST may contain [`K::ErrorStmt`] placeholders (zero-width
+/// When [`Self::errors`] is non-empty, the CST may contain [`Node::ErrorStmt`] placeholders (zero-width
 /// nodes) from sipha’s error-node insertion. Valid siblings are still parsed normally.
 #[derive(Debug)]
 pub struct ParsedWithRecovery {
@@ -66,7 +66,7 @@ pub fn parse_doc_with_recovery_limited_with_built(
     let ctx = opts
         .parse_context()
         .with_set(super::version::FLAG_PARSE_RECOVERY)
-        .with_error_node_kind(K::ErrorStmt as sipha::types::SyntaxKind);
+        .with_error_node_kind(Node::ErrorStmt as sipha::types::SyntaxKind);
 
     let bytes = src.as_bytes();
     match super::with_reusable_engine(|engine| {
@@ -121,7 +121,12 @@ pub fn parse_signature_doc_with_recovery_limited(
     lang: impl Into<LanguageOptions>,
     max_errors: usize,
 ) -> Result<ParsedWithRecovery, ParseError> {
-    parse_signature_doc_with_recovery_limited_with_built(src, lang, max_errors, grammar::built_graph())
+    parse_signature_doc_with_recovery_limited_with_built(
+        src,
+        lang,
+        max_errors,
+        grammar::built_graph(),
+    )
 }
 
 /// Like [`parse_signature_doc_with_recovery_limited`], but uses the given [`BuiltGraph`].
@@ -136,7 +141,7 @@ pub fn parse_signature_doc_with_recovery_limited_with_built(
     let ctx = opts
         .signature_parse_context()
         .with_set(super::version::FLAG_PARSE_RECOVERY)
-        .with_error_node_kind(K::ErrorStmt as sipha::types::SyntaxKind);
+        .with_error_node_kind(Node::ErrorStmt as sipha::types::SyntaxKind);
 
     let bytes = src.as_bytes();
     match super::with_reusable_engine(|engine| {

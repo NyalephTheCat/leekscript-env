@@ -276,7 +276,6 @@ impl Vm {
     fn read_i32(&mut self) -> Result<i32, VmError> {
         Ok(self.read_u32()? as i32)
     }
-
 }
 
 /// Handler installed for every unused opcode slot and for truly unknown bytes at runtime.
@@ -332,8 +331,10 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
     let b = vm.pop_stack()?;
     let a = vm.pop_stack()?;
     let out = match (&a, &b) {
-        (Value::String(_), _) | (_, Value::String(_))
-        | (Value::Class(_), _) | (_, Value::Class(_)) => {
+        (Value::String(_), _)
+        | (_, Value::String(_))
+        | (Value::Class(_), _)
+        | (_, Value::Class(_)) => {
             let sa = a.to_leek_coerce_string();
             let sb = b.to_leek_coerce_string();
             let extra = (sa.len() + sb.len()) as u64;
@@ -341,7 +342,9 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
             Value::String(format!("{sa}{sb}"))
         }
         (Value::Array(ax), Value::Array(bx)) => {
-            let extra = 2u64.saturating_add(ax.len() as u64).saturating_add(bx.len() as u64);
+            let extra = 2u64
+                .saturating_add(ax.len() as u64)
+                .saturating_add(bx.len() as u64);
             vm.charge_ops(extra)?;
             let mut v = ax.clone();
             v.extend(bx.iter().cloned());
@@ -365,7 +368,8 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
             vm.charge_ops(extra)?;
             Value::Map(Value::map_merge_java(mx, my))
         }
-        (Value::Map(mx), Value::Object(my)) | (Value::Object(mx), Value::Map(my))
+        (Value::Map(mx), Value::Object(my))
+        | (Value::Object(mx), Value::Map(my))
         | (Value::Object(mx), Value::Object(my)) => {
             let extra = ((mx.len() + my.len()) * 3) as u64;
             vm.charge_ops(extra)?;
@@ -373,9 +377,9 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
         }
         _ => Value::Number(match (&a, &b) {
             (Value::Number(an), Value::Number(bn)) => an.add(*bn),
-            _ => NumberBits::coerce_integerish_f64(
-                a.to_real_for_compare() + b.to_real_for_compare(),
-            ),
+            _ => {
+                NumberBits::coerce_integerish_f64(a.to_real_for_compare() + b.to_real_for_compare())
+            }
         }),
     };
     vm.push_stack(out)?;
@@ -383,30 +387,54 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
 }
 
 fn op_sub(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let b = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
+    let a = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
     vm.push_stack(Value::Number(a.sub(b)))?;
     Ok(())
 }
 
 fn op_mul(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let b = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
+    let a = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
     vm.push_stack(Value::Number(a.mul(b)))?;
     Ok(())
 }
 
 fn op_div(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let b = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
+    let a = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
     let out = a.div(b).map_err(|_| VmError::DivByZero)?;
     vm.push_stack(Value::Number(out))?;
     Ok(())
 }
 
 fn op_int_div(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let b = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
+    let a = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
     let q = a.int_div(b).map_err(|_| VmError::DivByZero)?;
     vm.push_stack(Value::Number(q))?;
     Ok(())
@@ -429,7 +457,10 @@ fn op_mod(vm: &mut Vm) -> Result<(), VmError> {
 }
 
 fn op_neg(vm: &mut Vm) -> Result<(), VmError> {
-    let x = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let x = vm
+        .pop_stack()?
+        .number_bits()
+        .ok_or(VmError::ExpectedNumber)?;
     vm.push_stack(Value::Number(x.neg()))?;
     Ok(())
 }
@@ -659,11 +690,7 @@ fn op_set_elem_local(vm: &mut Vm) -> Result<(), VmError> {
     let rhs = vm.pop_stack()?;
     let key = vm.pop_stack()?;
     let idx = usize::from(slot);
-    let container = vm
-        .locals
-        .get(idx)
-        .cloned()
-        .ok_or(VmError::BadLocal(slot))?;
+    let container = vm.locals.get(idx).cloned().ok_or(VmError::BadLocal(slot))?;
 
     match container {
         Value::Null => {
@@ -761,7 +788,11 @@ fn op_call_function(vm: &mut Vm) -> Result<(), VmError> {
     let base = usize::from(meta.slot_base);
     let total = usize::from(meta.slot_count);
     if base.saturating_add(total) > vm.locals.len() {
-        return Err(VmError::BadLocal(meta.slot_base.saturating_add(meta.slot_count).saturating_sub(1)));
+        return Err(VmError::BadLocal(
+            meta.slot_base
+                .saturating_add(meta.slot_count)
+                .saturating_sub(1),
+        ));
     }
     let mut args = vec![Value::Null; argc as usize];
     for slot in (0..argc as usize).rev() {

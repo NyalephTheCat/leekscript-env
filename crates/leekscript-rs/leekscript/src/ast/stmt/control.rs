@@ -2,7 +2,7 @@ use super::Block;
 use super::Stmt;
 use super::StmtBlock;
 use crate::ast::expr::Expr;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 use sipha::prelude::*;
 use sipha::tree::ast::AstNode;
 use sipha::tree::ast::AstNodeExt;
@@ -44,7 +44,7 @@ fn second_branch_after_condition(syntax: &SyntaxNode) -> Option<StmtBlock> {
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::IfStmt)]
+#[ast(kind = Node::IfStmt)]
 pub struct IfStmt(SyntaxNode);
 
 impl IfStmt {
@@ -52,7 +52,7 @@ impl IfStmt {
         self.syntax().child::<Expr>()
     }
 
-    /// `then` branch: `{ ... }` or a `K::Stmt`-wrapped statement (e.g. `if (x) return 1`).
+    /// `then` branch: `{ ... }` or a `Node::Stmt`-wrapped statement (e.g. `if (x) return 1`).
     pub fn then_branch(&self) -> Option<StmtBlock> {
         first_branch_after_condition(self.syntax())
     }
@@ -74,7 +74,7 @@ impl IfStmt {
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::WhileStmt)]
+#[ast(kind = Node::WhileStmt)]
 pub struct WhileStmt(SyntaxNode);
 
 impl WhileStmt {
@@ -88,7 +88,7 @@ impl WhileStmt {
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::DoWhileStmt)]
+#[ast(kind = Node::DoWhileStmt)]
 pub struct DoWhileStmt(SyntaxNode);
 
 impl DoWhileStmt {
@@ -110,7 +110,7 @@ impl DoWhileStmt {
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::ForStmt)]
+#[ast(kind = Node::ForStmt)]
 pub struct ForStmt(SyntaxNode);
 
 /// `for ( ; …` / `for (;;)` — header’s first clause is empty; CST expr children are `[cond, step]` not `[init, cond, step]`.
@@ -121,13 +121,13 @@ fn for_paren_header_starts_with_semicolon(syntax: &SyntaxNode) -> bool {
             continue;
         }
         if let Some(t) = el.as_token() {
-            let k = t.kind_as::<K>();
-            if k == Some(K::LParen) {
+            let k = t.kind_as::<Lex>();
+            if k == Some(Lex::LParen) {
                 after_lparen = true;
                 continue;
             }
             if after_lparen {
-                return k == Some(K::Semi);
+                return k == Some(Lex::Semi);
             }
         } else if after_lparen {
             return false;
@@ -167,7 +167,7 @@ impl ForStmt {
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::ForeachStmt)]
+#[ast(kind = Node::ForeachStmt)]
 pub struct ForeachStmt(SyntaxNode);
 
 impl ForeachStmt {
@@ -187,7 +187,7 @@ fn last_stmt_block_child(syntax: &SyntaxNode) -> Option<StmtBlock> {
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::SwitchStmt)]
+#[ast(kind = Node::SwitchStmt)]
 pub struct SwitchStmt(SyntaxNode);
 
 impl SwitchStmt {
@@ -201,7 +201,7 @@ impl SwitchStmt {
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::SwitchArm)]
+#[ast(kind = Node::SwitchArm)]
 pub struct SwitchArm(SyntaxNode);
 
 impl SwitchArm {

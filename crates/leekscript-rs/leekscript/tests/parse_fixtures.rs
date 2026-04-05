@@ -33,7 +33,6 @@ fn parses_basic_fixture_v4() {
     assert!(got.contains("PAREN_EXPR"));
 }
 
-#[cfg(not(feature = "grammar-v4-only"))]
 #[test]
 fn v2_keywords_are_ascii_case_insensitive() {
     parse_doc("VAR x = 1\nReTuRn x", Version::V2).expect("v2: VAR / ReTuRn are keywords");
@@ -45,21 +44,16 @@ fn v3_plus_keywords_are_case_sensitive() {
     parse_doc("var ReTuRn = 1", Version::V4).expect("v4: ReTuRn is an identifier, not `return`");
 }
 
-#[cfg(not(feature = "grammar-v4-only"))]
 #[test]
 fn v2_treats_let_as_identifier_before_v3() {
     // Reference lexer only emits `LET` for version >= 3; before that `let` is `STRING`.
     parse_doc("var let = 1", Version::V2).expect("v2: `let` is a valid variable name");
 }
 
-#[cfg(not(feature = "grammar-v4-only"))]
 #[test]
 fn leeklang_directive_sets_dialect_for_parse() {
-    parse_doc(
-        "// leeklang: dialect=v2\nVAR x = 1\nreturn x",
-        Version::V4,
-    )
-    .expect("file directive selects v2 keyword rules");
+    parse_doc("// leeklang: dialect=v2\nVAR x = 1\nreturn x", Version::V4)
+        .expect("file directive selects v2 keyword rules");
 }
 
 #[test]
@@ -123,11 +117,8 @@ fn triple_less_lexes_as_single_token() {
 #[test]
 fn experimental_all_parses_reserved_statement_shapes() {
     let all = LanguageOptions::v4_experimental_all();
-    parse_doc(
-        "try { var x = 1 } catch (integer e) { } finally { }",
-        all,
-    )
-    .expect("try/catch/finally");
+    parse_doc("try { var x = 1 } catch (integer e) { } finally { }", all)
+        .expect("try/catch/finally");
     parse_doc("throw 1", all).expect("throw");
     parse_doc(r#"import "m""#, all).expect("import string");
     parse_doc("package a.b", all).expect("package");
@@ -136,7 +127,6 @@ fn experimental_all_parses_reserved_statement_shapes() {
     parse_doc("export { var x = 1 }", all).expect("export block");
 }
 
-#[cfg(not(feature = "grammar-v4-only"))]
 #[test]
 fn v3_allows_match_as_identifier() {
     parse_doc("var match = 1", Version::V3).expect("`match` is not reserved in v3");
@@ -165,8 +155,11 @@ fn doxygen_doc_comments_before_decls_parse() {
     )
     .expect("doxygen before decls");
     parse_doc("/// one\n/// two\nfunction g() { }", Version::V4).expect("slash-slash-slash lines");
-    parse_doc("/** g */\nglobal integer x;", LanguageOptions::v4_experimental_all())
-        .expect("doc on global");
+    parse_doc(
+        "/** g */\nglobal integer x;",
+        LanguageOptions::v4_experimental_all(),
+    )
+    .expect("doc on global");
     parse_doc(
         "/** c */\nconst y = 1;",
         LanguageOptions::new(
@@ -200,7 +193,6 @@ fn v4_allows_match_as_identifier_like_v3() {
         .expect("`match` is not reserved in v4 without experimental match");
 }
 
-#[cfg(not(feature = "grammar-v4-only"))]
 #[test]
 fn parses_v1_block_comment_short_form_only_in_v1() {
     let src = include_str!("../testdata/v1_block_comment_short.leek");
@@ -246,11 +238,8 @@ fn signature_stub_path_heuristic() {
 
 #[test]
 fn method_params_allow_default_without_experimental() {
-    parse_doc(
-        "class C { m(integer x = 0) { return x; } }",
-        Version::V4,
-    )
-    .expect("method default param");
+    parse_doc("class C { m(integer x = 0) { return x; } }", Version::V4)
+        .expect("method default param");
 }
 
 #[test]
@@ -283,7 +272,8 @@ fn template_params_require_experimental() {
 
 #[test]
 fn signature_mode_accepts_templated_function_stub() {
-    parse_signature_doc("function first<T>(Array<T> a) => T;", Version::V4).expect("stub with templates");
+    parse_signature_doc("function first<T>(Array<T> a) => T;", Version::V4)
+        .expect("stub with templates");
 }
 
 #[test]

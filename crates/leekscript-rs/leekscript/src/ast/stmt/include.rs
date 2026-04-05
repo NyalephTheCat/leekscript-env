@@ -1,11 +1,11 @@
 use crate::ast::literal::LitStr;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::AstNode;
 use sipha::prelude::*;
 use sipha::tree::ast::AstTokenExt;
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::IncludeStmt)]
+#[ast(kind = Node::IncludeStmt)]
 pub struct IncludeStmt(SyntaxNode);
 
 impl IncludeStmt {

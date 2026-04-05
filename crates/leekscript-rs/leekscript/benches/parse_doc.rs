@@ -9,14 +9,6 @@
 //! cargo bench -p leekscript --bench parse_doc -- --baseline main
 //! ```
 //!
-//! With v4-specialized grammar bytecode (`grammar-v4-only`), pass the feature on the same bench
-//! target so the baseline matches the build you care about:
-//!
-//! ```text
-//! cargo bench -p leekscript --bench parse_doc --features grammar-v4-only -- --save-baseline v4
-//! cargo bench -p leekscript --bench parse_doc --features grammar-v4-only -- --baseline v4
-//! ```
-//!
 //! Or run `benches/compare_parse_doc_baseline.sh` from this crate directory.
 //!
 //! Benches use [`parse_doc_reusing_vec`](leekscript::parse_doc_reusing_vec) /
@@ -26,9 +18,7 @@
 use std::time::Duration;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use leekscript::{
-    Version, parse_doc_reusing_vec, parse_signature_doc_reusing_vec,
-};
+use leekscript::{Version, parse_doc_reusing_vec, parse_signature_doc_reusing_vec};
 
 fn parse_doc_criterion() -> Criterion {
     // Default 5s measurement window is too tight for 100 samples when each iteration parses

@@ -27,7 +27,7 @@
 
 use crate::document::LeekDoc;
 use crate::format::options::{BraceStyle, FormatPatch, LineEnding, SemicolonStyle};
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Lex;
 use sipha::tree::red::SyntaxToken;
 use sipha::tree::walk::{Visitor, WalkOptions, walk};
 use sipha::types::{Pos, Span};
@@ -77,10 +77,10 @@ pub fn scan_directives(doc: &LeekDoc) -> DirectivePlan {
 
     impl Visitor for V<'_> {
         fn visit_token(&mut self, token: &SyntaxToken) -> sipha::tree::walk::WalkResult {
-            let Some(k) = token.kind_as::<K>() else {
+            let Some(k) = token.kind_as::<Lex>() else {
                 return sipha::tree::walk::WalkResult::Continue(());
             };
-            if !matches!(k, K::LineComment | K::BlockComment) {
+            if !matches!(k, Lex::LineComment | Lex::BlockComment) {
                 return sipha::tree::walk::WalkResult::Continue(());
             }
             let text = token.text();

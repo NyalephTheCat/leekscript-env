@@ -13,7 +13,7 @@ use crate::scope::model::{
     ExprTypeKey, Reference, ScopeId, ScopeKind, SemanticCode, SemanticDiagnostic, SemanticSeverity,
     SymbolId, SymbolKind,
 };
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 
 use super::condition::{
     facts_when_expression_known_false, is_short_circuit_or_rhs_operand,
@@ -49,7 +49,7 @@ pub(crate) struct Analyzer {
     pub(crate) class_template_stack: Vec<Vec<String>>,
     /// Template names for each nested `function f<T>` / `function<T>(…) { }` (for `var x: T` typing).
     pub(crate) fn_template_stack: Vec<Vec<String>>,
-    pub node_stack: Vec<Option<K>>,
+    pub node_stack: Vec<Option<Node>>,
     pub instanceof_type_ctx_depth: u32,
     pub narrowing: NarrowingEnv,
     pub syntax_node_stack: Vec<SyntaxNode>,
@@ -124,14 +124,14 @@ impl Analyzer {
         sync_leave(self, node);
     }
 
-    /// Builtin type keywords are sometimes lexed as [`K::Ident`]. Skip bogus undefined diagnostics
+    /// Builtin type keywords are sometimes lexed as [`Lex::Ident`]. Skip bogus undefined diagnostics
     /// for those spellings in **class fields** (not methods): fields have no method body, methods do.
     fn skip_mislexed_builtin_type_in_class_field(a: &Analyzer, token: &SyntaxToken) -> bool {
         if leek_ty_from_builtin_type_ident_text(token.text()).is_none() {
             return false;
         }
         for n in a.syntax_node_stack.iter().rev() {
-            if n.kind_as::<K>() == Some(K::ClassMember) {
+            if n.kind_as::<Node>() == Some(Node::ClassMember) {
                 return ClassMember::cast(n.clone()).is_some_and(|cm| !cm.has_method_body());
             }
         }
@@ -139,7 +139,7 @@ impl Analyzer {
     }
 
     pub(crate) fn resolve_ident(&mut self, token: &SyntaxToken) {
-        if token.kind_as::<K>() != Some(K::Ident) {
+        if token.kind_as::<Lex>() != Some(Lex::Ident) {
             return;
         }
         let span = token.text_range();
@@ -148,7 +148,7 @@ impl Analyzer {
             return;
         }
         if self.phase == AnalysisPhase::ResolveAndInfer
-            && matches!(self.node_stack.last(), Some(Some(K::MemberExpr)))
+            && matches!(self.node_stack.last(), Some(Some(Node::MemberExpr)))
         {
             return;
         }
@@ -222,29 +222,29 @@ impl Analyzer {
     pub(crate) fn infer_expr_node(&mut self, node: &SyntaxNode) {
         let span = node.text_range();
         let key = ExprTypeKey::from_span(span);
-        if node.kind_as::<K>() == Some(K::BracketMapExpr) {
+        if node.kind_as::<Node>() == Some(Node::BracketMapExpr) {
             // Inner `Expr` nodes can share this node's exact byte span; `ExprTypeKey` is span-only,
             // so caching here would overwrite the value expression's type (e.g. `[from: 0]`).
             let _ = infer_bracket_map_expr(self, node);
             return;
         }
-        let ty = match node.kind_as::<K>() {
-            Some(K::BinaryExpr) => infer_binary(self, node),
-            Some(K::IntervalExpr) => infer_interval_ty(self, node),
-            Some(K::MemberExpr) => infer_member_expr(self, node),
-            Some(K::IndexExpr) => infer_index_expr(self, node),
-            Some(K::CallExpr) => infer_call_expr(self, node),
-            Some(K::TernaryExpr) => infer_ternary_expr(self, node),
-            Some(K::ArrayExpr) => infer_array_expr(self, node),
-            Some(K::CastExpr) => infer_cast_expr(self, node),
-            Some(K::Expr | K::ParenExpr | K::UnaryExpr) => expr_span_ty(self, node),
+        let ty = match node.kind_as::<Node>() {
+            Some(Node::BinaryExpr) => infer_binary(self, node),
+            Some(Node::IntervalExpr) => infer_interval_ty(self, node),
+            Some(Node::MemberExpr) => infer_member_expr(self, node),
+            Some(Node::IndexExpr) => infer_index_expr(self, node),
+            Some(Node::CallExpr) => infer_call_expr(self, node),
+            Some(Node::TernaryExpr) => infer_ternary_expr(self, node),
+            Some(Node::ArrayExpr) => infer_array_expr(self, node),
+            Some(Node::CastExpr) => infer_cast_expr(self, node),
+            Some(Node::Expr | Node::ParenExpr | Node::UnaryExpr) => expr_span_ty(self, node),
             _ => return,
         };
         self.expr_types.insert(key, ty);
     }
 
     pub(crate) fn apply_var_inits(&mut self, node: &SyntaxNode) {
-        if self.phase != AnalysisPhase::ResolveAndInfer || node.kind_as::<K>() != Some(K::VarDecl) {
+        if self.phase != AnalysisPhase::ResolveAndInfer || node.kind_as::<Node>() != Some(Node::VarDecl) {
             return;
         }
         let vd = VarDecl::cast(node.clone()).expect("vd");
@@ -260,7 +260,7 @@ impl Analyzer {
         let rhs_ty = vd
             .syntax()
             .child_nodes()
-            .find(|n| n.kind_as::<K>() == Some(K::Expr))
+            .find(|n| n.kind_as::<Node>() == Some(Node::Expr))
             .map(|e| expr_span_ty(self, &e))
             .filter(|t| *t != LeekTy::Unknown);
         let Some(rhs_ty) = rhs_ty else {
@@ -359,7 +359,7 @@ impl Analyzer {
     }
 
     pub(crate) fn apply_foreach_var_inference(&mut self, node: &SyntaxNode) {
-        if node.kind_as::<K>() != Some(K::ForeachStmt) {
+        if node.kind_as::<Node>() != Some(Node::ForeachStmt) {
             return;
         }
         let fe = ForeachStmt::cast(node.clone()).expect("foreach");

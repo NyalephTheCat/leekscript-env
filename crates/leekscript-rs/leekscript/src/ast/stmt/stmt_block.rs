@@ -2,11 +2,11 @@ use super::{Block, Stmt};
 use sipha::prelude::*;
 use sipha::tree::ast::AstNode;
 
-/// `stmt_or_block`: braced block vs a single statement wrapped in `K::Stmt`.
+/// `stmt_or_block`: braced block vs a single statement wrapped in `Node::Stmt`.
 #[derive(Debug, Clone)]
 pub enum StmtBlock {
     Block(Block),
-    /// Single-statement branch (`K::Stmt` wrapper).
+    /// Single-statement branch (`Node::Stmt` wrapper).
     Wrapped(Stmt),
 }
 

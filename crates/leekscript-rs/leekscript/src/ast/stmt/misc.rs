@@ -1,12 +1,12 @@
 use super::Block;
-use crate::ast::binding_name::is_lexical_binding_name;
-use super::params::{FnParam, fn_param_children};
 use super::TemplateParams;
+use super::params::{FnParam, fn_param_children};
 use crate::Span;
+use crate::ast::binding_name::is_lexical_binding_name;
 use crate::ast::expr::Expr;
 use crate::ast::literal::LitStr;
 use crate::ast::types::TypeExpr;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 use crate::syntax::syntax_el_is_trivia;
 use crate::syntax::{ParsedDoxygen, attached_docstring, attached_parsed_doxygen};
 use sipha::AstNode;
@@ -17,16 +17,16 @@ use sipha::types::IntoSyntaxKind;
 
 /// Empty statement: a single `;`.
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::EmptyStmt)]
+#[ast(kind = Node::EmptyStmt)]
 pub struct EmptyStmt(SyntaxNode);
 
 /// Parse error placeholder (recovery mode); empty CST node at the error offset.
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ErrorStmt)]
+#[ast(kind = Node::ErrorStmt)]
 pub struct ErrorStmt(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::GlobalDecl)]
+#[ast(kind = Node::GlobalDecl)]
 pub struct GlobalDecl(SyntaxNode);
 
 impl GlobalDecl {
@@ -49,14 +49,14 @@ impl GlobalDecl {
     pub fn first_name(&self) -> Option<String> {
         self.syntax()
             .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
+            .find(|t| t.kind() == Lex::Ident.into_syntax_kind())
             .map(|t| t.text().to_string())
     }
 }
 
-/// One member inside a class body (`K::ClassMember`): field, method, or constructor.
+/// One member inside a class body (`Node::ClassMember`): field, method, or constructor.
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ClassMember)]
+#[ast(kind = Node::ClassMember)]
 pub struct ClassMember(SyntaxNode);
 
 impl ClassMember {
@@ -71,7 +71,7 @@ impl ClassMember {
     pub fn has_method_body(&self) -> bool {
         self.syntax()
             .child_nodes()
-            .any(|n| n.kind_as::<K>() == Some(K::Block))
+            .any(|n| n.kind_as::<Node>() == Some(Node::Block))
     }
 
     #[must_use]
@@ -79,7 +79,7 @@ impl ClassMember {
         self.syntax()
             .descendant_tokens()
             .iter()
-            .any(|t| t.kind_as::<K>() == Some(K::ConstructorKw))
+            .any(|t| t.kind_as::<Lex>() == Some(Lex::ConstructorKw))
     }
 
     /// Parameters inside `( … )` for methods and constructors.
@@ -99,7 +99,7 @@ impl ClassMember {
         self.syntax()
             .descendant_tokens()
             .into_iter()
-            .any(|t| t.kind_as::<K>() == Some(K::StaticKw))
+            .any(|t| t.kind_as::<Lex>() == Some(Lex::StaticKw))
     }
 
     /// Constructor uses `class_name`; methods use the `ident` before `(`.
@@ -109,7 +109,7 @@ impl ClassMember {
                 .syntax()
                 .descendant_tokens()
                 .iter()
-                .find(|t| t.kind_as::<K>() == Some(K::ConstructorKw))
+                .find(|t| t.kind_as::<Lex>() == Some(Lex::ConstructorKw))
                 .map(|t| t.text_range())
                 .unwrap_or_else(|| Span::new(0, 0));
             return Some((class_name.to_string(), span));
@@ -127,12 +127,12 @@ fn method_name_ident_before_params(
         .collect();
     let lparen_idx = children.iter().position(|e| {
         e.as_token()
-            .is_some_and(|t| t.kind() == K::LParen.into_syntax_kind())
+            .is_some_and(|t| t.kind() == Lex::LParen.into_syntax_kind())
     })?;
     let mut out = None;
     for el in &children[..lparen_idx] {
         if let Some(t) = el.as_token() {
-            if let Some(k) = t.kind_as::<K>() {
+            if let Some(k) = t.kind_as::<Lex>() {
                 if is_lexical_binding_name(k) {
                     out = Some((t.text().to_string(), t.text_range()));
                 }
@@ -143,7 +143,7 @@ fn method_name_ident_before_params(
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ClassDecl)]
+#[ast(kind = Node::ClassDecl)]
 pub struct ClassDecl(SyntaxNode);
 
 impl ClassDecl {
@@ -160,8 +160,8 @@ impl ClassDecl {
 
     /// Class name (`class` … `{`); stops before `extends` if present.
     pub fn name(&self) -> Option<String> {
-        let ext = K::ExtendsKw.into_syntax_kind();
-        let id = K::Ident.into_syntax_kind();
+        let ext = Lex::ExtendsKw.into_syntax_kind();
+        let id = Lex::Ident.into_syntax_kind();
         for t in self.syntax().child_tokens() {
             let k = t.kind();
             if k == ext {
@@ -182,8 +182,8 @@ impl ClassDecl {
 
     /// Superclass name after `extends`, if any.
     pub fn extends(&self) -> Option<String> {
-        let ext = K::ExtendsKw.into_syntax_kind();
-        let id = K::Ident.into_syntax_kind();
+        let ext = Lex::ExtendsKw.into_syntax_kind();
+        let id = Lex::Ident.into_syntax_kind();
         let mut after_extends = false;
         for t in self.syntax().child_tokens() {
             let k = t.kind();
@@ -204,7 +204,7 @@ impl ClassDecl {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ConstDecl)]
+#[ast(kind = Node::ConstDecl)]
 pub struct ConstDecl(SyntaxNode);
 
 impl ConstDecl {
@@ -222,17 +222,17 @@ impl ConstDecl {
     pub fn first_name(&self) -> Option<String> {
         self.syntax()
             .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
+            .find(|t| t.kind() == Lex::Ident.into_syntax_kind())
             .map(|t| t.text().to_string())
     }
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ElseStmt)]
+#[ast(kind = Node::ElseStmt)]
 pub struct ElseStmt(SyntaxNode);
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::TryStmt)]
+#[ast(kind = Node::TryStmt)]
 pub struct TryStmt(SyntaxNode);
 
 impl TryStmt {
@@ -253,7 +253,7 @@ impl TryStmt {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::CatchClause)]
+#[ast(kind = Node::CatchClause)]
 pub struct CatchClause(SyntaxNode);
 
 impl CatchClause {
@@ -265,7 +265,7 @@ impl CatchClause {
     pub fn param_name(&self) -> Option<String> {
         self.syntax()
             .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
+            .find(|t| t.kind() == Lex::Ident.into_syntax_kind())
             .map(|t| t.text().to_string())
     }
 
@@ -275,7 +275,7 @@ impl CatchClause {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ThrowStmt)]
+#[ast(kind = Node::ThrowStmt)]
 pub struct ThrowStmt(SyntaxNode);
 
 impl ThrowStmt {
@@ -285,7 +285,7 @@ impl ThrowStmt {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ImportStmt)]
+#[ast(kind = Node::ImportStmt)]
 pub struct ImportStmt(SyntaxNode);
 
 impl ImportStmt {
@@ -301,7 +301,7 @@ impl ImportStmt {
         let segs: Vec<_> = self
             .syntax()
             .child_tokens()
-            .filter(|t| t.kind() == K::Ident.into_syntax_kind())
+            .filter(|t| t.kind() == Lex::Ident.into_syntax_kind())
             .map(|t| t.text().to_string())
             .collect();
         if segs.is_empty() { None } else { Some(segs) }
@@ -309,7 +309,7 @@ impl ImportStmt {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::ExportStmt)]
+#[ast(kind = Node::ExportStmt)]
 pub struct ExportStmt(SyntaxNode);
 
 impl ExportStmt {
@@ -319,27 +319,27 @@ impl ExportStmt {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::GotoStmt)]
+#[ast(kind = Node::GotoStmt)]
 pub struct GotoStmt(SyntaxNode);
 
 impl GotoStmt {
     pub fn label(&self) -> Option<String> {
         self.syntax()
             .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
+            .find(|t| t.kind() == Lex::Ident.into_syntax_kind())
             .map(|t| t.text().to_string())
     }
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::PackageStmt)]
+#[ast(kind = Node::PackageStmt)]
 pub struct PackageStmt(SyntaxNode);
 
 impl PackageStmt {
     pub fn segments(&self) -> impl Iterator<Item = String> + '_ {
         self.syntax()
             .child_tokens()
-            .filter(|t| t.kind() == K::Ident.into_syntax_kind())
+            .filter(|t| t.kind() == Lex::Ident.into_syntax_kind())
             .map(|t| t.text().to_string())
     }
 
@@ -350,7 +350,7 @@ impl PackageStmt {
 }
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::MatchStmt)]
+#[ast(kind = Node::MatchStmt)]
 pub struct MatchStmt(SyntaxNode);
 
 impl MatchStmt {

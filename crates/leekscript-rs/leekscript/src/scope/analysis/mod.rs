@@ -100,7 +100,7 @@ mod narrowing_smoke {
     use crate::Version;
     use crate::parse_doc;
     use crate::scope::model::ExprTypeKey;
-    use crate::syntax::kinds::K;
+    use crate::syntax::kinds::{Lex, Node};
     use sipha::types::IntoSyntaxKind;
 
     #[test]
@@ -127,14 +127,14 @@ mod narrowing_smoke {
             Version::V4,
         )
         .unwrap();
-        let bins = doc.root().find_all_nodes(K::BinaryExpr.into_syntax_kind());
+        let bins = doc.root().find_all_nodes(Node::BinaryExpr.into_syntax_kind());
         let n = bins
             .iter()
             .find(|b| b.text_range().start == 25)
             .expect("binary at offset 25");
-        let kinds: Vec<_> = n.non_trivia_tokens().map(|t| t.kind_as::<K>()).collect();
+        let kinds: Vec<_> = n.non_trivia_tokens().map(|t| t.kind_as::<Lex>()).collect();
         assert!(
-            kinds.iter().any(|k| *k == Some(K::InstanceofKw)),
+            kinds.iter().any(|k| *k == Some(Lex::InstanceofKw)),
             "expected InstanceofKw in {:?}",
             kinds
         );

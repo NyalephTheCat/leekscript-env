@@ -31,9 +31,8 @@ use cases_generated::{ExpectKind, JavaVmCase, SourceKind};
 const RUST_LS_VERSION: u8 = 4;
 
 fn java_test_resources() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-        "../../../leek-wars-generator/leekscript/src/test/resources",
-    )
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../leek-wars-generator/leekscript/src/test/resources")
 }
 
 fn case_applies(c: &JavaVmCase) -> bool {
@@ -49,12 +48,7 @@ fn apply_limits(vm: &mut Vm, c: &JavaVmCase) {
     }
 }
 
-fn assert_java_error(
-    id: &str,
-    java_name: &str,
-    compile_failed: bool,
-    run_err: Option<&VmError>,
-) {
+fn assert_java_error(id: &str, java_name: &str, compile_failed: bool, run_err: Option<&VmError>) {
     match java_name {
         "NONE" => {
             assert!(
@@ -128,7 +122,10 @@ fn run_snippet(c: &JavaVmCase) {
             let name = *name;
             if name == "NONE" {
                 let chunk = compile_chunk_v4(c.source).unwrap_or_else(|e| {
-                    panic!("{}: expected success (Java NONE), compile failed: {e}", c.id)
+                    panic!(
+                        "{}: expected success (Java NONE), compile failed: {e}",
+                        c.id
+                    )
                 });
                 let mut vm = Vm::from_compiled_chunk(chunk).expect("vm");
                 apply_limits(&mut vm, c);
@@ -157,10 +154,7 @@ fn run_snippet(c: &JavaVmCase) {
                                 name,
                                 "TOO_MUCH_OPERATIONS" | "OUT_OF_MEMORY" | "DIVISION_BY_ZERO"
                             ) {
-                                panic!(
-                                    "{}: expected Java error {name}, run succeeded",
-                                    c.id
-                                );
+                                panic!("{}: expected Java error {name}, run succeeded", c.id);
                             }
                             assert_java_error(c.id, name, false, None);
                         }
@@ -189,11 +183,7 @@ fn run_snippet(c: &JavaVmCase) {
             apply_limits(&mut vm, c);
             vm.run()
                 .unwrap_or_else(|e| panic!("{}: run {:?}: {e:?}", c.id, c.source));
-            assert_eq!(
-                vm.operations, *expected_ops,
-                "ops mismatch {}",
-                c.id
-            );
+            assert_eq!(vm.operations, *expected_ops, "ops mismatch {}", c.id);
         }
         ExpectKind::Almost { value, delta } => {
             let chunk = compile_chunk_v4(c.source)
@@ -205,7 +195,10 @@ fn run_snippet(c: &JavaVmCase) {
                 .unwrap_or_else(|e| panic!("{}: run {:?}: {e:?}", c.id, c.source))
                 .to_leek_export_string();
             let n: f64 = got.parse().unwrap_or_else(|_| {
-                panic!("{}: expected numeric export for almost, got {:?}", c.id, got)
+                panic!(
+                    "{}: expected numeric export for almost, got {:?}",
+                    c.id, got
+                )
             });
             assert!(
                 (n - *value).abs() < *delta,
@@ -289,14 +282,10 @@ fn run_file_case(c: &JavaVmCase) {
                 .run()
                 .unwrap_or_else(|e| panic!("{}: run file {:?}: {e:?}", c.id, c.source))
                 .to_leek_export_string();
-            let n: f64 = got.parse().unwrap_or_else(|_| {
-                panic!("{}: expected numeric export, got {:?}", c.id, got)
-            });
-            assert!(
-                (n - *value).abs() < *delta,
-                "{}: almost: got {n}",
-                c.id
-            );
+            let n: f64 = got
+                .parse()
+                .unwrap_or_else(|_| panic!("{}: expected numeric export, got {:?}", c.id, got));
+            assert!((n - *value).abs() < *delta, "{}: almost: got {n}", c.id);
         }
     }
 }

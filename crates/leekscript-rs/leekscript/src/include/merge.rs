@@ -13,7 +13,9 @@ use sipha::tree::ast::{AstNode, AstNodeExt};
 use crate::ast::{Root, Stmt};
 use crate::parse::LanguageOptions;
 
-use super::{IncludeLoadError, LoadedProject, LoadedSourceFile, ResolveError, load_project_with_includes};
+use super::{
+    IncludeLoadError, LoadedProject, LoadedSourceFile, ResolveError, load_project_with_includes,
+};
 
 /// Maps byte offsets in merged include output back to a concrete source file and offset.
 #[derive(Debug, Clone, Default)]
@@ -113,11 +115,7 @@ impl fmt::Display for PreludeBuildError {
             PreludeBuildError::IncludeLoad {
                 signature_entry,
                 source,
-            } => write!(
-                f,
-                "`--signatures` {}: {source}",
-                signature_entry.display()
-            ),
+            } => write!(f, "`--signatures` {}: {source}", signature_entry.display()),
             PreludeBuildError::Merge {
                 signature_entry,
                 source,
@@ -174,7 +172,8 @@ pub fn prepend_signatures_to_merged(
 
         let canon = fs::canonicalize(path).map_err(|e| PreludeBuildError::Io(path.clone(), e))?;
         let sig_root = canon.parent().unwrap_or_else(|| Path::new("/"));
-        let sig_root = fs::canonicalize(sig_root).map_err(|e| PreludeBuildError::Io(sig_root.to_path_buf(), e))?;
+        let sig_root = fs::canonicalize(sig_root)
+            .map_err(|e| PreludeBuildError::Io(sig_root.to_path_buf(), e))?;
 
         let project = load_project_with_includes(&sig_root, &canon, lang).map_err(|e| {
             PreludeBuildError::IncludeLoad {
@@ -183,10 +182,12 @@ pub fn prepend_signatures_to_merged(
             }
         })?;
 
-        let (text, mut chunk_map) = merge_included_sources_to_single_file_mapped(&sig_root, &project)
-            .map_err(|e| PreludeBuildError::Merge {
-                signature_entry: canon,
-                source: e,
+        let (text, mut chunk_map) =
+            merge_included_sources_to_single_file_mapped(&sig_root, &project).map_err(|e| {
+                PreludeBuildError::Merge {
+                    signature_entry: canon,
+                    source: e,
+                }
             })?;
 
         prelude.push_str(&text);
@@ -221,8 +222,9 @@ pub fn prepend_signatures_to_merged(
 fn merge_path_key(path: &Path) -> Result<PathBuf, MergeIncludesError> {
     match fs::canonicalize(path) {
         Ok(p) => Ok(p),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => std::path::absolute(path)
-            .map_err(|e2| MergeIncludesError::Io(path.to_path_buf(), e2)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            std::path::absolute(path).map_err(|e2| MergeIncludesError::Io(path.to_path_buf(), e2))
+        }
         Err(e) => Err(MergeIncludesError::Io(path.to_path_buf(), e)),
     }
 }

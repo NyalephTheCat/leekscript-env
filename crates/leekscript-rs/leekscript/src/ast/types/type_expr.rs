@@ -1,13 +1,13 @@
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 use sipha::prelude::*;
 use sipha::tree::ast::AstNode;
 
-/// Root of a full type from `ls_type` / `lambda_return_type` (`K::TypeExpr`).
+/// Root of a full type from `ls_type` / `lambda_return_type` (`Node::TypeExpr`).
 ///
 /// Structure: [`TypeExpr`] → [`TypeUnionType`] → one or more [`TypeNullableType`] (`T | U?`).
 /// Each nullable wraps [`TypePrimaryType`] (keyword, `ident`, or `Foo<…>`). See [`super::TypeNode`].
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::TypeExpr)]
+#[ast(kind = Node::TypeExpr)]
 pub struct TypeExpr(SyntaxNode);
 
 impl TypeExpr {
@@ -20,7 +20,7 @@ impl TypeExpr {
 
 /// `integer | real | …` — one or more [`TypeNullableType`] separated by `|`.
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::TypeUnionType)]
+#[ast(kind = Node::TypeUnionType)]
 pub struct TypeUnionType(SyntaxNode);
 
 impl TypeUnionType {
@@ -36,7 +36,7 @@ impl TypeUnionType {
 
 /// `T` or `T?`.
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::TypeNullableType)]
+#[ast(kind = Node::TypeNullableType)]
 pub struct TypeNullableType(SyntaxNode);
 
 impl TypeNullableType {
@@ -50,13 +50,13 @@ impl TypeNullableType {
     pub fn is_optional(&self) -> bool {
         self.syntax()
             .child_tokens()
-            .any(|t| t.kind_as::<K>() == Some(K::Question))
+            .any(|t| t.kind_as::<Lex>() == Some(Lex::Question))
     }
 }
 
 /// A single primary: builtin keyword, `ident`, or generic application (`Array<…>`, `Map<…,…>`, …).
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::TypePrimaryType)]
+#[ast(kind = Node::TypePrimaryType)]
 pub struct TypePrimaryType(SyntaxNode);
 
 impl TypePrimaryType {
@@ -65,7 +65,7 @@ impl TypePrimaryType {
     pub fn ident_text(&self) -> Option<String> {
         self.syntax()
             .child_tokens()
-            .find(|t| t.kind_as::<K>() == Some(K::Ident))
+            .find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
             .map(|t| t.text().to_string())
     }
 

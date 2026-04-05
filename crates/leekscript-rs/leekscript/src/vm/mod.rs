@@ -36,7 +36,7 @@ pub use compile::{
 };
 pub use error::VmError;
 pub use interpreter::{
-    NativeFn, OpHandler, Vm, DEFAULT_MAX_OPERATIONS, DEFAULT_MAX_RAM_QUADS, DISPATCH, op_illegal,
+    DEFAULT_MAX_OPERATIONS, DEFAULT_MAX_RAM_QUADS, DISPATCH, NativeFn, OpHandler, Vm, op_illegal,
 };
 pub use opcode::Opcode;
 pub use stdlib::{default_natives, native_id, stdlib_global_constant_init};

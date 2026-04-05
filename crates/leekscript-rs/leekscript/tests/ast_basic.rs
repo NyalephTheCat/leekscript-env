@@ -1,5 +1,5 @@
 use leekscript::ast::{BinaryExpr, Expr, IncludeStmt, Root, Stmt, TypeExpr};
-use leekscript::syntax::kinds::K;
+use leekscript::syntax::kinds::{Lex, Node};
 use leekscript::{LanguageOptions, Version, parse_doc};
 use sipha::tree::ast::{AstNode, AstNodeExt};
 use sipha::tree::red::SyntaxNode;
@@ -378,7 +378,7 @@ fn type_cst_union_and_type_node() {
         ty.syntax()
             .descendant_semantic_tokens()
             .iter()
-            .any(|t| t.kind_as::<K>() == Some(K::BitOr)),
+            .any(|t| t.kind_as::<Lex>() == Some(Lex::BitOr)),
         "expected `|` token under union return type"
     );
 
@@ -411,7 +411,7 @@ fn type_cst_union_and_type_node() {
     assert_eq!(inner.len(), 1);
 }
 
-/// First `->` / `=>` result `ls_type` (`K::TypeExpr`) under a class declaration.
+/// First `->` / `=>` result `ls_type` (`Node::TypeExpr`) under a class declaration.
 fn first_class_member_result_type(syntax: &sipha::tree::red::SyntaxNode) -> Option<TypeExpr> {
     first_type_expr_descendant(syntax)
 }
@@ -421,7 +421,7 @@ fn first_type_expr_descendant(syntax: &sipha::tree::red::SyntaxNode) -> Option<T
     use sipha::types::IntoSyntaxKind;
 
     syntax.descendant_nodes().find_map(|n| {
-        (n.kind() == K::TypeExpr.into_syntax_kind())
+        (n.kind() == Node::TypeExpr.into_syntax_kind())
             .then(|| TypeExpr::cast(n))
             .flatten()
     })
@@ -481,7 +481,7 @@ fn interval_literals_parse_like_java() {
         assert!(
             root.syntax()
                 .descendant_nodes()
-                .any(|n| n.kind_as::<K>() == Some(K::IntervalExpr)),
+                .any(|n| n.kind_as::<Node>() == Some(Node::IntervalExpr)),
             "expected IntervalExpr in {src:?}"
         );
     }

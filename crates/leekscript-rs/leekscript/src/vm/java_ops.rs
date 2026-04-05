@@ -5,48 +5,48 @@
 use sipha::prelude::AstNode;
 use sipha::tree::ast::AstNodeExt;
 use sipha::tree::red::{SyntaxElement, SyntaxNode};
-use sipha::types::{FromSyntaxKind, IntoSyntaxKind};
+use sipha::types::IntoSyntaxKind;
 
 use crate::ast::{
     BinaryExpr, CallExpr, Expr, IndexExpr, MemberExpr, ParenExpr, TernaryExpr, UnaryExpr,
 };
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 use crate::syntax::syntax_el_is_trivia;
 
 // `leekscript/runner/values/LeekValueType.java`
 const MUL_COST: u32 = 2;
 const DIV_COST: u32 = 5;
 const MOD_COST: u32 = 5;
-pub(crate) fn binary_op_kind(k: K) -> bool {
+pub(crate) fn binary_op_kind(k: Lex) -> bool {
     matches!(
         k,
-        K::Plus
-            | K::Minus
-            |         K::Star
-            | K::Slash
-            | K::Backslash
-            | K::Percent
-            | K::EqEq
-            | K::NotEq
-            | K::EqEqEq
-            | K::NotEqEq
-            | K::Lt
-            | K::Lte
-            | K::Gt
-            | K::Gte
-            | K::AndAnd
-            | K::OrOr
-            | K::XorKw
+        Lex::Plus
+            | Lex::Minus
+            | Lex::Star
+            | Lex::Slash
+            | Lex::Backslash
+            | Lex::Percent
+            | Lex::EqEq
+            | Lex::NotEq
+            | Lex::EqEqEq
+            | Lex::NotEqEq
+            | Lex::Lt
+            | Lex::Lte
+            | Lex::Gt
+            | Lex::Gte
+            | Lex::AndAnd
+            | Lex::OrOr
+            | Lex::XorKw
     )
 }
 
-pub(crate) fn first_binary_op_token(bin: &SyntaxNode) -> Option<K> {
+pub(crate) fn first_binary_op_token(bin: &SyntaxNode) -> Option<Lex> {
     for el in bin.children() {
         if syntax_el_is_trivia(&el) {
             continue;
         }
         if let SyntaxElement::Token(t) = &el {
-            if let Some(k) = K::from_syntax_kind(t.kind()) {
+            if let Some(k) = t.kind_as::<Lex>() {
                 if binary_op_kind(k) {
                     return Some(k);
                 }
@@ -66,7 +66,7 @@ pub(crate) fn suffix_after_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxElemen
         }
         if !after_op {
             if let SyntaxElement::Token(t) = &el {
-                if let Some(k) = K::from_syntax_kind(t.kind()) {
+                if let Some(k) = t.kind_as::<Lex>() {
                     if binary_op_kind(k) {
                         after_op = true;
                     }
@@ -87,7 +87,7 @@ pub(crate) fn prefix_before_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxEleme
             continue;
         }
         if let SyntaxElement::Token(t) = &el {
-            if let Some(k) = K::from_syntax_kind(t.kind()) {
+            if let Some(k) = t.kind_as::<Lex>() {
                 if binary_op_kind(k) {
                     break;
                 }
@@ -98,21 +98,21 @@ pub(crate) fn prefix_before_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxEleme
     out
 }
 
-fn bin_fragment_extra_cost(op: K) -> u32 {
+fn bin_fragment_extra_cost(op: Lex) -> u32 {
     match op {
-        K::Star => MUL_COST,
-        K::Slash | K::Backslash => DIV_COST,
-        K::Percent => MOD_COST,
-        K::AndAnd | K::OrOr => 0,
+        Lex::Star => MUL_COST,
+        Lex::Slash | Lex::Backslash => DIV_COST,
+        Lex::Percent => MOD_COST,
+        Lex::AndAnd | Lex::OrOr => 0,
         _ => 1,
     }
 }
 
 /// Extra operation cost for `+=` / `-=` / … (Java `LeekExpression` analyze for compound assign).
-pub(crate) fn compound_assign_bin_extra(assign_op: K) -> u32 {
+pub(crate) fn compound_assign_bin_extra(assign_op: Lex) -> u32 {
     match assign_op {
-        K::StarEq => MUL_COST,
-        K::SlashEq | K::PercentEq => MOD_COST,
+        Lex::StarEq => MUL_COST,
+        Lex::SlashEq | Lex::PercentEq => MOD_COST,
         _ => 1,
     }
 }
@@ -148,12 +148,12 @@ pub(crate) fn java_ops_expr_flat(parts: &[SyntaxElement]) -> u32 {
     if !BinaryExpr::can_cast(last.kind()) {
         return 1;
     }
-    let op = first_binary_op_token(last).unwrap_or(K::Plus);
+    let op = first_binary_op_token(last).unwrap_or(Lex::Plus);
     let lhs = &parts[..parts.len() - 1];
     let lhs_o = java_ops_expr_flat(lhs);
     let suff = suffix_after_first_binary_op(last);
     let rhs_o = java_ops_infix_suffix(&suff);
-    if matches!(op, K::AndAnd | K::OrOr) {
+    if matches!(op, Lex::AndAnd | Lex::OrOr) {
         return 0;
     }
     lhs_o + rhs_o + bin_fragment_extra_cost(op)
@@ -176,7 +176,7 @@ pub(crate) fn java_ops_infix_suffix(parts: &[SyntaxElement]) -> u32 {
     if !BinaryExpr::can_cast(last.kind()) {
         return 1;
     }
-    let op = first_binary_op_token(last).unwrap_or(K::Plus);
+    let op = first_binary_op_token(last).unwrap_or(Lex::Plus);
     let lhs = &parts[..parts.len() - 1];
     let lhs_o = match lhs {
         [SyntaxElement::Token(_)] => 0,
@@ -185,7 +185,7 @@ pub(crate) fn java_ops_infix_suffix(parts: &[SyntaxElement]) -> u32 {
     };
     let suff = suffix_after_first_binary_op(last);
     let rhs_o = java_ops_infix_suffix(&suff);
-    if matches!(op, K::AndAnd | K::OrOr) {
+    if matches!(op, Lex::AndAnd | Lex::OrOr) {
         return 0;
     }
     lhs_o + rhs_o + bin_fragment_extra_cost(op)
@@ -204,7 +204,7 @@ fn flatten_one_expr_layer(items: &[SyntaxElement]) -> Vec<SyntaxElement> {
     let mut out = Vec::new();
     for el in items {
         if let SyntaxElement::Node(node) = el {
-            if node.kind() == K::Expr.into_syntax_kind() {
+            if node.kind() == Node::Expr.into_syntax_kind() {
                 for c in node.children() {
                     if syntax_el_is_trivia(&c) {
                         continue;
@@ -224,8 +224,8 @@ fn java_ops_syntax(n: &SyntaxNode) -> u32 {
         if let Some(inner_e) = p.syntax().child::<Expr>() {
             return java_analyzed_ops(&inner_e);
         }
-        let lparen = K::LParen.into_syntax_kind();
-        let rparen = K::RParen.into_syntax_kind();
+        let lparen = Lex::LParen.into_syntax_kind();
+        let rparen = Lex::RParen.into_syntax_kind();
         let full: Vec<_> = p
             .syntax()
             .children()
@@ -254,11 +254,8 @@ fn java_ops_syntax(n: &SyntaxNode) -> u32 {
             }
         }
     }
-    if n.kind() == K::Expr.into_syntax_kind() {
-        let parts: Vec<_> = n
-            .children()
-            .filter(|e| !syntax_el_is_trivia(e))
-            .collect();
+    if n.kind() == Node::Expr.into_syntax_kind() {
+        let parts: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
         return java_ops_expr_flat(&parts);
     }
     if let Some(ix) = IndexExpr::cast(n.clone()) {
@@ -298,17 +295,14 @@ fn java_ops_syntax(n: &SyntaxNode) -> u32 {
         return c;
     }
     if BinaryExpr::can_cast(n.kind()) {
-        if matches!(
-            first_binary_op_token(n),
-            Some(K::AndAnd) | Some(K::OrOr)
-        ) {
+        if matches!(first_binary_op_token(n), Some(Lex::AndAnd) | Some(Lex::OrOr)) {
             return 0;
         }
         let lhs = prefix_before_first_binary_op(n);
         let lhs_o = java_ops_expr_flat(&lhs);
         let suff = suffix_after_first_binary_op(n);
         let rhs_o = java_ops_infix_suffix(&suff);
-        let op = first_binary_op_token(n).unwrap_or(K::Plus);
+        let op = first_binary_op_token(n).unwrap_or(Lex::Plus);
         return lhs_o + rhs_o + bin_fragment_extra_cost(op);
     }
     if crate::ast::ArrayExpr::can_cast(n.kind()) {
@@ -326,9 +320,9 @@ fn java_ops_syntax(n: &SyntaxNode) -> u32 {
 
 fn java_ops_unary(n: &SyntaxNode) -> u32 {
     let semantic: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
-    let minus = K::Minus.into_syntax_kind();
-    let bang = K::Bang.into_syntax_kind();
-    let not_kw = K::NotKw.into_syntax_kind();
+    let minus = Lex::Minus.into_syntax_kind();
+    let bang = Lex::Bang.into_syntax_kind();
+    let not_kw = Lex::NotKw.into_syntax_kind();
     let mut i = 0usize;
     let mut has_not = false;
     while i < semantic.len() {

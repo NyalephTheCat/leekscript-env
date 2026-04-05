@@ -1,16 +1,19 @@
-use crate::ast::binding_name::function_decl_name_token;
 use super::Block;
-use super::params::{FnParam, fn_param_children};
 use super::TemplateParams;
+use super::params::{FnParam, fn_param_children};
+use crate::ast::binding_name::function_decl_name_token;
 use crate::ast::expr::Expr;
 use crate::ast::types::TypeExpr;
-use crate::syntax::{ParsedDoxygen, attached_docstring, attached_parsed_doxygen, kinds::K};
+use crate::syntax::{
+    ParsedDoxygen, attached_docstring, attached_parsed_doxygen,
+    kinds::{Lex, Node},
+};
 use sipha::prelude::*;
 use sipha::tree::ast::AstNode;
 use sipha::tree::ast::AstNodeExt;
 use sipha::types::IntoSyntaxKind;
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::VarDecl)]
+#[ast(kind = Node::VarDecl)]
 pub struct VarDecl(SyntaxNode);
 
 impl VarDecl {
@@ -30,13 +33,13 @@ impl VarDecl {
     pub fn first_name(&self) -> Option<String> {
         self.syntax()
             .child_tokens()
-            .find(|t| t.kind() == K::Ident.into_syntax_kind())
+            .find(|t| t.kind() == Lex::Ident.into_syntax_kind())
             .map(|t| t.text().to_string())
     }
 }
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::FunctionDecl)]
+#[ast(kind = Node::FunctionDecl)]
 pub struct FunctionDecl(SyntaxNode);
 
 impl FunctionDecl {
@@ -65,7 +68,7 @@ impl FunctionDecl {
 
     /// Result type only when spelled with `->` / `=>` after `)` (not parameter types in `T name` form).
     pub fn return_type(&self) -> Option<TypeExpr> {
-        let arrow = K::Arrow.into_syntax_kind();
+        let arrow = Lex::Arrow.into_syntax_kind();
         let mut after_arrow = false;
         for el in self.syntax().children() {
             if crate::syntax::syntax_el_is_trivia(&el) {
@@ -102,9 +105,9 @@ impl FunctionDecl {
     }
 }
 
-/// Expression statement: `expr;` wrapped in `K::Stmt`.
+/// Expression statement: `expr;` wrapped in `Node::Stmt`.
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::Stmt)]
+#[ast(kind = Node::Stmt)]
 pub struct ExprStmt(SyntaxNode);
 
 impl ExprStmt {

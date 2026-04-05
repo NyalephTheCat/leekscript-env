@@ -234,7 +234,10 @@ impl Value {
 
     /// Java `MapLeekValue.mapMerge`: clone `base`, then append entries from `other` whose keys are absent.
     #[must_use]
-    pub fn map_merge_java(base: &[(Value, Value)], other: &[(Value, Value)]) -> Vec<(Value, Value)> {
+    pub fn map_merge_java(
+        base: &[(Value, Value)],
+        other: &[(Value, Value)],
+    ) -> Vec<(Value, Value)> {
         let mut out = base.to_vec();
         for (k, v) in other {
             if !out.iter().any(|(bk, _)| bk == k) {
@@ -583,10 +586,7 @@ fn object_field_key_export(k: &Value) -> String {
     }
 }
 
-fn format_object_brace_export(
-    o: &[(Value, Value)],
-    fmt_val: impl Fn(&Value) -> String,
-) -> String {
+fn format_object_brace_export(o: &[(Value, Value)], fmt_val: impl Fn(&Value) -> String) -> String {
     if o.is_empty() {
         return "{}".into();
     }

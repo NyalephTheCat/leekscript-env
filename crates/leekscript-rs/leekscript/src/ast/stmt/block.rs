@@ -1,11 +1,11 @@
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::AstNode;
 use sipha::prelude::*;
 use sipha::tree::ast::AstNodeExt;
 
-/// Braced statement list (`K::Block`).
+/// Braced statement list (`Node::Block`).
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::Block)]
+#[ast(kind = Node::Block)]
 pub struct Block(SyntaxNode);
 
 impl Block {

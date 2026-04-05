@@ -17,7 +17,12 @@ impl ParseError {
             Self::Sipha(ParseErrorInner::NoMatch(d)) => {
                 let idx = sipha::diagnostics::line_index::LineIndex::new(src.as_bytes());
                 let graph = crate::grammar::built_graph().as_graph();
-                d.format_with_source(src.as_bytes(), &idx, Some(&graph.literals), Some(&graph))
+                d.format_with_source_deduped_expected(
+                    src.as_bytes(),
+                    &idx,
+                    Some(&graph.literals),
+                    Some(&graph),
+                )
             }
             other => format!("{other:?}"),
         }

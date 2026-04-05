@@ -2,7 +2,8 @@
 
 use leekscript::{
     Version, load_project_with_includes, merge_included_sources_to_single_file,
-    merge_included_sources_to_single_file_mapped, parse_signature_doc, prepend_signatures_to_merged,
+    merge_included_sources_to_single_file_mapped, parse_signature_doc,
+    prepend_signatures_to_merged,
 };
 use std::path::Path;
 

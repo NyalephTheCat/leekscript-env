@@ -1,15 +1,15 @@
-//! Formal parameter nodes (`K::FnParam`) shared by function and method headers.
+//! Formal parameter nodes (`Node::FnParam`) shared by function and method headers.
 
-use crate::ast::binding_name::fn_param_binding_token;
 use crate::Span;
+use crate::ast::binding_name::fn_param_binding_token;
 use crate::ast::expr::Expr;
 use crate::ast::types::TypeExpr;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::prelude::*;
 use sipha::tree::ast::{AstNode, AstNodeExt};
 
 #[derive(Debug, Clone, sipha::AstNode)]
-#[ast(kind = K::FnParam)]
+#[ast(kind = Node::FnParam)]
 pub struct FnParam(SyntaxNode);
 
 impl FnParam {

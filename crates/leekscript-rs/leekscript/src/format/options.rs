@@ -69,7 +69,7 @@ pub struct FormatOptions {
     pub brace_style: BraceStyle,
     /// Blank lines between top-level statements (`0` = single newline only).
     pub blank_lines_between_top_level: usize,
-    /// Extra blank lines after a top-level [`crate::syntax::kinds::K::ClassDecl`] before the next
+    /// Extra blank lines after a top-level [`crate::syntax::kinds::Node::ClassDecl`] before the next
     /// top-level item (`0` = no extra beyond [`Self::blank_lines_between_top_level`]).
     pub blank_lines_after_class: usize,
     /// `if (` vs `if(` for `if`, `while`, `for`, `switch`, `catch`, etc.
@@ -96,7 +96,7 @@ pub struct FormatOptions {
     /// Extra blank lines between class members in a class body (`0` = single newline only).
     /// Consecutive **fields** (members without a `{ ... }` body) stay adjacent; this still applies
     /// between methods and between fields and methods.
-    /// The class `{ ... }` block is the direct child of [`crate::syntax::kinds::K::ClassDecl`].
+    /// The class `{ ... }` block is the direct child of [`crate::syntax::kinds::Node::ClassDecl`].
     pub blank_lines_between_class_members: usize,
     /// When non-zero, caps [`Self::blank_lines_between_block_statements`],
     /// [`Self::blank_lines_between_class_members`], and **source-preserved** blank lines between

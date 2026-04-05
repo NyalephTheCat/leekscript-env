@@ -10,7 +10,11 @@ use std::ops::ControlFlow;
 
 #[test]
 fn walk_counts_nodes_and_tokens() {
-    let doc = LeekDoc::parse("let a = 1; let b = 2;", LanguageOptions::v4_experimental_all()).expect("parse");
+    let doc = LeekDoc::parse(
+        "let a = 1; let b = 2;",
+        LanguageOptions::v4_experimental_all(),
+    )
+    .expect("parse");
     struct Count {
         nodes: usize,
         tokens: usize,
@@ -36,7 +40,8 @@ fn walk_counts_nodes_and_tokens() {
 
 #[test]
 fn typed_at_offset_finds_var_decl() {
-    let doc = LeekDoc::parse("let renamed = 0;", LanguageOptions::v4_experimental_all()).expect("parse");
+    let doc =
+        LeekDoc::parse("let renamed = 0;", LanguageOptions::v4_experimental_all()).expect("parse");
     let offset = doc.source_str().find("renamed").expect("renamed") as u32;
     let v: VarDecl = doc.typed_at_offset(offset).expect("VarDecl");
     assert_eq!(v.first_name(), Some("renamed".into()));
@@ -53,7 +58,8 @@ fn typed_at_offset_free_function_matches() {
 
 #[test]
 fn replace_span_reparses() {
-    let mut doc = LeekDoc::parse("let old = 1;", LanguageOptions::v4_experimental_all()).expect("parse");
+    let mut doc =
+        LeekDoc::parse("let old = 1;", LanguageOptions::v4_experimental_all()).expect("parse");
     let src = doc.source_str();
     let start = src.find("old").expect("old") as u32;
     let end = start + "old".len() as u32;
@@ -78,7 +84,8 @@ fn transform_noop_preserves_meaning() {
             None
         }
     }
-    let mut doc = LeekDoc::parse("let x = 1;", LanguageOptions::v4_experimental_all()).expect("parse");
+    let mut doc =
+        LeekDoc::parse("let x = 1;", LanguageOptions::v4_experimental_all()).expect("parse");
     doc.apply_transform(&mut Noop);
     let root = doc.root_ast().expect("root");
     let stmts: Vec<Stmt> = AstNodeExt::children::<Stmt>(root.syntax()).collect();

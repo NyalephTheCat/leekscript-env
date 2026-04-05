@@ -36,51 +36,52 @@
 //! [`vm`] is a table-driven stack VM (`opcode → handler` via [`vm::DISPATCH`]) for running a small
 //! LeekScript subset; the Java reference compiler targets the JVM instead. See [`vm::compile_chunk_v4`].
 //!
-//! ## Cargo features
+//! ## Grammar graph (`sipha`)
 //!
-//! - **`grammar-v4-only`**: Specializes lexer/parser bytecode for [`parse::Version::V4`] by
-//!   stripping older-dialect flag checks. Do not parse [`parse::Version::V1`]–[`parse::Version::V3`]
-//!   with this enabled. Experimental parse flags remain in the bytecode and are controlled via
-//!   [`parse::ExperimentalFeatures`] on [`parse::LanguageOptions`].
-
+//! The CST grammar lives in [`grammar`] and becomes a [`BuiltGraph`] via [`leekscript_build_grammar!`].
+//! Sipha’s `optimize_graph` pass runs inside [`GrammarBuilder::finish`](sipha::prelude::GrammarBuilder::finish).
+//! [`GRAMMAR_SOURCE_FINGERPRINT`] is fixed when this crate is **built** by Cargo (`build.rs` hashes sources).
+//!
 pub mod ast;
 pub mod document;
 pub mod format;
 pub mod grammar;
 pub mod include;
 pub mod parse;
-pub mod vm;
 #[cfg(feature = "walk")]
 pub mod scope;
 pub mod syntax;
 pub mod visit;
+pub mod vm;
 
 pub use document::{DocEditError, LeekDoc};
+pub use grammar::{COMPILE_TIME_GRAMMAR, GRule, GRAMMAR_SOURCE_FINGERPRINT};
 pub use include::{
     IncludeLimits, IncludeLoadError, LoadedProject, LoadedSourceFile, MergeIncludesError,
     MergedCheckPrepError, MergedCheckUnit, MergedSourceMapping, MergedSpanMap, PreludeBuildError,
-    ResolveError, infer_include_project_root, load_project_with_includes, load_project_with_includes_limited,
-    load_project_with_includes_limited_with_overlay,     merge_included_sources_to_single_file,
-    merge_included_sources_to_single_file_mapped, merge_included_sources_to_single_file_mapped_with_overlay,
-    prepare_merged_check_unit, prepend_signatures_to_merged,
-    resolve_include_path, try_resolve_include_file,
+    ResolveError, infer_include_project_root, load_project_with_includes,
+    load_project_with_includes_limited, load_project_with_includes_limited_with_overlay,
+    merge_included_sources_to_single_file, merge_included_sources_to_single_file_mapped,
+    merge_included_sources_to_single_file_mapped_with_overlay, prepare_merged_check_unit,
+    prepend_signatures_to_merged, resolve_include_path, try_resolve_include_file,
 };
-#[cfg(feature = "partial-reparse")]
-pub use parse::{parse_rule_at_offset, parse_rule_at_offset_with_built};
 pub use parse::{
-    ExperimentalFeatures, LanguageOptions, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, ParseError,
+    ExperimentalFeatures, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, LanguageOptions, ParseError,
     ParseErrorInner, ParsedWithRecovery, Version, is_signature_stub_path,
-    language_options_with_source_directives, parse_doc, parse_doc_or_recover, parse_doc_reusing_vec,
-    parse_doc_reusing_vec_with_built, parse_doc_with_built, parse_doc_with_recovery,
-    parse_doc_with_recovery_limited, parse_doc_with_recovery_limited_with_built,
-    parse_doc_with_recovery_with_built, parse_signature_doc, parse_signature_doc_reusing_vec,
+    language_options_with_source_directives, parse_doc, parse_doc_or_recover,
+    parse_doc_reusing_vec, parse_doc_reusing_vec_with_built, parse_doc_with_built,
+    parse_doc_with_recovery, parse_doc_with_recovery_limited,
+    parse_doc_with_recovery_limited_with_built, parse_doc_with_recovery_with_built,
+    parse_signature_doc, parse_signature_doc_reusing_vec,
     parse_signature_doc_reusing_vec_with_built, parse_signature_doc_with_built,
     parse_signature_doc_with_recovery, parse_signature_doc_with_recovery_limited,
     parse_signature_doc_with_recovery_limited_with_built,
     parse_signature_doc_with_recovery_with_built, parse_syntax_root,
 };
-pub use sipha::parse::builder::{BuiltGraph, SharedGrammar};
+#[cfg(feature = "partial-reparse")]
+pub use parse::{parse_rule_at_offset, parse_rule_at_offset_with_built};
 pub use sipha::diagnostics::parsed_doc::ParsedDoc;
+pub use sipha::parse::builder::{BuiltGraph, SharedGrammar};
 pub use sipha::types::{Pos, Span};
 
 #[cfg(feature = "walk")]

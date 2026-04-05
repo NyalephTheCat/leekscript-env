@@ -94,7 +94,8 @@ fn scan_apply_leading_leeklang(src: &str, opts: &mut LanguageOptions) {
                 end += 1;
             }
             let body = &bytes[i + 2..end];
-            if line_body_might_be_leeklang(body) || prefix_might_contain_non_ascii(body, body.len()) {
+            if line_body_might_be_leeklang(body) || prefix_might_contain_non_ascii(body, body.len())
+            {
                 if let Some(line) = src.get(start..end)
                     && let Some(body_str) = line.strip_prefix("//")
                 {
@@ -120,9 +121,8 @@ fn scan_apply_leading_leeklang(src: &str, opts: &mut LanguageOptions) {
             let inner = &bytes[start + 2..end];
             if line_body_might_be_leeklang(inner) || prefix_might_contain_non_ascii(inner, 256) {
                 if let Some(block) = src.get(start..block_end)
-                    && let Some(inner_str) = block
-                        .strip_prefix("/*")
-                        .and_then(|s| s.strip_suffix("*/"))
+                    && let Some(inner_str) =
+                        block.strip_prefix("/*").and_then(|s| s.strip_suffix("*/"))
                 {
                     let trimmed = inner_str.trim();
                     if let Some((rest, _file_wide)) = leeklang_directive_rest(trimmed) {
@@ -296,7 +296,10 @@ mod tests {
     #[test]
     fn bom_then_line_directive_version() {
         let src = "\u{FEFF}// leeklang: version=v2\nVAR x = 1\n";
-        let o = language_options_with_source_directives(src, LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE));
+        let o = language_options_with_source_directives(
+            src,
+            LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE),
+        );
         assert_eq!(o.version, Version::V2);
     }
 
@@ -311,14 +314,20 @@ mod tests {
     #[test]
     fn block_comment_directive() {
         let src = "/* leeklang: dialect=v3 */\nvar x = 1;\n";
-        let o = language_options_with_source_directives(src, LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE));
+        let o = language_options_with_source_directives(
+            src,
+            LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE),
+        );
         assert_eq!(o.version, Version::V3);
     }
 
     #[test]
     fn stops_at_first_non_comment() {
         let src = "// leeklang: version=v1\nnot_a_comment // leeklang: version=v4\n";
-        let o = language_options_with_source_directives(src, LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE));
+        let o = language_options_with_source_directives(
+            src,
+            LanguageOptions::new(Version::V4, ExperimentalFeatures::NONE),
+        );
         assert_eq!(o.version, Version::V1);
     }
 

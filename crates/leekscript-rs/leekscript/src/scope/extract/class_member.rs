@@ -1,14 +1,14 @@
 use crate::Span;
 use crate::ast::ClassMember;
 use crate::ast::types::TypeExpr;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Lex;
 use sipha::tree::ast::AstNode;
 use sipha::tree::red::SyntaxNode;
 
 use super::type_expr::leek_ty_from_type_expr_with_templates;
 use crate::scope::leek_ty::LeekTy;
 
-/// When the lexer emits a builtin type spelling as [`K::Ident`] (should not happen, but avoids
+/// When the lexer emits a builtin type spelling as [`Lex::Ident`] (should not happen, but avoids
 /// mis-extracting `cellId integer` as a field named `integer`).
 #[must_use]
 pub(crate) fn leek_ty_from_builtin_type_ident_text(s: &str) -> Option<LeekTy> {
@@ -23,24 +23,24 @@ pub(crate) fn leek_ty_from_builtin_type_ident_text(s: &str) -> Option<LeekTy> {
     })
 }
 
-fn leek_ty_from_type_name_keyword(k: K) -> Option<LeekTy> {
+fn leek_ty_from_type_name_keyword(k: Lex) -> Option<LeekTy> {
     Some(match k {
-        K::StringTypeKw => LeekTy::String,
-        K::IntegerKw | K::IntKw | K::ByteKw | K::ShortKw | K::LongKw => LeekTy::Integer,
-        K::RealKw | K::FloatKw | K::DoubleKw => LeekTy::Real,
-        K::BooleanKw => LeekTy::Boolean,
-        K::AnyKw => LeekTy::Any,
-        K::VoidKw => LeekTy::Void,
-        K::ClassTypeKw => LeekTy::Class("Class".to_string()),
-        K::ObjectKw => LeekTy::Class("Object".to_string()),
-        K::ArrayKw => LeekTy::Array(Box::new(LeekTy::Unknown)),
-        K::SetTypeKw => LeekTy::Array(Box::new(LeekTy::Unknown)),
-        K::MapKw => LeekTy::Map(Box::new(LeekTy::Unknown), Box::new(LeekTy::Unknown)),
-        K::FunctionTypeKw => LeekTy::Function {
+        Lex::StringTypeKw => LeekTy::String,
+        Lex::IntegerKw | Lex::IntKw | Lex::ByteKw | Lex::ShortKw | Lex::LongKw => LeekTy::Integer,
+        Lex::RealKw | Lex::FloatKw | Lex::DoubleKw => LeekTy::Real,
+        Lex::BooleanKw => LeekTy::Boolean,
+        Lex::AnyKw => LeekTy::Any,
+        Lex::VoidKw => LeekTy::Void,
+        Lex::ClassTypeKw => LeekTy::Class("Class".to_string()),
+        Lex::ObjectKw => LeekTy::Class("Object".to_string()),
+        Lex::ArrayKw => LeekTy::Array(Box::new(LeekTy::Unknown)),
+        Lex::SetTypeKw => LeekTy::Array(Box::new(LeekTy::Unknown)),
+        Lex::MapKw => LeekTy::Map(Box::new(LeekTy::Unknown), Box::new(LeekTy::Unknown)),
+        Lex::FunctionTypeKw => LeekTy::Function {
             params: vec![],
             ret: Box::new(LeekTy::Unknown),
         },
-        K::IntervalKw => LeekTy::Interval(Box::new(LeekTy::Unknown)),
+        Lex::IntervalKw => LeekTy::Interval(Box::new(LeekTy::Unknown)),
         _ => return None,
     })
 }
@@ -58,10 +58,8 @@ fn try_extract_name_first_field(
         .collect();
     let mut i = 0;
     while i < tokens.len() {
-        match tokens[i].kind_as::<K>() {
-            Some(
-                K::PrivateKw | K::PublicKw | K::ProtectedKw | K::StaticKw | K::FinalKw,
-            ) => i += 1,
+        match tokens[i].kind_as::<Lex>() {
+            Some(Lex::PrivateKw | Lex::PublicKw | Lex::ProtectedKw | Lex::StaticKw | Lex::FinalKw) => i += 1,
             _ => break,
         }
     }
@@ -70,23 +68,19 @@ fn try_extract_name_first_field(
     }
     let t0 = &tokens[i];
     let t1 = &tokens[i + 1];
-    if t0.kind_as::<K>() != Some(K::Ident) {
+    if t0.kind_as::<Lex>() != Some(Lex::Ident) {
         return None;
     }
-    if let Some(ty) = t1.kind_as::<K>().and_then(leek_ty_from_type_name_keyword) {
+    if let Some(ty) = t1.kind_as::<Lex>().and_then(leek_ty_from_type_name_keyword) {
         return Some((t0.text().to_string(), t0.text_range(), ty));
     }
-    if t1.kind_as::<K>() == Some(K::Ident) {
+    if t1.kind_as::<Lex>() == Some(Lex::Ident) {
         if let Some(ty) = leek_ty_from_builtin_type_ident_text(t1.text()) {
             return Some((t0.text().to_string(), t0.text_range(), ty));
         }
         // `Cell id`, `Entity target` — user type (leading ident) then field name.
         let type_name = t0.text();
-        if type_name
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_uppercase())
-        {
+        if type_name.chars().next().is_some_and(|c| c.is_uppercase()) {
             let ty = if class_templates.iter().any(|n| n == type_name) {
                 LeekTy::TypeParam(type_name.to_string())
             } else {
@@ -110,12 +104,8 @@ fn try_extract_type_first_field(
         .syntax()
         .descendant_semantic_tokens()
         .into_iter()
-        .find(|t| t.offset() >= type_end && t.kind_as::<K>() == Some(K::Ident))?;
-    Some((
-        name_tok.text().to_string(),
-        name_tok.text_range(),
-        ty,
-    ))
+        .find(|t| t.offset() >= type_end && t.kind_as::<Lex>() == Some(Lex::Ident))?;
+    Some((name_tok.text().to_string(), name_tok.text_range(), ty))
 }
 
 /// Method or constructor body member (`foo() {}`, `constructor() {}`).
@@ -175,8 +165,7 @@ pub fn try_extract_class_field(
         .syntax()
         .descendant_tokens()
         .into_iter()
-        .filter(|t| t.kind_as::<K>() == Some(K::Ident))
+        .filter(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
         .last()?;
     Some((name_tok.text().to_string(), name_tok.text_range(), ty))
 }
-

@@ -4,7 +4,7 @@ use sipha::tree::red::{SyntaxElement, SyntaxNode, SyntaxToken};
 
 use crate::parse::Version;
 use crate::scope::model::{SemanticCode, SemanticDiagnostic, SemanticSeverity, SymbolKind};
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 
 use super::analyzer::Analyzer;
 use super::phase::AnalysisPhase;
@@ -24,12 +24,12 @@ impl Analyzer {
 
     /// `===` / `!==` — deprecated for LS 4+ (`LeekExpression.java` in leekscript-java).
     fn check_strict_equality_deprecated(&mut self, node: &SyntaxNode) {
-        if !self.ls4_or_later() || node.kind_as::<K>() != Some(K::BinaryExpr) {
+        if !self.ls4_or_later() || node.kind_as::<Node>() != Some(Node::BinaryExpr) {
             return;
         }
         for t in node.non_trivia_tokens() {
-            let k = t.kind_as::<K>();
-            if !matches!(k, Some(K::EqEqEq | K::NotEqEq)) {
+            let k = t.kind_as::<Lex>();
+            if !matches!(k, Some(Lex::EqEqEq | Lex::NotEqEq)) {
                 continue;
             }
             let op = t.text();
@@ -45,7 +45,7 @@ impl Analyzer {
     }
 
     fn check_deprecated_call(&mut self, node: &SyntaxNode) {
-        if node.kind_as::<K>() != Some(K::CallExpr) {
+        if node.kind_as::<Node>() != Some(Node::CallExpr) {
             return;
         }
         if call_expr_starts_with_eval_kw(node) {
@@ -98,8 +98,8 @@ impl Analyzer {
 fn call_expr_starts_with_eval_kw(call: &SyntaxNode) -> bool {
     call.non_trivia_tokens()
         .next()
-        .and_then(|t| t.kind_as::<K>())
-        == Some(K::EvalKw)
+        .and_then(|t| t.kind_as::<Lex>())
+        == Some(Lex::EvalKw)
 }
 
 /// Direct call `name(...)` or parenthesized `(name)(...)` with a single identifier in the callee.
@@ -119,12 +119,12 @@ fn callee_ident_token_for_call(call: &SyntaxNode, parent: &SyntaxNode) -> Option
         return None;
     }
     match &children[idx - 1] {
-        SyntaxElement::Token(t) if t.kind_as::<K>() == Some(K::Ident) => Some(t.clone()),
+        SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::Ident) => Some(t.clone()),
         SyntaxElement::Node(n) => {
             let idents: Vec<SyntaxToken> = n
                 .descendant_semantic_tokens()
                 .into_iter()
-                .filter(|t| t.kind_as::<K>() == Some(K::Ident))
+                .filter(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
                 .collect();
             if idents.len() == 1 {
                 Some(idents[0].clone())

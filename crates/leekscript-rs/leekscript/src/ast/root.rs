@@ -1,7 +1,7 @@
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::AstNode;
 use sipha::prelude::*;
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::Root)]
+#[ast(kind = Node::Root)]
 pub struct Root(SyntaxNode);

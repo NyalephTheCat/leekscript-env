@@ -11,54 +11,54 @@ pub use nodes::{
 };
 pub use root::ExprRoot;
 
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::AstEnum;
 
-/// Any expression CST node: the `expr` rule root (`K::Expr`) or a nested expression shape.
+/// Any expression CST node: the `expr` rule root (`Node::Expr`) or a nested expression shape.
 #[derive(Debug, Clone, AstEnum)]
 pub enum Expr {
-    #[ast(kind = K::Expr)]
+    #[ast(kind = Node::Expr)]
     Root(ExprRoot),
-    #[ast(kind = K::BinaryExpr)]
+    #[ast(kind = Node::BinaryExpr)]
     Binary(BinaryExpr),
-    #[ast(kind = K::UnaryExpr)]
+    #[ast(kind = Node::UnaryExpr)]
     Unary(UnaryExpr),
-    #[ast(kind = K::TernaryExpr)]
+    #[ast(kind = Node::TernaryExpr)]
     Ternary(TernaryExpr),
-    #[ast(kind = K::CastExpr)]
+    #[ast(kind = Node::CastExpr)]
     Cast(CastExpr),
-    #[ast(kind = K::CallExpr)]
+    #[ast(kind = Node::CallExpr)]
     Call(CallExpr),
-    #[ast(kind = K::IndexExpr)]
+    #[ast(kind = Node::IndexExpr)]
     Index(IndexExpr),
-    #[ast(kind = K::MemberExpr)]
+    #[ast(kind = Node::MemberExpr)]
     Member(MemberExpr),
-    #[ast(kind = K::ParenExpr)]
+    #[ast(kind = Node::ParenExpr)]
     Paren(ParenExpr),
-    #[ast(kind = K::LambdaExpr)]
+    #[ast(kind = Node::LambdaExpr)]
     Lambda(LambdaExpr),
-    #[ast(kind = K::BracketMapExpr)]
+    #[ast(kind = Node::BracketMapExpr)]
     BracketMap(BracketMapExpr),
-    #[ast(kind = K::ArrayExpr)]
+    #[ast(kind = Node::ArrayExpr)]
     Array(ArrayExpr),
-    #[ast(kind = K::ObjectExpr)]
+    #[ast(kind = Node::ObjectExpr)]
     Object(ObjectExpr),
-    #[ast(kind = K::SetExpr)]
+    #[ast(kind = Node::SetExpr)]
     Set(SetExpr),
-    #[ast(kind = K::IntervalExpr)]
+    #[ast(kind = Node::IntervalExpr)]
     Interval(IntervalExpr),
-    #[ast(kind = K::AnonFunctionExpr)]
+    #[ast(kind = Node::AnonFunctionExpr)]
     AnonFunction(AnonFunctionExpr),
-    #[ast(kind = K::IfExpr)]
+    #[ast(kind = Node::IfExpr)]
     If(IfExpr),
-    #[ast(kind = K::NewExpr)]
+    #[ast(kind = Node::NewExpr)]
     New(NewExpr),
-    #[ast(kind = K::SuperExpr)]
+    #[ast(kind = Node::SuperExpr)]
     Super(SuperExpr),
-    #[ast(kind = K::ClassRefExpr)]
+    #[ast(kind = Node::ClassRefExpr)]
     ClassRef(ClassRefExpr),
-    #[ast(kind = K::BuiltinTypeNameExpr)]
+    #[ast(kind = Node::BuiltinTypeNameExpr)]
     BuiltinTypeName(BuiltinTypeNameExpr),
-    #[ast(kind = K::BuiltinStringifyExpr)]
+    #[ast(kind = Node::BuiltinStringifyExpr)]
     BuiltinStringify(BuiltinStringifyExpr),
 }

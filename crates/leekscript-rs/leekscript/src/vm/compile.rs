@@ -26,20 +26,19 @@ use sipha::tree::ast::{AstNode, AstNodeExt, AstToken};
 use sipha::tree::red::{SyntaxElement, SyntaxNode, SyntaxToken};
 use sipha::types::{FromSyntaxKind, IntoSyntaxKind};
 
-use crate::ast::{
-    ArrayExpr, BinaryExpr, BracketMapExpr, CallExpr, CatchClause, ClassDecl, ClassMember, ConstDecl,
-    DoWhileStmt, Expr, ForStmt, ForeachStmt, FunctionDecl, GlobalDecl, IfStmt, IndexExpr,
-    NewExpr, ObjectExpr,
-    IntervalExpr, LitStr, MemberExpr, ParenExpr, Root, Stmt, StmtBlock,
-    SwitchStmt, TernaryExpr, ThrowStmt, TryStmt, UnaryExpr, VarDecl, WhileStmt,
-};
 use crate::ast::types::TypeExpr;
+use crate::ast::{
+    ArrayExpr, BinaryExpr, BracketMapExpr, CallExpr, CatchClause, ClassDecl, ClassMember,
+    ConstDecl, DoWhileStmt, Expr, ForStmt, ForeachStmt, FunctionDecl, GlobalDecl, IfStmt,
+    IndexExpr, IntervalExpr, LitStr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, Root, Stmt,
+    StmtBlock, SwitchStmt, TernaryExpr, ThrowStmt, TryStmt, UnaryExpr, VarDecl, WhileStmt,
+};
 use crate::include;
 use crate::parse::{
-    ExperimentalFeatures, LanguageOptions, ParseError, Version, language_options_with_source_directives,
-    parse_doc,
+    ExperimentalFeatures, LanguageOptions, ParseError, Version,
+    language_options_with_source_directives, parse_doc,
 };
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 use crate::syntax::syntax_el_is_trivia;
 
 use super::bytecode::{Bytecode, BytecodeBuilder};
@@ -138,9 +137,8 @@ fn vm_parse_options() -> LanguageOptions {
 /// `catch` / `throw` ([`ExperimentalFeatures::exceptions`](crate::parse::ExperimentalFeatures::exceptions)).
 pub fn compile_chunk_v4(source: &str) -> Result<CompiledChunk, CompileError> {
     let doc = parse_doc(source, vm_parse_options())?;
-    let root = Root::cast(doc.root().clone()).ok_or(CompileError::Unsupported(
-        "parse tree root is not K::Root",
-    ))?;
+    let root = Root::cast(doc.root().clone())
+        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"))?;
     compile_root(root)
 }
 
@@ -151,15 +149,14 @@ pub fn compile_chunk_v4_with_includes(
     entry: &Path,
 ) -> Result<CompiledChunk, CompileChunkError> {
     let lang = vm_parse_options();
-    let project =
-        include::load_project_with_includes(project_root, entry, lang).map_err(CompileChunkError::Load)?;
+    let project = include::load_project_with_includes(project_root, entry, lang)
+        .map_err(CompileChunkError::Load)?;
     let merged = include::merge_included_sources_to_single_file(project_root, &project)
         .map_err(CompileChunkError::Merge)?;
     let resolved = language_options_with_source_directives(&merged, lang);
     let doc = parse_doc(&merged, resolved).map_err(|e| CompileChunkError::Compile(e.into()))?;
-    let root = Root::cast(doc.root().clone()).ok_or(CompileError::Unsupported(
-        "parse tree root is not K::Root",
-    ));
+    let root = Root::cast(doc.root().clone())
+        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"));
     let root = root.map_err(CompileChunkError::Compile)?;
     compile_root(root).map_err(CompileChunkError::Compile)
 }
@@ -209,10 +206,10 @@ fn foreach_binding_idents(fe: &ForeachStmt) -> Vec<String> {
         if syntax_el_is_trivia(&SyntaxElement::Token(t.clone())) {
             continue;
         }
-        match K::from_syntax_kind(t.kind()) {
-            Some(K::ForKw) => after_for = true,
-            Some(K::InKw) => break,
-            Some(K::Ident) if after_for => out.push(t.text().to_string()),
+        match Lex::from_syntax_kind(t.kind()) {
+            Some(Lex::ForKw) => after_for = true,
+            Some(Lex::InKw) => break,
+            Some(Lex::Ident) if after_for => out.push(t.text().to_string()),
             _ => {}
         }
     }
@@ -241,7 +238,7 @@ enum BreakScope {
     },
 }
 
-/// Elements between `(` and `)` in a [`K::ParenExpr`] (excluding the bracket tokens).
+/// Elements between `(` and `)` in a [`Node::ParenExpr`] (excluding the bracket tokens).
 ///
 /// Direct children may include trivia wrappers before `(`; scan for the first `(` / last `)`.
 fn paren_expr_inner_elements(paren: &SyntaxNode) -> Result<Vec<SyntaxElement>, CompileError> {
@@ -249,8 +246,8 @@ fn paren_expr_inner_elements(paren: &SyntaxNode) -> Result<Vec<SyntaxElement>, C
         .children()
         .filter(|e| !syntax_el_is_trivia(e))
         .collect();
-    let lparen = K::LParen.into_syntax_kind();
-    let rparen = K::RParen.into_syntax_kind();
+    let lparen = Lex::LParen.into_syntax_kind();
+    let rparen = Lex::RParen.into_syntax_kind();
     let open_idx = full
         .iter()
         .position(|e| matches!(e, SyntaxElement::Token(t) if t.kind() == lparen))
@@ -265,13 +262,13 @@ fn paren_expr_inner_elements(paren: &SyntaxNode) -> Result<Vec<SyntaxElement>, C
     Ok(full[open_idx + 1..close_idx].to_vec())
 }
 
-/// Sipha may place `K::BinaryExpr` siblings next to an inner `K::Expr` under parentheses; peel one
-/// `K::Expr` layer so infix-chain lowering sees `[lhs, BinaryExpr, …]`.
+/// Sipha may place `Node::BinaryExpr` siblings next to an inner `Node::Expr` under parentheses; peel one
+/// `Node::Expr` layer so infix-chain lowering sees `[lhs, BinaryExpr, …]`.
 fn flatten_one_expr_layer(items: &[SyntaxElement]) -> Vec<SyntaxElement> {
     let mut out = Vec::new();
     for el in items {
         if let SyntaxElement::Node(node) = el {
-            if node.kind() == K::Expr.into_syntax_kind() {
+            if node.kind() == Node::Expr.into_syntax_kind() {
                 for c in node.children() {
                     if syntax_el_is_trivia(&c) {
                         continue;
@@ -286,7 +283,7 @@ fn flatten_one_expr_layer(items: &[SyntaxElement]) -> Vec<SyntaxElement> {
     out
 }
 
-/// If `semantic` is the non-trivia children of a `K::ArrayExpr`, detect map literal
+/// If `semantic` is the non-trivia children of a `Node::ArrayExpr`, detect map literal
 /// shapes `[:]` or `[key: BracketMapExpr…]` and return key/value pairs in source order.
 fn try_extract_map_literal_pairs(
     semantic: &[SyntaxElement],
@@ -296,8 +293,8 @@ fn try_extract_map_literal_pairs(
     }
     match (&semantic[0], semantic.last()) {
         (SyntaxElement::Token(lb), Some(SyntaxElement::Token(rb))) => {
-            if lb.kind() != K::LBracket.into_syntax_kind()
-                || rb.kind() != K::RBracket.into_syntax_kind()
+            if lb.kind() != Lex::LBracket.into_syntax_kind()
+                || rb.kind() != Lex::RBracket.into_syntax_kind()
             {
                 return Ok(None);
             }
@@ -320,12 +317,12 @@ fn try_extract_map_literal_pairs(
     }
 
     // `[key: value, …]` — the grammar emits `EXPR` then `COLON` then `BRACKET_MAP_EXPR` under
-    // `K::ArrayExpr` (see `bracket_list_or_map_inner`).
+    // `Node::ArrayExpr` (see `bracket_list_or_map_inner`).
     if inner.len() >= 3 {
         if let (SyntaxElement::Node(nk), SyntaxElement::Token(col), SyntaxElement::Node(nb)) =
             (&inner[0], &inner[1], &inner[2])
         {
-            if col.kind() == K::Colon.into_syntax_kind() {
+            if col.kind() == Lex::Colon.into_syntax_kind() {
                 let key = Expr::cast(nk.clone());
                 let bracket = BracketMapExpr::cast(nb.clone());
                 if let (Some(k), Some(b)) = (key, bracket) {
@@ -354,15 +351,12 @@ fn try_extract_map_literal_pairs(
 
 /// `for (… ident = …)` — name token immediately before `=` in the header.
 fn ident_before_eq_in_for_header(syn: &SyntaxNode) -> Option<String> {
-    let v: Vec<_> = syn
-        .children()
-        .filter(|e| !syntax_el_is_trivia(e))
-        .collect();
+    let v: Vec<_> = syn.children().filter(|e| !syntax_el_is_trivia(e)).collect();
     for i in 1..v.len() {
         if let SyntaxElement::Token(t) = &v[i] {
-            if t.kind() == K::Eq.into_syntax_kind() {
+            if t.kind() == Lex::Eq.into_syntax_kind() {
                 if let SyntaxElement::Token(prev) = &v[i - 1] {
-                    if prev.kind() == K::Ident.into_syntax_kind() {
+                    if prev.kind() == Lex::Ident.into_syntax_kind() {
                         return Some(prev.text().to_string());
                     }
                 }
@@ -375,11 +369,11 @@ fn ident_before_eq_in_for_header(syn: &SyntaxNode) -> Option<String> {
 
 /// `ident` or `Array` keyword as a simple name (prelude / locals).
 fn token_as_plain_local_name(t: &SyntaxToken) -> Option<String> {
-    if t.kind() == K::Ident.into_syntax_kind() {
+    if t.kind() == Lex::Ident.into_syntax_kind() {
         Some(t.text().to_string())
-    } else if t.kind() == K::ArrayKw.into_syntax_kind() {
+    } else if t.kind() == Lex::ArrayKw.into_syntax_kind() {
         Some("Array".to_string())
-    } else if t.kind() == K::StringTypeKw.into_syntax_kind() {
+    } else if t.kind() == Lex::StringTypeKw.into_syntax_kind() {
         Some("string".to_string())
     } else {
         None
@@ -402,13 +396,12 @@ fn expr_element_as_plain_ident(el: &SyntaxElement) -> Option<String> {
 
 fn expr_plain_ident_from_expr(e: &Expr) -> Option<String> {
     let syn = e.syntax();
-    let ch: Vec<_> = syn
-        .children()
-        .filter(|x| !syntax_el_is_trivia(x))
-        .collect();
+    let ch: Vec<_> = syn.children().filter(|x| !syntax_el_is_trivia(x)).collect();
     match ch.as_slice() {
         [SyntaxElement::Token(t)] => token_as_plain_local_name(t),
-        [SyntaxElement::Node(n)] => Expr::cast(n.clone()).and_then(|e| expr_plain_ident_from_expr(&e)),
+        [SyntaxElement::Node(n)] => {
+            Expr::cast(n.clone()).and_then(|e| expr_plain_ident_from_expr(&e))
+        }
         _ => None,
     }
 }
@@ -421,7 +414,7 @@ fn index_expr_single_key_expr(ix: &IndexExpr) -> Option<Expr> {
             continue;
         }
         if let SyntaxElement::Token(t) = &el {
-            if t.kind() == K::Colon.into_syntax_kind() {
+            if t.kind() == Lex::Colon.into_syntax_kind() {
                 return None;
             }
         }
@@ -448,7 +441,7 @@ fn flatten_assign_lhs_for_index_store(lhs: &[SyntaxElement]) -> Option<Vec<Synta
     let SyntaxElement::Node(n) = &lhs[0] else {
         return None;
     };
-    if n.kind() == K::Expr.into_syntax_kind() {
+    if n.kind() == Node::Expr.into_syntax_kind() {
         let ch: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
         return flatten_assign_lhs_for_index_store(&ch);
     }
@@ -470,7 +463,7 @@ fn try_index_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, 
     let SyntaxElement::Token(eq_t) = &parts[parts.len() - 2] else {
         return None;
     };
-    if eq_t.kind() != K::Eq.into_syntax_kind() {
+    if eq_t.kind() != Lex::Eq.into_syntax_kind() {
         return None;
     }
     let SyntaxElement::Node(rhs_n) = parts.last()? else {
@@ -502,7 +495,7 @@ fn try_simple_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String,
     let SyntaxElement::Token(t) = &parts[1] else {
         return None;
     };
-    if t.kind() != K::Eq.into_syntax_kind() {
+    if t.kind() != Lex::Eq.into_syntax_kind() {
         return None;
     }
     let SyntaxElement::Node(rhs_n) = &parts[2] else {
@@ -513,26 +506,26 @@ fn try_simple_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String,
     Some((name, rhs))
 }
 
-fn compound_assign_binop(k: K) -> Option<K> {
+fn compound_assign_binop(k: Lex) -> Option<Lex> {
     match k {
-        K::PlusEq => Some(K::Plus),
-        K::MinusEq => Some(K::Minus),
-        K::StarEq => Some(K::Star),
-        K::SlashEq => Some(K::Slash),
-        K::PercentEq => Some(K::Percent),
+        Lex::PlusEq => Some(Lex::Plus),
+        Lex::MinusEq => Some(Lex::Minus),
+        Lex::StarEq => Some(Lex::Star),
+        Lex::SlashEq => Some(Lex::Slash),
+        Lex::PercentEq => Some(Lex::Percent),
         _ => None,
     }
 }
 
 /// Plain `ident += rhs` (and related); same shape as [`try_simple_assign_from_expr_parts`].
-fn try_compound_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, K, Expr)> {
+fn try_compound_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, Lex, Expr)> {
     if parts.len() != 3 {
         return None;
     }
     let SyntaxElement::Token(t) = &parts[1] else {
         return None;
     };
-    let Some(assign_k) = K::from_syntax_kind(t.kind()) else {
+    let Some(assign_k) = Lex::from_syntax_kind(t.kind()) else {
         return None;
     };
     compound_assign_binop(assign_k)?;
@@ -554,9 +547,7 @@ enum LoopTail {
     WhileStyle,
     /// `for (; …; step)`: `continue` runs `step` (if any) before the condition; `step == None` is
     /// an empty step (same PCs as before).
-    ForStyle {
-        step: Option<Expr>,
-    },
+    ForStyle { step: Option<Expr> },
 }
 
 impl CompileCtx {
@@ -585,7 +576,7 @@ impl CompileCtx {
 
     fn push_literal_token(&mut self, t: &SyntaxToken) -> Result<bool, CompileError> {
         let kind = t.kind();
-        if kind == K::Number.into_syntax_kind() {
+        if kind == Lex::Number.into_syntax_kind() {
             let text = t.text();
             let compact: String = text.chars().filter(|c| *c != '_').collect();
             let x = compact
@@ -596,22 +587,21 @@ impl CompileCtx {
             self.builder.emit_push_const(Value::Number(nb));
             return Ok(true);
         }
-        if kind == K::TrueKw.into_syntax_kind() {
+        if kind == Lex::TrueKw.into_syntax_kind() {
             self.builder.emit_push_const(Value::Bool(true));
             return Ok(true);
         }
-        if kind == K::FalseKw.into_syntax_kind() {
+        if kind == Lex::FalseKw.into_syntax_kind() {
             self.builder.emit_push_const(Value::Bool(false));
             return Ok(true);
         }
-        if kind == K::NullKw.into_syntax_kind() {
+        if kind == Lex::NullKw.into_syntax_kind() {
             self.builder.emit_opcode(Opcode::PushNull);
             return Ok(true);
         }
-        if kind == K::String.into_syntax_kind() {
+        if kind == Lex::String.into_syntax_kind() {
             let lit = LitStr::cast(t.clone()).ok_or(CompileError::Unsupported("string literal"))?;
-            self.builder
-                .emit_push_const(Value::String(lit.value()));
+            self.builder.emit_push_const(Value::String(lit.value()));
             return Ok(true);
         }
         Ok(false)
@@ -743,7 +733,9 @@ impl CompileCtx {
         }
         let catches: Vec<CatchClause> = t.catch_clauses().collect();
         if catches.len() != 1 {
-            return Err(CompileError::Unsupported("try/catch: need exactly one catch"));
+            return Err(CompileError::Unsupported(
+                "try/catch: need exactly one catch",
+            ));
         }
         let catch = &catches[0];
         let param = catch
@@ -772,10 +764,8 @@ impl CompileCtx {
             self.compile_stmt(s)?;
         }
         let merge = self.builder.len();
-        self.builder.patch_i32_operand_at(
-            j_skip_catch,
-            merge as i32 - (j_skip_catch + 4) as i32,
-        );
+        self.builder
+            .patch_i32_operand_at(j_skip_catch, merge as i32 - (j_skip_catch + 4) as i32);
         Ok(())
     }
 
@@ -840,10 +830,8 @@ impl CompileCtx {
         self.next_local = saved_water.max(slot_base.saturating_add(slot_count));
 
         let after_fn = self.builder.len();
-        self.builder.patch_i32_operand_at(
-            j_skip,
-            after_fn as i32 - (j_skip + 4) as i32,
-        );
+        self.builder
+            .patch_i32_operand_at(j_skip, after_fn as i32 - (j_skip + 4) as i32);
         Ok(())
     }
 
@@ -881,10 +869,8 @@ impl CompileCtx {
                 continue;
             }
             for off in to_next_arm.drain(..) {
-                self.builder.patch_i32_operand_at(
-                    off,
-                    self.builder.len() as i32 - (off + 4) as i32,
-                );
+                self.builder
+                    .patch_i32_operand_at(off, self.builder.len() as i32 - (off + 4) as i32);
             }
 
             let cases: Vec<_> = arm.case_exprs().collect();
@@ -892,10 +878,8 @@ impl CompileCtx {
             let mut hits: Vec<usize> = Vec::new();
             for ce in &cases {
                 if let Some(pf) = prev_false.take() {
-                    self.builder.patch_i32_operand_at(
-                        pf,
-                        self.builder.len() as i32 - (pf + 4) as i32,
-                    );
+                    self.builder
+                        .patch_i32_operand_at(pf, self.builder.len() as i32 - (pf + 4) as i32);
                 }
                 self.builder.emit_opcode(Opcode::GetLocal);
                 self.builder.emit_u16_operand(tmp_slot);
@@ -905,10 +889,8 @@ impl CompileCtx {
                 hits.push(self.builder.emit_jump_placeholder());
             }
             if let Some(pf) = prev_false {
-                self.builder.patch_i32_operand_at(
-                    pf,
-                    self.builder.len() as i32 - (pf + 4) as i32,
-                );
+                self.builder
+                    .patch_i32_operand_at(pf, self.builder.len() as i32 - (pf + 4) as i32);
             }
             to_next_arm.push(self.builder.emit_jump_placeholder());
 
@@ -924,10 +906,8 @@ impl CompileCtx {
         }
 
         for off in to_next_arm.drain(..) {
-            self.builder.patch_i32_operand_at(
-                off,
-                self.builder.len() as i32 - (off + 4) as i32,
-            );
+            self.builder
+                .patch_i32_operand_at(off, self.builder.len() as i32 - (off + 4) as i32);
         }
 
         if let Some(dix) = default_ix {
@@ -939,10 +919,8 @@ impl CompileCtx {
 
         let merge_pc = self.builder.len();
         for off in to_merge {
-            self.builder.patch_i32_operand_at(
-                off,
-                merge_pc as i32 - (off + 4) as i32,
-            );
+            self.builder
+                .patch_i32_operand_at(off, merge_pc as i32 - (off + 4) as i32);
         }
 
         let break_fixups = match self.break_scopes.pop() {
@@ -950,19 +928,18 @@ impl CompileCtx {
             _ => panic!("switch scope"),
         };
         for off in break_fixups {
-            self.builder.patch_i32_operand_at(
-                off,
-                merge_pc as i32 - (off + 4) as i32,
-            );
+            self.builder
+                .patch_i32_operand_at(off, merge_pc as i32 - (off + 4) as i32);
         }
         Ok(())
     }
 
     fn compile_break_stmt(&mut self) -> Result<(), CompileError> {
         self.builder.emit_charge_ops(1);
-        let scope = self.break_scopes.last_mut().ok_or(CompileError::Unsupported(
-            "break outside switch or loop",
-        ))?;
+        let scope = self
+            .break_scopes
+            .last_mut()
+            .ok_or(CompileError::Unsupported("break outside switch or loop"))?;
         let off = self.builder.emit_jump_placeholder();
         match scope {
             BreakScope::Loop { break_fixups, .. } | BreakScope::Switch { break_fixups } => {
@@ -975,7 +952,10 @@ impl CompileCtx {
     fn compile_continue_stmt(&mut self) -> Result<(), CompileError> {
         self.builder.emit_charge_ops(1);
         for scope in self.break_scopes.iter_mut().rev() {
-            if let BreakScope::Loop { continue_fixups, .. } = scope {
+            if let BreakScope::Loop {
+                continue_fixups, ..
+            } = scope
+            {
                 let off = self.builder.emit_jump_placeholder();
                 continue_fixups.push(off);
                 return Ok(());
@@ -986,12 +966,13 @@ impl CompileCtx {
 
     fn patch_continue_fixups(&mut self, target_pc: usize) {
         for scope in self.break_scopes.iter_mut().rev() {
-            if let BreakScope::Loop { continue_fixups, .. } = scope {
+            if let BreakScope::Loop {
+                continue_fixups, ..
+            } = scope
+            {
                 for off in continue_fixups.iter().copied() {
-                    self.builder.patch_i32_operand_at(
-                        off,
-                        target_pc as i32 - (off + 4) as i32,
-                    );
+                    self.builder
+                        .patch_i32_operand_at(off, target_pc as i32 - (off + 4) as i32);
                 }
                 continue_fixups.clear();
                 return;
@@ -1001,11 +982,8 @@ impl CompileCtx {
 
     fn peel_loop_cond_syntax(&self, mut n: SyntaxNode) -> SyntaxNode {
         loop {
-            if n.kind() == K::Expr.into_syntax_kind() {
-                let non_triv: Vec<_> = n
-                    .children()
-                    .filter(|e| !syntax_el_is_trivia(e))
-                    .collect();
+            if n.kind() == Node::Expr.into_syntax_kind() {
+                let non_triv: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
                 if non_triv.len() == 1 {
                     if let SyntaxElement::Node(c) = &non_triv[0] {
                         n = c.clone();
@@ -1040,13 +1018,13 @@ impl CompileCtx {
 
     fn emit_loop_logical_chain(
         &mut self,
-        op: K,
+        op: Lex,
         lhs_parts: &[SyntaxElement],
         bin: &SyntaxNode,
     ) -> Result<bool, CompileError> {
         let suff = java_ops::suffix_after_first_binary_op(bin);
         match op {
-            K::AndAnd => {
+            Lex::AndAnd => {
                 self.compile_cond_chain_lhs(lhs_parts)?;
                 let lo = java_ops::java_ops_expr_flat(lhs_parts);
                 self.builder.emit_charge_ops(lo.saturating_add(1));
@@ -1064,7 +1042,7 @@ impl CompileCtx {
                     .patch_i32_operand_at(jif, merge_pc as i32 - after_jif as i32);
                 Ok(true)
             }
-            K::OrOr => {
+            Lex::OrOr => {
                 self.compile_cond_chain_lhs(lhs_parts)?;
                 let lo = java_ops::java_ops_expr_flat(lhs_parts);
                 self.builder.emit_charge_ops(lo.saturating_add(1));
@@ -1091,12 +1069,15 @@ impl CompileCtx {
         }
     }
 
-    fn try_compile_loop_short_circuit_cond(&mut self, n: &SyntaxNode) -> Result<bool, CompileError> {
+    fn try_compile_loop_short_circuit_cond(
+        &mut self,
+        n: &SyntaxNode,
+    ) -> Result<bool, CompileError> {
         if BinaryExpr::can_cast(n.kind()) {
             let Some(op) = java_ops::first_binary_op_token(n) else {
                 return Ok(false);
             };
-            if matches!(op, K::AndAnd | K::OrOr) {
+            if matches!(op, Lex::AndAnd | Lex::OrOr) {
                 let lhs = java_ops::prefix_before_first_binary_op(n);
                 if lhs.is_empty() {
                     return Ok(false);
@@ -1104,11 +1085,8 @@ impl CompileCtx {
                 return self.emit_loop_logical_chain(op, &lhs, n);
             }
         }
-        if n.kind() == K::Expr.into_syntax_kind() {
-            let parts: Vec<_> = n
-                .children()
-                .filter(|e| !syntax_el_is_trivia(e))
-                .collect();
+        if n.kind() == Node::Expr.into_syntax_kind() {
+            let parts: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
             if parts.len() < 2 {
                 return Ok(false);
             }
@@ -1121,7 +1099,7 @@ impl CompileCtx {
             let Some(op) = java_ops::first_binary_op_token(bin) else {
                 return Ok(false);
             };
-            if !matches!(op, K::AndAnd | K::OrOr) {
+            if !matches!(op, Lex::AndAnd | Lex::OrOr) {
                 return Ok(false);
             }
             let lhs_parts = &parts[..parts.len() - 1];
@@ -1188,10 +1166,8 @@ impl CompileCtx {
         }
 
         let j_back = self.builder.emit_jump_placeholder();
-        self.builder.patch_i32_operand_at(
-            j_back,
-            head_pc as i32 - (j_back + 4) as i32,
-        );
+        self.builder
+            .patch_i32_operand_at(j_back, head_pc as i32 - (j_back + 4) as i32);
 
         let after = self.builder.len();
         if let Some(j) = j_exit {
@@ -1243,10 +1219,8 @@ impl CompileCtx {
         self.compile_boolean_condition_header(cond)?;
         let j_exit = self.builder.emit_jump_if_false_placeholder();
         let j_repeat = self.builder.emit_jump_placeholder();
-        self.builder.patch_i32_operand_at(
-            j_repeat,
-            body_start as i32 - (j_repeat + 4) as i32,
-        );
+        self.builder
+            .patch_i32_operand_at(j_repeat, body_start as i32 - (j_repeat + 4) as i32);
 
         let after = self.builder.len();
         self.builder
@@ -1268,9 +1242,8 @@ impl CompileCtx {
             if let Some(init_e) = f.init_expr() {
                 let slot = self.alloc_local(&name);
                 self.compile_expr(init_e.clone())?;
-                self.builder.emit_charge_ops(
-                    1u32.saturating_add(java_ops::java_analyzed_ops(&init_e)),
-                );
+                self.builder
+                    .emit_charge_ops(1u32.saturating_add(java_ops::java_analyzed_ops(&init_e)));
                 self.builder.emit_opcode(Opcode::SetLocal);
                 self.builder.emit_u16_operand(slot);
             }
@@ -1323,8 +1296,7 @@ impl CompileCtx {
             .ok_or(CompileError::Unsupported("undefined variable"))?;
         self.compile_expr(key.clone())?;
         self.compile_expr(rhs.clone())?;
-        let o = java_ops::java_analyzed_ops(&key)
-            .saturating_add(java_ops::java_analyzed_ops(&rhs));
+        let o = java_ops::java_analyzed_ops(&key).saturating_add(java_ops::java_analyzed_ops(&rhs));
         if o > 0 {
             self.builder.emit_charge_ops(o);
         }
@@ -1336,7 +1308,7 @@ impl CompileCtx {
     fn compile_compound_assign_local(
         &mut self,
         name: &str,
-        assign_op: K,
+        assign_op: Lex,
         rhs: Expr,
     ) -> Result<(), CompileError> {
         let bin = compound_assign_binop(assign_op).ok_or(CompileError::Unsupported(
@@ -1363,10 +1335,7 @@ impl CompileCtx {
 
     /// Emit the left operand of an infix chain or postfix receiver. `Ok(None)` means this element
     /// cannot start such a chain (caller should try another strategy).
-    fn emit_expr_head_operand(
-        &mut self,
-        el: &SyntaxElement,
-    ) -> Result<Option<()>, CompileError> {
+    fn emit_expr_head_operand(&mut self, el: &SyntaxElement) -> Result<Option<()>, CompileError> {
         match el {
             SyntaxElement::Token(t) => {
                 if self.push_literal_token(t)? {
@@ -1393,7 +1362,10 @@ impl CompileCtx {
         }
     }
 
-    fn try_compile_expr_parts_dispatch(&mut self, parts: &[SyntaxElement]) -> Result<bool, CompileError> {
+    fn try_compile_expr_parts_dispatch(
+        &mut self,
+        parts: &[SyntaxElement],
+    ) -> Result<bool, CompileError> {
         if let Some((name, key, rhs)) = try_index_assign_from_expr_parts(parts) {
             self.compile_assign_index_local(&name, key, rhs)?;
             return Ok(true);
@@ -1431,7 +1403,10 @@ impl CompileCtx {
         Err(CompileError::Unsupported("expression shape not supported"))
     }
 
-    fn try_compile_ternary_suffix(&mut self, parts: &[SyntaxElement]) -> Result<bool, CompileError> {
+    fn try_compile_ternary_suffix(
+        &mut self,
+        parts: &[SyntaxElement],
+    ) -> Result<bool, CompileError> {
         let Some(SyntaxElement::Node(tn)) = parts.last() else {
             return Ok(false);
         };
@@ -1452,16 +1427,12 @@ impl CompileCtx {
         self.compile_expr(arms[0].clone())?;
         let jend = self.builder.emit_jump_placeholder();
         let else_pc = self.builder.len();
-        self.builder.patch_i32_operand_at(
-            jelse,
-            else_pc as i32 - (jelse + 4) as i32,
-        );
+        self.builder
+            .patch_i32_operand_at(jelse, else_pc as i32 - (jelse + 4) as i32);
         self.compile_expr(arms[1].clone())?;
         let end_pc = self.builder.len();
-        self.builder.patch_i32_operand_at(
-            jend,
-            end_pc as i32 - (jend + 4) as i32,
-        );
+        self.builder
+            .patch_i32_operand_at(jend, end_pc as i32 - (jend + 4) as i32);
         Ok(true)
     }
 
@@ -1472,7 +1443,7 @@ impl CompileCtx {
                 continue;
             }
             if let SyntaxElement::Token(t) = &el {
-                if t.kind() == K::Colon.into_syntax_kind() {
+                if t.kind() == Lex::Colon.into_syntax_kind() {
                     return Err(CompileError::Unsupported("slice index"));
                 }
             }
@@ -1491,7 +1462,7 @@ impl CompileCtx {
                 continue;
             }
             if let SyntaxElement::Token(t) = &el {
-                if t.kind() == K::Ident.into_syntax_kind() {
+                if t.kind() == Lex::Ident.into_syntax_kind() {
                     return Ok(t.text().to_string());
                 }
             }
@@ -1541,15 +1512,11 @@ impl CompileCtx {
         Ok(true)
     }
 
-    fn local_slot_for_prefix_update(
-        &self,
-        operand: &[SyntaxElement],
-    ) -> Result<u16, CompileError> {
+    fn local_slot_for_prefix_update(&self, operand: &[SyntaxElement]) -> Result<u16, CompileError> {
         match operand {
             [SyntaxElement::Token(t)] => {
-                let name = token_as_plain_local_name(t).ok_or(CompileError::Unsupported(
-                    "prefix ++/-- expects identifier",
-                ))?;
+                let name = token_as_plain_local_name(t)
+                    .ok_or(CompileError::Unsupported("prefix ++/-- expects identifier"))?;
                 self.locals
                     .get(&name)
                     .copied()
@@ -1561,9 +1528,7 @@ impl CompileCtx {
                 } else {
                     None
                 }
-                .or_else(|| {
-                    expr_element_as_plain_ident(&SyntaxElement::Node(inner.clone()))
-                })
+                .or_else(|| expr_element_as_plain_ident(&SyntaxElement::Node(inner.clone())))
                 .ok_or(CompileError::Unsupported(
                     "prefix ++/-- expects simple identifier",
                 ))?;
@@ -1580,7 +1545,10 @@ impl CompileCtx {
 
     /// Sipha postfix parsing: `ident ( args )` is `[Ident, CallExpr]` — the call node has only
     /// argument expressions (callee is the preceding operand), not a callee child.
-    fn try_emit_ident_call_two_part(&mut self, parts: &[SyntaxElement]) -> Result<bool, CompileError> {
+    fn try_emit_ident_call_two_part(
+        &mut self,
+        parts: &[SyntaxElement],
+    ) -> Result<bool, CompileError> {
         if parts.len() != 2 {
             return Ok(false);
         }
@@ -1640,7 +1608,7 @@ impl CompileCtx {
         let Some(SyntaxElement::Token(t0)) = elts.get(i) else {
             return Err(CompileError::Unsupported("new: malformed"));
         };
-        if t0.kind() != K::NewKw.into_syntax_kind() {
+        if t0.kind() != Lex::NewKw.into_syntax_kind() {
             return Err(CompileError::Unsupported("new: expected new"));
         }
         i += 1;
@@ -1680,10 +1648,10 @@ impl CompileCtx {
         if parts.len() == 2 {
             if let SyntaxElement::Token(t2) = &parts[1] {
                 let k = t2.kind();
-                if k == K::PlusPlus.into_syntax_kind() {
+                if k == Lex::PlusPlus.into_syntax_kind() {
                     return self.compile_postfix_inc_dec(&parts[0], true);
                 }
-                if k == K::MinusMinus.into_syntax_kind() {
+                if k == Lex::MinusMinus.into_syntax_kind() {
                     return self.compile_postfix_inc_dec(&parts[0], false);
                 }
             }
@@ -1746,22 +1714,16 @@ impl CompileCtx {
         if let Some(else_sb) = i.else_branch() {
             let jmp_end = self.builder.emit_jump_placeholder();
             let else_start = self.builder.len();
-            self.builder.patch_i32_operand_at(
-                jif_op,
-                else_start as i32 - (jif_op + 4) as i32,
-            );
+            self.builder
+                .patch_i32_operand_at(jif_op, else_start as i32 - (jif_op + 4) as i32);
             self.compile_stmt_block(&else_sb)?;
             let merge = self.builder.len();
-            self.builder.patch_i32_operand_at(
-                jmp_end,
-                merge as i32 - (jmp_end + 4) as i32,
-            );
+            self.builder
+                .patch_i32_operand_at(jmp_end, merge as i32 - (jmp_end + 4) as i32);
         } else {
             let merge = self.builder.len();
-            self.builder.patch_i32_operand_at(
-                jif_op,
-                merge as i32 - (jif_op + 4) as i32,
-            );
+            self.builder
+                .patch_i32_operand_at(jif_op, merge as i32 - (jif_op + 4) as i32);
         }
         Ok(())
     }
@@ -1775,8 +1737,8 @@ impl CompileCtx {
         let mut i = 0usize;
         if let Some(SyntaxElement::Token(t)) = elts.get(i) {
             if matches!(
-                K::from_syntax_kind(t.kind()),
-                Some(K::VarKw) | Some(K::LetKw)
+                Lex::from_syntax_kind(t.kind()),
+                Some(Lex::VarKw) | Some(Lex::LetKw)
             ) {
                 i += 1;
             }
@@ -1792,7 +1754,7 @@ impl CompileCtx {
             .collect();
         let mut i = 0usize;
         if let Some(SyntaxElement::Token(t)) = elts.get(i) {
-            if K::from_syntax_kind(t.kind()) == Some(K::ConstKw) {
+            if Lex::from_syntax_kind(t.kind()) == Some(Lex::ConstKw) {
                 i += 1;
             }
         }
@@ -1807,7 +1769,7 @@ impl CompileCtx {
             .collect();
         let mut i = 0usize;
         if let Some(SyntaxElement::Token(t)) = elts.get(i) {
-            if K::from_syntax_kind(t.kind()) == Some(K::GlobalKw) {
+            if Lex::from_syntax_kind(t.kind()) == Some(Lex::GlobalKw) {
                 i += 1;
             }
         }
@@ -1828,7 +1790,7 @@ impl CompileCtx {
         let mut i = 0usize;
         while i < elts.len() {
             if let SyntaxElement::Token(t) = &elts[i] {
-                if matches!(K::from_syntax_kind(t.kind()), Some(K::Semi)) {
+                if matches!(Lex::from_syntax_kind(t.kind()), Some(Lex::Semi)) {
                     break;
                 }
             }
@@ -1837,10 +1799,8 @@ impl CompileCtx {
                     "typed or complex declarator not supported by VM compiler",
                 ));
             };
-            if name_t.kind() != K::Ident.into_syntax_kind() {
-                return Err(CompileError::Unsupported(
-                    "declarator: expected identifier",
-                ));
+            if name_t.kind() != Lex::Ident.into_syntax_kind() {
+                return Err(CompileError::Unsupported("declarator: expected identifier"));
             }
             let name = name_t.text().to_string();
             i += 1;
@@ -1848,7 +1808,7 @@ impl CompileCtx {
             let mut initialized = false;
             if i < elts.len() {
                 if let SyntaxElement::Token(t) = &elts[i] {
-                    if t.kind() == K::Eq.into_syntax_kind() {
+                    if t.kind() == Lex::Eq.into_syntax_kind() {
                         i += 1;
                         let Some(SyntaxElement::Node(n)) = elts.get(i) else {
                             return Err(CompileError::Unsupported(
@@ -1880,11 +1840,11 @@ impl CompileCtx {
             self.builder.emit_u16_operand(slot);
             if i < elts.len() {
                 if let SyntaxElement::Token(t) = &elts[i] {
-                    if t.kind() == K::Comma.into_syntax_kind() {
+                    if t.kind() == Lex::Comma.into_syntax_kind() {
                         i += 1;
                         continue;
                     }
-                    if t.kind() == K::Semi.into_syntax_kind() {
+                    if t.kind() == Lex::Semi.into_syntax_kind() {
                         break;
                     }
                 }
@@ -1926,9 +1886,8 @@ impl CompileCtx {
         let v_slot = elem_v_slot.expect("one or two binds");
 
         self.compile_expr(iter_e.clone())?;
-        self.builder.emit_charge_ops(
-            1u32.saturating_add(java_ops::java_analyzed_ops(&iter_e)),
-        );
+        self.builder
+            .emit_charge_ops(1u32.saturating_add(java_ops::java_analyzed_ops(&iter_e)));
         self.builder.emit_opcode(Opcode::SetLocal);
         self.builder.emit_u16_operand(cont_slot);
         self.builder.emit_push_const(Value::num_int(0));
@@ -1965,7 +1924,8 @@ impl CompileCtx {
             self.builder.emit_opcode(Opcode::SetLocal);
             self.builder.emit_u16_operand(v_slot);
             self.builder.emit_opcode(Opcode::SetLocal);
-            self.builder.emit_u16_operand(elem_k_slot.expect("map foreach"));
+            self.builder
+                .emit_u16_operand(elem_k_slot.expect("map foreach"));
         } else {
             self.builder.emit_opcode(Opcode::GetElem);
             self.builder.emit_opcode(Opcode::SetLocal);
@@ -1985,10 +1945,8 @@ impl CompileCtx {
         self.builder.emit_u16_operand(i_slot);
 
         let j_back = self.builder.emit_jump_placeholder();
-        self.builder.patch_i32_operand_at(
-            j_back,
-            head_pc as i32 - (j_back + 4) as i32,
-        );
+        self.builder
+            .patch_i32_operand_at(j_back, head_pc as i32 - (j_back + 4) as i32);
 
         let after = self.builder.len();
         self.builder
@@ -2069,39 +2027,39 @@ impl CompileCtx {
         let mut fields: Vec<(String, Expr)> = Vec::new();
         while i < elts.len() {
             if let SyntaxElement::Token(t) = &elts[i] {
-                if t.kind() == K::RBrace.into_syntax_kind() {
+                if t.kind() == Lex::RBrace.into_syntax_kind() {
                     break;
                 }
             }
             let SyntaxElement::Token(name_t) = &elts[i] else {
-                return Err(CompileError::Unsupported("object literal: expected field name"));
+                return Err(CompileError::Unsupported(
+                    "object literal: expected field name",
+                ));
             };
-            if name_t.kind() != K::Ident.into_syntax_kind() {
-                return Err(CompileError::Unsupported("object literal: expected field name"));
+            if name_t.kind() != Lex::Ident.into_syntax_kind() {
+                return Err(CompileError::Unsupported(
+                    "object literal: expected field name",
+                ));
             }
             let name = name_t.text().to_string();
             i += 1;
-            let colon_el = elts
-                .get(i)
-                .ok_or(CompileError::Unsupported(
-                    "object literal: expected ':' after field name",
-                ))?;
+            let colon_el = elts.get(i).ok_or(CompileError::Unsupported(
+                "object literal: expected ':' after field name",
+            ))?;
             let SyntaxElement::Token(colon_t) = colon_el else {
                 return Err(CompileError::Unsupported(
                     "object literal: expected ':' after field name",
                 ));
             };
-            if colon_t.kind() != K::Colon.into_syntax_kind() {
+            if colon_t.kind() != Lex::Colon.into_syntax_kind() {
                 return Err(CompileError::Unsupported(
                     "object literal: expected ':' after field name",
                 ));
             }
             i += 1;
-            let expr_el = elts
-                .get(i)
-                .ok_or(CompileError::Unsupported(
-                    "object literal: expected expression after ':'",
-                ))?;
+            let expr_el = elts.get(i).ok_or(CompileError::Unsupported(
+                "object literal: expected expression after ':'",
+            ))?;
             let SyntaxElement::Node(expr_n) = expr_el else {
                 return Err(CompileError::Unsupported(
                     "object literal: expected expression after ':'",
@@ -2114,7 +2072,7 @@ impl CompileCtx {
             i += 1;
             if i < elts.len() {
                 if let SyntaxElement::Token(ct) = &elts[i] {
-                    if ct.kind() == K::Comma.into_syntax_kind() {
+                    if ct.kind() == Lex::Comma.into_syntax_kind() {
                         i += 1;
                     }
                 }
@@ -2132,10 +2090,7 @@ impl CompileCtx {
 
     fn compile_array_literal(&mut self, arr: &ArrayExpr) -> Result<(), CompileError> {
         let syn = arr.syntax();
-        let semantic: Vec<_> = syn
-            .children()
-            .filter(|e| !syntax_el_is_trivia(e))
-            .collect();
+        let semantic: Vec<_> = syn.children().filter(|e| !syntax_el_is_trivia(e)).collect();
         for el in &semantic {
             if let SyntaxElement::Node(n) = el {
                 if IntervalExpr::can_cast(n.kind()) {
@@ -2171,7 +2126,7 @@ impl CompileCtx {
         self.compile_expr_from_syntax(expr.syntax().clone())
     }
 
-    /// Lower an expression given any [`SyntaxNode`](SyntaxNode) that appears under `K::Expr`.
+    /// Lower an expression given any [`SyntaxNode`](SyntaxNode) that appears under `Node::Expr`.
     ///
     /// Sipha’s [`left_assoc_infix_level`](sipha::parse::expr::left_assoc_infix_level) produces two
     /// shapes we handle:
@@ -2179,11 +2134,8 @@ impl CompileCtx {
     /// - **Inside each [`BinaryExpr`](BinaryExpr):** `op` token then a **suffix** (`NUMBER`, nested
     ///   `BinaryExpr`, …) — not always a single rhs subtree (e.g. `+` then `3` then `* 4`).
     fn compile_expr_from_syntax(&mut self, n: SyntaxNode) -> Result<(), CompileError> {
-        if n.kind() == K::Expr.into_syntax_kind() {
-            let parts: Vec<_> = n
-                .children()
-                .filter(|e| !syntax_el_is_trivia(e))
-                .collect();
+        if n.kind() == Node::Expr.into_syntax_kind() {
+            let parts: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
             if self.try_compile_expr_parts_dispatch(&parts)? {
                 return Ok(());
             }
@@ -2245,18 +2197,13 @@ impl CompileCtx {
                             self.builder.emit_u16_operand(slot);
                             return Ok(());
                         }
-                        Err(CompileError::Unsupported(
-                            "expression shape not supported",
-                        ))
+                        Err(CompileError::Unsupported("expression shape not supported"))
                     }
                 };
             }
             return Err(CompileError::Unsupported("empty parentheses"));
         }
-        let semantic: Vec<_> = n
-            .children()
-            .filter(|e| !syntax_el_is_trivia(e))
-            .collect();
+        let semantic: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
         if semantic.len() == 1 {
             match &semantic[0] {
                 SyntaxElement::Node(c) => return self.compile_expr_from_syntax(c.clone()),
@@ -2276,34 +2223,33 @@ impl CompileCtx {
                 }
             }
         }
-        Err(CompileError::Unsupported(
-            "expression shape not supported",
-        ))
+        Err(CompileError::Unsupported("expression shape not supported"))
     }
 
     /// If `tail` is `[BinaryExpr, …]` and every binary uses the same `and` / `or` operator.
-    fn homogeneous_short_circuit_tail_op(tail: &[SyntaxElement]) -> Option<K> {
+    fn homogeneous_short_circuit_tail_op(tail: &[SyntaxElement]) -> Option<Lex> {
         let SyntaxElement::Node(b0) = tail.first()? else {
             return None;
         };
         let op = match java_ops::first_binary_op_token(b0)? {
-            k @ (K::AndAnd | K::OrOr) => k,
+            k @ (Lex::AndAnd | Lex::OrOr) => k,
             _ => return None,
         };
-        tail.iter().all(|el| {
-            let SyntaxElement::Node(n) = el else {
-                return false;
-            };
-            java_ops::first_binary_op_token(n) == Some(op)
-        })
-        .then_some(op)
+        tail.iter()
+            .all(|el| {
+                let SyntaxElement::Node(n) = el else {
+                    return false;
+                };
+                java_ops::first_binary_op_token(n) == Some(op)
+            })
+            .then_some(op)
     }
 
     /// Lower `a op b op c` (`op` ∈ {`and`, `or`}) as nested short-circuit, not sequential fragments,
     /// so a truthy `or` (or falsy `and`) skips the rest without extra `ChargeOps` prologues.
     fn compile_homogeneous_short_circuit_chain(
         &mut self,
-        op: K,
+        op: Lex,
         bins: &[SyntaxElement],
         lhs_ops: u32,
     ) -> Result<(), CompileError> {
@@ -2316,9 +2262,8 @@ impl CompileCtx {
         inner_parts.extend_from_slice(&bins[1..]);
 
         match op {
-            K::OrOr => {
-                self.builder
-                    .emit_charge_ops(lhs_ops.saturating_add(1));
+            Lex::OrOr => {
+                self.builder.emit_charge_ops(lhs_ops.saturating_add(1));
                 self.builder.emit_opcode(Opcode::Dup);
                 let jif_op = self.builder.emit_jump_if_false_placeholder();
                 let jmp_op = self.builder.emit_jump_placeholder();
@@ -2340,9 +2285,8 @@ impl CompileCtx {
                     .patch_i32_operand_at(jmp_op, merge_pc as i32 - after_jmp as i32);
                 Ok(())
             }
-            K::AndAnd => {
-                self.builder
-                    .emit_charge_ops(lhs_ops.saturating_add(1));
+            Lex::AndAnd => {
+                self.builder.emit_charge_ops(lhs_ops.saturating_add(1));
                 self.builder.emit_opcode(Opcode::Dup);
                 let jif_op = self.builder.emit_jump_if_false_placeholder();
                 self.builder.emit_opcode(Opcode::Pop);
@@ -2366,10 +2310,7 @@ impl CompileCtx {
     }
 
     fn try_compile_infix_chain(&mut self, n: &SyntaxNode) -> Result<bool, CompileError> {
-        let parts: Vec<_> = n
-            .children()
-            .filter(|e| !syntax_el_is_trivia(e))
-            .collect();
+        let parts: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
         self.try_compile_infix_chain_on_parts(&parts)
     }
 
@@ -2433,8 +2374,8 @@ impl CompileCtx {
         ))?;
         let suff = java_ops::suffix_after_first_binary_op(bin);
         match op {
-            K::AndAnd => self.compile_short_circuit_and(&suff, lhs_ops),
-            K::OrOr => self.compile_short_circuit_or(&suff, lhs_ops),
+            Lex::AndAnd => self.compile_short_circuit_and(&suff, lhs_ops),
+            Lex::OrOr => self.compile_short_circuit_or(&suff, lhs_ops),
             _ => {
                 self.compile_infix_suffix(&suff)?;
                 self.emit_binop(op)
@@ -2447,8 +2388,7 @@ impl CompileCtx {
         rhs: &[SyntaxElement],
         lhs_ops: u32,
     ) -> Result<(), CompileError> {
-        self.builder
-            .emit_charge_ops(lhs_ops.saturating_add(1));
+        self.builder.emit_charge_ops(lhs_ops.saturating_add(1));
         self.builder.emit_opcode(Opcode::Dup);
         let jif_op = self.builder.emit_jump_if_false_placeholder();
         self.builder.emit_opcode(Opcode::Pop);
@@ -2469,8 +2409,7 @@ impl CompileCtx {
         rhs: &[SyntaxElement],
         lhs_ops: u32,
     ) -> Result<(), CompileError> {
-        self.builder
-            .emit_charge_ops(lhs_ops.saturating_add(1));
+        self.builder.emit_charge_ops(lhs_ops.saturating_add(1));
         self.builder.emit_opcode(Opcode::Dup);
         let jif_op = self.builder.emit_jump_if_false_placeholder();
         let jmp_op = self.builder.emit_jump_placeholder();
@@ -2530,10 +2469,14 @@ impl CompileCtx {
         }
         for p in parts.iter().skip(1) {
             let SyntaxElement::Node(node) = p else {
-                return Err(CompileError::Unsupported("infix suffix tail must be BinaryExpr"));
+                return Err(CompileError::Unsupported(
+                    "infix suffix tail must be BinaryExpr",
+                ));
             };
             if !BinaryExpr::can_cast(node.kind()) {
-                return Err(CompileError::Unsupported("infix suffix tail must be BinaryExpr"));
+                return Err(CompileError::Unsupported(
+                    "infix suffix tail must be BinaryExpr",
+                ));
             }
         }
         let mut prefix_len = 1usize;
@@ -2572,21 +2515,21 @@ impl CompileCtx {
         }
     }
 
-    fn emit_binop(&mut self, op: K) -> Result<(), CompileError> {
+    fn emit_binop(&mut self, op: Lex) -> Result<(), CompileError> {
         let opc = match op {
-            K::Plus => Opcode::Add,
-            K::Minus => Opcode::Sub,
-            K::Star => Opcode::Mul,
-            K::Slash => Opcode::Div,
-            K::Backslash => Opcode::IntDiv,
-            K::Percent => Opcode::Mod,
-            K::EqEq | K::EqEqEq => Opcode::EqEquals,
-            K::NotEq | K::NotEqEq => Opcode::NeEquals,
-            K::Lt => Opcode::Lt,
-            K::Lte => Opcode::Lte,
-            K::Gt => Opcode::Gt,
-            K::Gte => Opcode::Gte,
-            K::XorKw => Opcode::LogicalXor,
+            Lex::Plus => Opcode::Add,
+            Lex::Minus => Opcode::Sub,
+            Lex::Star => Opcode::Mul,
+            Lex::Slash => Opcode::Div,
+            Lex::Backslash => Opcode::IntDiv,
+            Lex::Percent => Opcode::Mod,
+            Lex::EqEq | Lex::EqEqEq => Opcode::EqEquals,
+            Lex::NotEq | Lex::NotEqEq => Opcode::NeEquals,
+            Lex::Lt => Opcode::Lt,
+            Lex::Lte => Opcode::Lte,
+            Lex::Gt => Opcode::Gt,
+            Lex::Gte => Opcode::Gte,
+            Lex::XorKw => Opcode::LogicalXor,
             _ => {
                 return Err(CompileError::Unsupported(
                     "binary operator not supported by VM",
@@ -2599,15 +2542,12 @@ impl CompileCtx {
 
     fn compile_unary(&mut self, u: &UnaryExpr) -> Result<(), CompileError> {
         let n = u.syntax();
-        let minus = K::Minus.into_syntax_kind();
-        let bang = K::Bang.into_syntax_kind();
-        let not_kw = K::NotKw.into_syntax_kind();
-        let plusplus = K::PlusPlus.into_syntax_kind();
-        let minusminus = K::MinusMinus.into_syntax_kind();
-        let semantic: Vec<_> = n
-            .children()
-            .filter(|e| !syntax_el_is_trivia(e))
-            .collect();
+        let minus = Lex::Minus.into_syntax_kind();
+        let bang = Lex::Bang.into_syntax_kind();
+        let not_kw = Lex::NotKw.into_syntax_kind();
+        let plusplus = Lex::PlusPlus.into_syntax_kind();
+        let minusminus = Lex::MinusMinus.into_syntax_kind();
+        let semantic: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
         // Sipha may store `++x` as `[operand, ++]` instead of `[++, operand]`.
         if let [SyntaxElement::Node(inner), SyntaxElement::Token(t)] = semantic.as_slice() {
             if t.kind() == plusplus {
@@ -2670,9 +2610,7 @@ impl CompileCtx {
         let operand = &semantic[i..];
         if has_pre_incr || has_pre_decr {
             if has_minus || has_not {
-                return Err(CompileError::Unsupported(
-                    "unsupported unary combination",
-                ));
+                return Err(CompileError::Unsupported("unsupported unary combination"));
             }
             if has_pre_incr && has_pre_decr {
                 return Err(CompileError::Unsupported(
@@ -2727,4 +2665,3 @@ impl CompileCtx {
         Ok(())
     }
 }
-

@@ -3,7 +3,7 @@ use sipha::tree::walk::{Visitor, WalkResult};
 
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::{ExprTypeKey, SymbolKind};
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 
 use super::analyzer::Analyzer;
 use super::infer::binary_expr_is_instanceof;
@@ -14,7 +14,7 @@ impl Visitor for Analyzer {
         if self.phase == AnalysisPhase::ResolveAndInfer {
             self.syntax_node_stack.push(node.clone());
         }
-        self.node_stack.push(node.kind_as::<K>());
+        self.node_stack.push(node.kind_as::<Node>());
         if self.phase == AnalysisPhase::ResolveAndInfer && binary_expr_is_instanceof(node) {
             self.instanceof_type_ctx_depth += 1;
         }
@@ -50,31 +50,31 @@ impl Visitor for Analyzer {
         if self.phase == AnalysisPhase::ResolveAndInfer {
             let span = token.text_range();
             let key = ExprTypeKey::from_span(span);
-            let in_member_expr = matches!(self.node_stack.last(), Some(Some(K::MemberExpr)));
-            match token.kind_as::<K>() {
-                Some(K::Number) => {
+            let in_member_expr = matches!(self.node_stack.last(), Some(Some(Node::MemberExpr)));
+            match token.kind_as::<Lex>() {
+                Some(Lex::Number) => {
                     let t = LeekTy::from_number_literal_text(token.text());
                     self.expr_types.insert(key, t);
                 }
-                Some(K::String) => {
+                Some(Lex::String) => {
                     self.expr_types.insert(key, LeekTy::String);
                 }
-                Some(K::TrueKw | K::FalseKw) => {
+                Some(Lex::TrueKw | Lex::FalseKw) => {
                     self.expr_types.insert(key, LeekTy::Boolean);
                 }
-                Some(K::NullKw) => {
+                Some(Lex::NullKw) => {
                     self.expr_types.insert(key, LeekTy::Null);
                 }
-                Some(K::Pi) => {
+                Some(Lex::Pi) => {
                     self.expr_types.insert(key, LeekTy::Real);
                 }
-                Some(K::Infinity) => {
+                Some(Lex::Infinity) => {
                     self.expr_types.insert(key, LeekTy::Real);
                 }
                 _ => {}
             }
             self.resolve_ident(token);
-            if token.kind_as::<K>() == Some(K::Ident) && !in_member_expr {
+            if token.kind_as::<Lex>() == Some(Lex::Ident) && !in_member_expr {
                 if let Some(sid) = self.resolve_here(token.text()) {
                     let sym = &self.graph.symbols[sid.0 as usize];
                     let binding_skip_expr_ty =

@@ -1,24 +1,27 @@
+//! Expressions: precedence levels, primaries, lambdas, and literals.
 use super::cfg_flags;
-use crate::syntax::kinds::K;
+use super::GRule;
+use crate::syntax::kinds::Node;
 use sipha::parse::expr as sipha_expr;
+use sipha::prelude::parse::GrammarChoiceFn;
 use sipha::prelude::*;
 
 pub fn define(g: &mut GrammarBuilder) {
     // `>>` / `>>>` are ambiguous with nested generic type closers (`Map<..., Map<...>>`).
     // We lex `>` always, then parse shift ops as sequences so types can use `>>` naturally.
-    g.parser_rule("op_shr", |g| {
-        g.call("op_gt");
-        g.call("op_gt");
+    g.parser_rule(GRule::OpShr.as_str(), |g| {
+        g.call_rule(GRule::OpGt);
+        g.call_rule(GRule::OpGt);
     });
-    g.parser_rule("op_ushr", |g| {
-        g.call("op_gt");
-        g.call("op_gt");
-        g.call("op_gt");
+    g.parser_rule(GRule::OpUshr.as_str(), |g| {
+        g.call_rule(GRule::OpGt);
+        g.call_rule(GRule::OpGt);
+        g.call_rule(GRule::OpGt);
     });
 
-    g.parser_rule("expr", |g| {
-        g.node(K::Expr, |g| {
-            g.call("assign");
+    g.parser_rule(GRule::Expr.as_str(), |g| {
+        g.node(Node::Expr, |g| {
+            g.call_rule(GRule::Assign);
         });
     });
 
@@ -26,88 +29,153 @@ pub fn define(g: &mut GrammarBuilder) {
     // Outermost levels bind loosest: assign (0) … power (12) … unary/postfix.
     //
     // assign := ternary ( assign_op expr )?
-    g.parser_rule("assign", |g| {
-        g.call("ternary");
+    g.parser_rule(GRule::Assign.as_str(), |g| {
+        g.call_rule(GRule::Ternary);
         g.optional(|g| {
-            g.call("assign_op");
-            g.call("expr");
+            g.call_rule(GRule::AssignOp);
+            g.call_rule(GRule::Expr);
         });
     });
 
     // ternary := or_coalesce ("?" expr ":" expr)?
-    g.parser_rule("ternary", |g| {
-        g.call("or_coalesce");
+    g.parser_rule(GRule::Ternary.as_str(), |g| {
+        g.call_rule(GRule::OrCoalesce);
         g.optional(|g| {
-            g.node(K::TernaryExpr, |g| {
-                g.call("op_question");
-                g.call("expr");
-                g.call("colon");
-                g.call("expr");
+            g.node(Node::TernaryExpr, |g| {
+                g.call_rule(GRule::OpQuestion);
+                g.call_rule(GRule::Expr);
+                g.call_rule(GRule::Colon);
+                g.call_rule(GRule::Expr);
             });
         });
     });
 
-    g.parser_rule("assign_op", |g| {
-        g.choices(vec![
-            Box::new(|g| {
-                g.call("eq");
-            }),
-            Box::new(|g| {
-                g.call("op_coalesce_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_star_star_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_plus_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_minus_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_star_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_slash_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_percent_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_backslash_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_triple_shl_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_shl_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_shr_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_ushr_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_bitand_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_bitor_eq");
-            }),
-            Box::new(|g| {
-                g.call("op_bitxor_eq");
-            }),
-        ]);
+    // `*=` / `**=` share a leading `*`; `<<=` / `<<<=` share `<`; `>>=` / `>>>=` share `>`.
+    g.parser_rule(GRule::AssignOpStar.as_str(), |g| {
+        g.choice(
+            |g| {
+                g.call_rule(GRule::OpStarStarEq);
+            },
+            |g| {
+                g.call_rule(GRule::OpStarEq);
+            },
+        );
+    });
+    g.parser_rule(GRule::AssignOpLt.as_str(), |g| {
+        g.choice(
+            |g| {
+                g.call_rule(GRule::OpTripleShlEq);
+            },
+            |g| {
+                g.call_rule(GRule::OpShlEq);
+            },
+        );
+    });
+    g.parser_rule(GRule::AssignOpGt.as_str(), |g| {
+        g.choice(
+            |g| {
+                g.call_rule(GRule::OpShrEq);
+            },
+            |g| {
+                g.call_rule(GRule::OpUshrEq);
+            },
+        );
+    });
+
+    g.parser_rule(GRule::AssignOp.as_str(), |g| {
+        g.byte_dispatch(
+            vec![
+                (
+                    CharClass::from_byte(b'='),
+                    Box::new(|g| {
+                        g.call_rule(GRule::Eq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'?'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpCoalesceEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'*'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::AssignOpStar);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'+'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpPlusEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'-'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpMinusEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'/'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpSlashEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'%'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpPercentEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'\\'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpBackslashEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'<'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::AssignOpLt);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'>'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::AssignOpGt);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'&'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpBitandEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'|'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpBitorEq);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'^'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::OpBitxorEq);
+                    }),
+                ),
+            ],
+            None,
+        );
     });
 
     // or / ?? (both precedence 2 in Java)
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "or_coalesce",
-            lower_level_name: "logical_xor",
-            ops: &["op_or_or", "op_or_word", "op_coalesce"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::OrCoalesce.as_str(),
+            lower_level_name: GRule::LogicalXor.as_str(),
+            ops: &[GRule::OpOrOr.as_str(), GRule::OpOrWord.as_str(), GRule::OpCoalesce.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -117,10 +185,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "logical_xor",
-            lower_level_name: "logical_and",
-            ops: &["kw_xor"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::LogicalXor.as_str(),
+            lower_level_name: GRule::LogicalAnd.as_str(),
+            ops: &[GRule::KwXor.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -131,10 +199,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "logical_and",
-            lower_level_name: "bitwise_or",
-            ops: &["op_and_and", "op_and_word"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::LogicalAnd.as_str(),
+            lower_level_name: GRule::BitwiseOr.as_str(),
+            ops: &[GRule::OpAndAnd.as_str(), GRule::OpAndWord.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -144,10 +212,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "bitwise_or",
-            lower_level_name: "bitwise_xor",
-            ops: &["op_bitor"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::BitwiseOr.as_str(),
+            lower_level_name: GRule::BitwiseXor.as_str(),
+            ops: &[GRule::OpBitor.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -157,10 +225,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "bitwise_xor",
-            lower_level_name: "bitwise_bitand",
-            ops: &["op_bitxor"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::BitwiseXor.as_str(),
+            lower_level_name: GRule::BitwiseBitand.as_str(),
+            ops: &[GRule::OpBitxor.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -170,19 +238,19 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "bitwise_bitand",
-            lower_level_name: "equality",
-            ops: &["op_bitand"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::BitwiseBitand.as_str(),
+            lower_level_name: GRule::Equality.as_str(),
+            ops: &[GRule::OpBitand.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
         },
     );
 
-    g.parser_rule("not_in", |g| {
-        g.call("kw_not");
-        g.call("kw_in");
+    g.parser_rule(GRule::NotIn.as_str(), |g| {
+        g.call_rule(GRule::KwNot);
+        g.call_rule(GRule::KwIn);
     });
 
     // relational = shift ( (<|>|<=|>=|instanceof|in|not in) shift )*
@@ -190,18 +258,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "relational",
-            lower_level_name: "shift",
-            ops: &[
-                "op_lte",
-                "op_gte",
-                "op_lt",
-                "op_gt",
-                "kw_instanceof",
-                "kw_in",
-                "not_in",
-            ],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::Relational.as_str(),
+            lower_level_name: GRule::Shift.as_str(),
+            ops: &[GRule::OpLte.as_str(), GRule::OpGte.as_str(), GRule::OpLt.as_str(), GRule::OpGt.as_str(), GRule::KwInstanceof.as_str(), GRule::KwIn.as_str(), GRule::NotIn.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -209,15 +269,15 @@ pub fn define(g: &mut GrammarBuilder) {
     );
 
     // `is` / `is not` — between relational and `==` (Java word-operators).
-    g.parser_rule("is_compare", |g| {
-        g.call("relational");
+    g.parser_rule(GRule::IsCompare.as_str(), |g| {
+        g.call_rule(GRule::Relational);
         g.zero_or_more(|g| {
-            g.node(K::BinaryExpr, |g| {
-                g.call("kw_is");
+            g.node(Node::BinaryExpr, |g| {
+                g.call_rule(GRule::KwIs);
                 g.optional(|g| {
-                    g.call("kw_not");
+                    g.call_rule(GRule::KwNot);
                 });
-                g.call("relational");
+                g.call_rule(GRule::Relational);
             });
         });
     });
@@ -226,10 +286,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "equality",
-            lower_level_name: "is_compare",
-            ops: &["op_eqeqeq", "op_noteqeq", "op_eqeq", "op_noteq"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::Equality.as_str(),
+            lower_level_name: GRule::IsCompare.as_str(),
+            ops: &[GRule::OpEqeqeq.as_str(), GRule::OpNoteqeq.as_str(), GRule::OpEqeq.as_str(), GRule::OpNoteq.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -240,10 +300,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "shift",
-            lower_level_name: "additive",
-            ops: &["op_triple_shl", "op_shl", "op_shr", "op_ushr"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::Shift.as_str(),
+            lower_level_name: GRule::Additive.as_str(),
+            ops: &[GRule::OpTripleShl.as_str(), GRule::OpShl.as_str(), GRule::OpShr.as_str(), GRule::OpUshr.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -254,10 +314,10 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "additive",
-            lower_level_name: "multiplicative",
-            ops: &["op_plus", "op_minus"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::Additive.as_str(),
+            lower_level_name: GRule::Multiplicative.as_str(),
+            ops: &[GRule::OpPlus.as_str(), GRule::OpMinus.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
@@ -268,205 +328,265 @@ pub fn define(g: &mut GrammarBuilder) {
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
-            level_name: "multiplicative",
-            lower_level_name: "power",
-            ops: &["op_star", "op_slash", "op_percent", "op_backslash"],
-            node_kind: &K::BinaryExpr,
+            level_name: GRule::Multiplicative.as_str(),
+            lower_level_name: GRule::Power.as_str(),
+            ops: &[GRule::OpStar.as_str(), GRule::OpSlash.as_str(), GRule::OpPercent.as_str(), GRule::OpBackslash.as_str()],
+            node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
             rhs_wrapper_kind: None,
         },
     );
 
-    sipha_expr::right_assoc_infix_level(
-        g,
-        "power",
-        "unary",
-        "op_star_star",
-        &K::BinaryExpr,
+    sipha_expr::right_assoc_infix_level(g, GRule::Power.as_str(), GRule::Unary.as_str(), GRule::OpStarStar.as_str(),
+        &Node::BinaryExpr,
         None,
         None,
     );
 
-    g.parser_rule("unary", |g| {
+    // Prefer `++` / `--` over unary `+` / `-` so `++i` is pre-increment, not `+(+i)`.
+    g.parser_rule(GRule::UnaryPlusPrefixed.as_str(), |g| {
         g.choice(
             |g| {
-                g.node(K::UnaryExpr, |g| {
-                    g.choices(vec![
-                        Box::new(|g| {
-                            g.call("op_bang");
-                        }),
-                        Box::new(|g| {
-                            g.call("kw_not");
-                        }),
-                        // Prefer `++` / `--` over unary `+` / `-` so `++i` is pre-increment, not `+(+i)`.
-                        Box::new(|g| {
-                            g.call("op_plusplus");
-                        }),
-                        Box::new(|g| {
-                            g.call("op_minusminus");
-                        }),
-                        Box::new(|g| {
-                            g.call("op_plus");
-                        }),
-                        Box::new(|g| {
-                            g.call("op_minus");
-                        }),
-                        Box::new(|g| {
-                            g.call("op_tilde");
-                        }),
-                        // `typeof` / `await` / `yield`: Java lexer tokens only — not handled in
-                        // leekscript-java `WordCompiler` / expression parser.
-                        Box::new(|g| {
-                            cfg_flags::v3(g);
-                            g.call("kw_typeof");
-                        }),
-                        Box::new(|g| {
-                            cfg_flags::v3(g);
-                            g.call("kw_await");
-                        }),
-                        Box::new(|g| {
-                            cfg_flags::v3(g);
-                            g.call("kw_yield");
-                        }),
-                    ]);
-                    g.call("unary");
+                g.call_rule(GRule::OpPlusplus);
+            },
+            |g| {
+                g.call_rule(GRule::OpPlus);
+            },
+        );
+    });
+    g.parser_rule(GRule::UnaryMinusPrefixed.as_str(), |g| {
+        g.choice(
+            |g| {
+                g.call_rule(GRule::OpMinusminus);
+            },
+            |g| {
+                g.call_rule(GRule::OpMinus);
+            },
+        );
+    });
+
+    g.parser_rule(GRule::Unary.as_str(), |g| {
+        g.choice(
+            |g| {
+                g.node(Node::UnaryExpr, |g| {
+                    g.byte_dispatch(
+                        vec![
+                            (
+                                CharClass::from_byte(b'!'),
+                                Box::new(|g| {
+                                    g.call_rule(GRule::OpBang);
+                                }),
+                            ),
+                            (
+                                CharClass::from_byte(b'n').union(CharClass::from_byte(b'N')),
+                                Box::new(|g| {
+                                    g.call_rule(GRule::KwNot);
+                                }),
+                            ),
+                            (
+                                CharClass::from_byte(b'+'),
+                                Box::new(|g| {
+                                    g.call_rule(GRule::UnaryPlusPrefixed);
+                                }),
+                            ),
+                            (
+                                CharClass::from_byte(b'-'),
+                                Box::new(|g| {
+                                    g.call_rule(GRule::UnaryMinusPrefixed);
+                                }),
+                            ),
+                            (
+                                CharClass::from_byte(b'~'),
+                                Box::new(|g| {
+                                    g.call_rule(GRule::OpTilde);
+                                }),
+                            ),
+                            (
+                                CharClass::from_byte(b't'),
+                                Box::new(|g| {
+                                    cfg_flags::v3(g);
+                                    g.call_rule(GRule::KwTypeof);
+                                }),
+                            ),
+                            (
+                                CharClass::from_byte(b'a'),
+                                Box::new(|g| {
+                                    cfg_flags::v3(g);
+                                    g.call_rule(GRule::KwAwait);
+                                }),
+                            ),
+                            (
+                                CharClass::from_byte(b'y'),
+                                Box::new(|g| {
+                                    cfg_flags::v3(g);
+                                    g.call_rule(GRule::KwYield);
+                                }),
+                            ),
+                        ],
+                        None,
+                    );
+                    g.call_rule(GRule::Unary);
                 });
             },
             |g| {
-                g.call("postfix_with_as");
+                g.call_rule(GRule::PostfixWithAs);
             },
         );
     });
 
     // postfix := primary postfix_suffix*
-    sipha_expr::postfix_chain(g, "postfix", "primary", "postfix_suffix");
+    sipha_expr::postfix_chain(g, GRule::Postfix.as_str(), GRule::Primary.as_str(), GRule::PostfixSuffix.as_str());
 
     // Postfix chain, then `as Type` casts (Java `AS` precedence).
-    g.parser_rule("postfix_with_as", |g| {
-        g.call("postfix");
+    g.parser_rule(GRule::PostfixWithAs.as_str(), |g| {
+        g.call_rule(GRule::Postfix);
         g.zero_or_more(|g| {
-            g.node(K::CastExpr, |g| {
-                g.call("kw_as");
-                g.call("ls_type");
+            g.node(Node::CastExpr, |g| {
+                g.call_rule(GRule::KwAs);
+                g.call_rule(GRule::LsType);
             });
         });
     });
 
-    g.parser_rule("postfix_suffix", |g| {
-        g.choices(vec![
-            Box::new(|g| {
-                g.call("call_expr_suffix");
-            }),
-            Box::new(|g| {
-                g.call("index_expr_suffix");
-            }),
-            Box::new(|g| {
-                g.call("member_expr_suffix");
-            }),
-            Box::new(|g| {
-                g.call("postfix_incr_suffix");
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.node(K::UnaryExpr, |g| {
-                    g.call("op_bang");
-                });
-            }),
-        ]);
+    g.parser_rule(GRule::PostfixSuffix.as_str(), |g| {
+        g.byte_dispatch(
+            vec![
+                (
+                    CharClass::from_byte(b'('),
+                    Box::new(|g| {
+                        g.call_rule(GRule::CallExprSuffix);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'['),
+                    Box::new(|g| {
+                        g.call_rule(GRule::IndexExprSuffix);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'.'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::MemberExprSuffix);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'+'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::PostfixIncrSuffix);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'-'),
+                    Box::new(|g| {
+                        g.call_rule(GRule::PostfixIncrSuffix);
+                    }),
+                ),
+                (
+                    CharClass::from_byte(b'!'),
+                    Box::new(|g| {
+                        cfg_flags::v3(g);
+                        g.node(Node::UnaryExpr, |g| {
+                            g.call_rule(GRule::OpBang);
+                        });
+                    }),
+                ),
+            ],
+            None,
+        );
     });
 
     // `(` arg_list_opt `)` — function/method call suffix.
-    g.parser_rule("call_expr_suffix", |g| {
-        g.node(K::CallExpr, |g| {
-            g.call("lparen");
-            g.call("arg_list_opt");
-            g.call("rparen");
+    g.parser_rule(GRule::CallExprSuffix.as_str(), |g| {
+        g.node(Node::CallExpr, |g| {
+            g.call_rule(GRule::Lparen);
+            g.call_rule(GRule::ArgListOpt);
+            g.call_rule(GRule::Rparen);
         });
     });
 
     // `[` ... `]` — indexing / slice entry.
-    g.parser_rule("index_expr_suffix", |g| {
-        g.node(K::IndexExpr, |g| {
-            g.call("lbracket");
+    g.parser_rule(GRule::IndexExprSuffix.as_str(), |g| {
+        g.node(Node::IndexExpr, |g| {
+            g.call_rule(GRule::Lbracket);
             g.optional(|g| {
                 // Either: expr
                 // Or: expr? ':' expr? (':' expr?)?   (slice)
                 g.optional(|g| {
-                    g.call("expr");
+                    g.call_rule(GRule::Expr);
                 });
                 g.optional(|g| {
-                    g.call("colon");
+                    g.call_rule(GRule::Colon);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
                     g.optional(|g| {
                         cfg_flags::v4(g);
-                        g.call("colon");
+                        g.call_rule(GRule::Colon);
                         g.optional(|g| {
-                            g.call("expr");
+                            g.call_rule(GRule::Expr);
                         });
                     });
                 });
             });
-            g.call("rbracket");
+            g.call_rule(GRule::Rbracket);
         });
     });
 
     // `.` ident | `class` | `super` (leekscript-java).
-    g.parser_rule("member_expr_suffix", |g| {
-        g.node(K::MemberExpr, |g| {
-            g.call("dot");
+    g.parser_rule(GRule::MemberExprSuffix.as_str(), |g| {
+        g.node(Node::MemberExpr, |g| {
+            g.call_rule(GRule::Dot);
             g.choice3(
                 |g| {
-                    g.call("ident");
+                    g.call_rule(GRule::Ident);
                 },
                 |g| {
-                    g.call("kw_class");
+                    g.call_rule(GRule::KwClass);
                 },
                 |g| {
-                    g.call("kw_super");
+                    g.call_rule(GRule::KwSuper);
                 },
             );
         });
     });
 
     // Postfix ++/-- (common in `for` loops).
-    g.parser_rule("postfix_incr_suffix", |g| {
+    g.parser_rule(GRule::PostfixIncrSuffix.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("op_plusplus");
+                g.call_rule(GRule::OpPlusplus);
             },
             |g| {
-                g.call("op_minusminus");
+                g.call_rule(GRule::OpMinusminus);
             },
         );
     });
 
     // arg_list_opt := arg_list?
-    g.parser_rule("arg_list_opt", |g| {
+    g.parser_rule(GRule::ArgListOpt.as_str(), |g| {
         g.optional(|g| {
-            g.call("arg_list");
+            g.call_rule(GRule::ArgList);
         });
     });
 
     // arg_list := expr ("," expr)* ","?
-    g.parser_rule("arg_list", |g| {
-        g.call("expr");
+    g.parser_rule(GRule::ArgList.as_str(), |g| {
+        g.call_rule(GRule::Expr);
         g.zero_or_more(|g| {
-            g.call("comma");
-            g.call("expr");
+            g.call_rule(GRule::Comma);
+            g.call_rule(GRule::Expr);
         });
         g.optional(|g| {
-            g.call("comma");
+            g.call_rule(GRule::Comma);
         });
     });
 
-    g.parser_rule("paren_expr", |g| {
-        g.node(K::ParenExpr, |g| {
-            g.call("lparen");
-            g.call("expr");
-            g.call("rparen");
+    g.parser_rule(GRule::ParenExpr.as_str(), |g| {
+        g.node(Node::ParenExpr, |g| {
+            g.call_rule(GRule::Lparen);
+            g.call_rule(GRule::Expr);
+            g.call_rule(GRule::Rparen);
         });
     });
 
@@ -478,63 +598,63 @@ pub fn define(g: &mut GrammarBuilder) {
     // Typed body: `=> T expr` uses `lambda_return_type` (no bare `ident` as `T`) so
     // `dp => dp["x"]` still parses as untyped lambda.
     // Typed params before bare names so `(V x) =>` is `V x`, not param `V` then junk `x`.
-    g.parser_rule("lambda_param", |g| {
+    g.parser_rule(GRule::LambdaParam.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("ls_type");
-                g.call("ident");
+                g.call_rule(GRule::LsType);
+                g.call_rule(GRule::Ident);
             },
             |g| {
-                g.call("ident");
+                g.call_rule(GRule::Ident);
             },
         );
     });
 
-    g.parser_rule("lambda_head", |g| {
+    g.parser_rule(GRule::LambdaHead.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("lambda_param");
+                g.call_rule(GRule::LambdaParam);
             },
             |g| {
-                g.call("lparen");
+                g.call_rule(GRule::Lparen);
                 g.optional(|g| {
-                    g.call("lambda_param");
+                    g.call_rule(GRule::LambdaParam);
                     g.zero_or_more(|g| {
-                        g.call("comma");
-                        g.call("lambda_param");
+                        g.call_rule(GRule::Comma);
+                        g.call_rule(GRule::LambdaParam);
                     });
                     g.optional(|g| {
-                        g.call("comma");
+                        g.call_rule(GRule::Comma);
                     });
                 });
-                g.call("rparen");
+                g.call_rule(GRule::Rparen);
             },
         );
     });
 
-    g.parser_rule("lambda_expr", |g| {
-        g.node(K::LambdaExpr, |g| {
-            g.call("lambda_head");
-            g.call("arrow");
+    g.parser_rule(GRule::LambdaExpr.as_str(), |g| {
+        g.node(Node::LambdaExpr, |g| {
+            g.call_rule(GRule::LambdaHead);
+            g.call_rule(GRule::Arrow);
             g.choice(
                 |g| {
-                    g.call("lambda_return_type");
+                    g.call_rule(GRule::LambdaReturnType);
                     g.choice(
                         |g| {
-                            g.call("expr");
+                            g.call_rule(GRule::Expr);
                         },
                         |g| {
-                            g.call("block");
+                            g.call_rule(GRule::Block);
                         },
                     );
                 },
                 |g| {
                     g.choice(
                         |g| {
-                            g.call("expr");
+                            g.call_rule(GRule::Expr);
                         },
                         |g| {
-                            g.call("block");
+                            g.call_rule(GRule::Block);
                         },
                     );
                 },
@@ -543,47 +663,47 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     // `]` or `[` — interval endpoint (Java `LeekInterval` open/closed bounds).
-    g.parser_rule("interval_closing_bracket", |g| {
+    g.parser_rule(GRule::IntervalClosingBracket.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("rbracket");
+                g.call_rule(GRule::Rbracket);
             },
             |g| {
-                g.call("lbracket");
+                g.call_rule(GRule::Lbracket);
             },
         );
     });
 
     // Array / map contents only (no `..` intervals — those use `bracket_interval_body`).
-    g.parser_rule("bracket_list_or_map_inner", |g| {
-        g.call("expr");
+    g.parser_rule(GRule::BracketListOrMapInner.as_str(), |g| {
+        g.call_rule(GRule::Expr);
         g.optional(|g| {
             g.choice(
                 |g| {
                     cfg_flags::v4(g);
-                    g.call("colon");
-                    g.node(K::BracketMapExpr, |g| {
-                        g.call("expr");
+                    g.call_rule(GRule::Colon);
+                    g.node(Node::BracketMapExpr, |g| {
+                        g.call_rule(GRule::Expr);
                         g.zero_or_more(|g| {
-                            g.call("comma");
-                            g.call("expr");
-                            g.call("colon");
-                            g.call("expr");
+                            g.call_rule(GRule::Comma);
+                            g.call_rule(GRule::Expr);
+                            g.call_rule(GRule::Colon);
+                            g.call_rule(GRule::Expr);
                         });
                         g.optional(|g| {
-                            g.call("comma");
+                            g.call_rule(GRule::Comma);
                         });
                     });
                 },
                 |g| {
-                    g.call("comma");
-                    g.call("expr");
+                    g.call_rule(GRule::Comma);
+                    g.call_rule(GRule::Expr);
                     g.zero_or_more(|g| {
-                        g.call("comma");
-                        g.call("expr");
+                        g.call_rule(GRule::Comma);
+                        g.call_rule(GRule::Expr);
                     });
                     g.optional(|g| {
-                        g.call("comma");
+                        g.call_rule(GRule::Comma);
                     });
                 },
             );
@@ -592,312 +712,379 @@ pub fn define(g: &mut GrammarBuilder) {
 
     // After `[`: `[..]`, `[..2]`, `[1..2]`, `[1..2[`, … (aligned with `readArrayOrMapOrInterval` /
     // `readInterval` in leekscript-java).
-    g.parser_rule("bracket_interval_body", |g| {
-        g.choices(vec![
-            Box::new(|g| {
-                g.call("dotdot");
+    g.parser_rule(GRule::BracketIntervalBody.as_str(), |g| {
+        sipha::choices!(
+            g,
+            |g| {
+                g.call_rule(GRule::Dotdot);
                 g.optional(|g| {
-                    g.call("expr");
+                    g.call_rule(GRule::Expr);
                 });
-            }),
-            Box::new(|g| {
-                g.call("expr");
-                g.call("dotdot");
+            },
+            |g| {
+                g.call_rule(GRule::Expr);
+                g.call_rule(GRule::Dotdot);
                 g.optional(|g| {
-                    g.call("expr");
+                    g.call_rule(GRule::Expr);
                 });
-            }),
-        ]);
+            },
+        );
     });
 
-    g.parser_rule("array_expr", |g| {
-        g.call("lbracket");
-        g.choices(vec![
-            Box::new(|g| {
+    g.parser_rule(GRule::ArrayExpr.as_str(), |g| {
+        g.call_rule(GRule::Lbracket);
+        sipha::choices!(
+            g,
+            |g| {
                 cfg_flags::v4(g);
-                g.node(K::BracketMapExpr, |g| {
-                    g.call("colon");
+                g.node(Node::BracketMapExpr, |g| {
+                    g.call_rule(GRule::Colon);
                 });
-                g.call("rbracket");
-            }),
-            Box::new(|g| {
-                g.node(K::IntervalExpr, |g| {
-                    g.call("bracket_interval_body");
-                    g.call("interval_closing_bracket");
+                g.call_rule(GRule::Rbracket);
+            },
+            |g| {
+                g.node(Node::IntervalExpr, |g| {
+                    g.call_rule(GRule::BracketIntervalBody);
+                    g.call_rule(GRule::IntervalClosingBracket);
                 });
-            }),
-            Box::new(|g| {
+            },
+            |g| {
                 g.optional(|g| {
-                    g.call("bracket_list_or_map_inner");
+                    g.call_rule(GRule::BracketListOrMapInner);
                 });
-                g.call("rbracket");
-            }),
-        ]);
+                g.call_rule(GRule::Rbracket);
+            },
+        );
     });
 
-    g.parser_rule("anon_function_expr", |g| {
-        g.node(K::AnonFunctionExpr, |g| {
-            g.call("kw_function");
+    g.parser_rule(GRule::AnonFunctionExpr.as_str(), |g| {
+        g.node(Node::AnonFunctionExpr, |g| {
+            g.call_rule(GRule::KwFunction);
             g.optional(|g| {
                 cfg_flags::exp_templates(g);
-                g.call("decl_template_params");
+                g.call_rule(GRule::DeclTemplateParams);
             });
-            g.call("lparen");
+            g.call_rule(GRule::Lparen);
             g.optional(|g| {
-                g.call("function_fn_param");
+                g.call_rule(GRule::FunctionFnParam);
                 g.zero_or_more(|g| {
-                    g.call("comma");
-                    g.call("function_fn_param");
+                    g.call_rule(GRule::Comma);
+                    g.call_rule(GRule::FunctionFnParam);
                 });
                 g.optional(|g| {
-                    g.call("comma");
+                    g.call_rule(GRule::Comma);
                 });
             });
-            g.call("rparen");
+            g.call_rule(GRule::Rparen);
             g.optional(|g| {
-                g.call("arrow");
-                g.call("ls_type");
+                g.call_rule(GRule::Arrow);
+                g.call_rule(GRule::LsType);
             });
-            g.call("block");
+            g.call_rule(GRule::Block);
         });
     });
 
     // `]..[`, `]..2]`, `]1..2[`, … (aligned with `BRACKET_RIGHT` + `DOT_DOT` in leekscript-java).
-    g.parser_rule("interval_rbracket_expr", |g| {
-        g.node(K::IntervalExpr, |g| {
-            g.call("rbracket");
-            g.choices(vec![
-                Box::new(|g| {
-                    g.call("dotdot");
+    g.parser_rule(GRule::IntervalRbracketExpr.as_str(), |g| {
+        g.node(Node::IntervalExpr, |g| {
+            g.call_rule(GRule::Rbracket);
+            sipha::choices!(
+                g,
+                |g| {
+                    g.call_rule(GRule::Dotdot);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                }),
-                Box::new(|g| {
-                    g.call("expr");
-                    g.call("dotdot");
+                },
+                |g| {
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Dotdot);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                }),
-            ]);
-            g.call("interval_closing_bracket");
+                },
+            );
+            g.call_rule(GRule::IntervalClosingBracket);
         });
     });
 
     // object := "{" (ident ":" expr ("," ident ":" expr)* ","?)? "}"
-    g.parser_rule("object_expr", |g| {
-        g.node(K::ObjectExpr, |g| {
-            g.call("lbrace");
+    g.parser_rule(GRule::ObjectExpr.as_str(), |g| {
+        g.node(Node::ObjectExpr, |g| {
+            g.call_rule(GRule::Lbrace);
             g.optional(|g| {
-                g.call("ident");
-                g.call("colon");
-                g.call("expr");
+                g.call_rule(GRule::Ident);
+                g.call_rule(GRule::Colon);
+                g.call_rule(GRule::Expr);
                 g.zero_or_more(|g| {
-                    g.call("comma");
-                    g.call("ident");
-                    g.call("colon");
-                    g.call("expr");
+                    g.call_rule(GRule::Comma);
+                    g.call_rule(GRule::Ident);
+                    g.call_rule(GRule::Colon);
+                    g.call_rule(GRule::Expr);
                 });
                 g.optional(|g| {
-                    g.call("comma");
+                    g.call_rule(GRule::Comma);
                 });
             });
-            g.call("rbrace");
+            g.call_rule(GRule::Rbrace);
         });
     });
 
     // set := "<" (expr ("," expr)* ","?)? ">"
-    g.parser_rule("set_expr", |g| {
-        g.node(K::SetExpr, |g| {
-            g.call("op_lt");
+    g.parser_rule(GRule::SetExpr.as_str(), |g| {
+        g.node(Node::SetExpr, |g| {
+            g.call_rule(GRule::OpLt);
             g.optional(|g| {
-                g.call("expr");
+                g.call_rule(GRule::Expr);
                 g.zero_or_more(|g| {
-                    g.call("comma");
-                    g.call("expr");
+                    g.call_rule(GRule::Comma);
+                    g.call_rule(GRule::Expr);
                 });
                 g.optional(|g| {
-                    g.call("comma");
+                    g.call_rule(GRule::Comma);
                 });
             });
-            g.call("op_gt");
+            g.call_rule(GRule::OpGt);
         });
     });
 
-    // primary := literals | ident | paren | array | object | set | lambda | …
-    g.parser_rule("primary", |g| {
-        g.choices(vec![
-            Box::new(|g| {
+    // `(` … `)` — parenthesized expr or lambda; disambiguate via `=>` before falling back to
+    // [`paren_expr`].
+    g.parser_rule(GRule::PrimaryLparen.as_str(), |g| {
+        g.choice(
+            |g| {
                 g.lookahead(|g| {
-                    g.call("lambda_head");
-                    g.call("arrow");
+                    g.call_rule(GRule::LambdaHead);
+                    g.call_rule(GRule::Arrow);
                 });
-                g.call("lambda_expr");
-            }),
-            Box::new(|g| {
-                g.lookahead(|g| {
-                    g.call("kw_function");
-                    g.optional(|g| {
-                        cfg_flags::exp_templates(g);
-                        g.call("decl_template_params");
-                    });
-                    g.call("lparen");
-                });
-                g.call("anon_function_expr");
-            }),
-            // `eval(...)`: lexer `EVAL` in Java; not a dedicated form in leekscript-java `WordCompiler`.
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.lookahead(|g| {
-                    g.call("kw_eval");
-                    g.call("lparen");
-                });
-                g.node(K::CallExpr, |g| {
-                    g.call("kw_eval");
-                    g.call("lparen");
-                    g.call("expr");
-                    g.call("rparen");
-                });
-            }),
-            Box::new(|g| {
-                g.call("number");
-            }),
-            Box::new(|g| {
-                g.call("string");
-            }),
-            Box::new(|g| {
-                g.call("pi");
-            }),
-            Box::new(|g| {
-                g.call("infinity");
-            }),
-            Box::new(|g| {
-                g.call("kw_true");
-            }),
-            Box::new(|g| {
-                g.call("kw_false");
-            }),
-            Box::new(|g| {
-                g.call("kw_null");
-            }),
-            Box::new(|g| {
-                g.call("kw_this");
-            }),
-            Box::new(|g| {
-                cfg_flags::v2(g);
-                g.node(K::SuperExpr, |g| {
-                    g.call("kw_super");
-                });
-            }),
-            Box::new(|g| {
-                cfg_flags::v2(g);
-                g.node(K::ClassRefExpr, |g| {
-                    g.call("kw_class");
-                });
-            }),
-            // `instanceof Class` / `instanceof Array` — type keywords are not `ident`.
-            Box::new(|g| {
-                cfg_flags::v2(g);
-                g.node(K::BuiltinTypeNameExpr, |g| {
-                    g.call("kw_class_type");
-                });
-            }),
-            Box::new(|g| {
-                cfg_flags::v2(g);
-                g.node(K::BuiltinTypeNameExpr, |g| {
-                    g.call("kw_array");
-                    g.optional(|g| {
-                        g.call("generic_type_args");
-                    });
-                });
-            }),
-            Box::new(|g| {
-                cfg_flags::v3(g);
-                g.node(K::BuiltinStringifyExpr, |g| {
-                    g.call("kw_string_type");
-                });
-            }),
-            Box::new(|g| {
-                g.call("interval_rbracket_expr");
-            }),
-            Box::new(|g| {
-                g.call("if_expr");
-            }),
-            Box::new(|g| {
-                g.call("new_expr");
-            }),
-            Box::new(|g| {
-                g.call("paren_expr");
-            }),
-            Box::new(|g| {
-                g.node(K::ArrayExpr, |g| {
-                    g.call("array_expr");
-                });
-            }),
-            Box::new(|g| {
-                g.call("object_expr");
-            }),
-            Box::new(|g| {
-                g.call("set_expr");
-            }),
-            Box::new(|g| {
-                g.call("ident");
-            }),
-        ]);
+                g.call_rule(GRule::LambdaExpr);
+            },
+            |g| {
+                g.call_rule(GRule::ParenExpr);
+            },
+        );
     });
 
-    g.parser_rule("if_expr", |g| {
-        g.node(K::IfExpr, |g| {
-            g.call("kw_if");
+    // Alternatives not covered by [`primary`]'s leading-byte dispatch. Kept as its own
+    // [`parser_rule`] so bytecode is emitted with trivia auto-skip enabled; an inlined fallback
+    // inside [`byte_dispatch`] would omit `skip()` before `call`s (breaking `=> real` lambdas).
+    g.parser_rule(GRule::PrimaryFallback.as_str(), |g| {
+        sipha::choices!(
+            g,
+            |g| {
+                g.lookahead(|g| {
+                    g.call_rule(GRule::LambdaHead);
+                    g.call_rule(GRule::Arrow);
+                });
+                g.call_rule(GRule::LambdaExpr);
+            },
+            |g| {
+                g.lookahead(|g| {
+                    g.call_rule(GRule::KwFunction);
+                    g.optional(|g| {
+                        cfg_flags::exp_templates(g);
+                        g.call_rule(GRule::DeclTemplateParams);
+                    });
+                    g.call_rule(GRule::Lparen);
+                });
+                g.call_rule(GRule::AnonFunctionExpr);
+            },
+            // `eval(...)`: lexer `EVAL` in Java; not a dedicated form in leekscript-java `WordCompiler`.
+            |g| {
+                cfg_flags::v3(g);
+                g.lookahead(|g| {
+                    g.call_rule(GRule::KwEval);
+                    g.call_rule(GRule::Lparen);
+                });
+                g.node(Node::CallExpr, |g| {
+                    g.call_rule(GRule::KwEval);
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Rparen);
+                });
+            },
+            |g| {
+                g.call_rule(GRule::Pi);
+            },
+            |g| {
+                g.call_rule(GRule::Infinity);
+            },
+            |g| {
+                g.call_rule(GRule::KwTrue);
+            },
+            |g| {
+                g.call_rule(GRule::KwFalse);
+            },
+            |g| {
+                g.call_rule(GRule::KwNull);
+            },
+            |g| {
+                g.call_rule(GRule::KwThis);
+            },
+            |g| {
+                cfg_flags::v2(g);
+                g.node(Node::SuperExpr, |g| {
+                    g.call_rule(GRule::KwSuper);
+                });
+            },
+            |g| {
+                cfg_flags::v2(g);
+                g.node(Node::ClassRefExpr, |g| {
+                    g.call_rule(GRule::KwClass);
+                });
+            },
+            // `instanceof Class` / `instanceof Array` — type keywords are not `ident`.
+            |g| {
+                cfg_flags::v2(g);
+                g.node(Node::BuiltinTypeNameExpr, |g| {
+                    g.call_rule(GRule::KwClassType);
+                });
+            },
+            |g| {
+                cfg_flags::v2(g);
+                g.node(Node::BuiltinTypeNameExpr, |g| {
+                    g.call_rule(GRule::KwArray);
+                    g.optional(|g| {
+                        g.call_rule(GRule::GenericTypeArgs);
+                    });
+                });
+            },
+            |g| {
+                cfg_flags::v3(g);
+                g.node(Node::BuiltinStringifyExpr, |g| {
+                    g.call_rule(GRule::KwStringType);
+                });
+            },
+            |g| {
+                g.call_rule(GRule::IfExpr);
+            },
+            |g| {
+                g.call_rule(GRule::NewExpr);
+            },
+            |g| {
+                g.call_rule(GRule::Ident);
+            },
+        );
+    });
+
+    // primary := literals | ident | paren | array | object | set | lambda | …
+    //
+    // Fast-path [`byte_dispatch`](GrammarBuilder::byte_dispatch) on leading byte (after trivia)
+    // for common starters; everything else goes through [`primary_fallback`].
+    g.parser_rule(GRule::Primary.as_str(), |g| {
+        let digit_or_dot = CharClass::EMPTY.with_range(b'0', b'9').with_byte(b'.');
+
+        let mut arms: Vec<(CharClass, GrammarChoiceFn)> = Vec::with_capacity(9);
+        arms.push((
+            digit_or_dot,
+            Box::new(|g| {
+                g.call_rule(GRule::Number);
+            }),
+        ));
+        arms.push((
+            CharClass::from_byte(b'"'),
+            Box::new(|g| {
+                g.call_rule(GRule::String);
+            }),
+        ));
+        arms.push((
+            CharClass::from_byte(b'\''),
+            Box::new(|g| {
+                g.call_rule(GRule::String);
+            }),
+        ));
+        arms.push((
+            CharClass::from_byte(b'['),
+            Box::new(|g| {
+                g.node(Node::ArrayExpr, |g| {
+                    g.call_rule(GRule::ArrayExpr);
+                });
+            }),
+        ));
+        arms.push((
+            CharClass::from_byte(b']'),
+            Box::new(|g| {
+                g.call_rule(GRule::IntervalRbracketExpr);
+            }),
+        ));
+        arms.push((
+            CharClass::from_byte(b'{'),
+            Box::new(|g| {
+                g.call_rule(GRule::ObjectExpr);
+            }),
+        ));
+        arms.push((
+            CharClass::from_byte(b'<'),
+            Box::new(|g| {
+                g.call_rule(GRule::SetExpr);
+            }),
+        ));
+        arms.push((
+            CharClass::from_byte(b'('),
+            Box::new(|g| {
+                g.call_rule(GRule::PrimaryLparen);
+            }),
+        ));
+
+        g.byte_dispatch(
+            arms,
+            Some(Box::new(|g| {
+                g.call_rule(GRule::PrimaryFallback);
+            })),
+        );
+    });
+
+    g.parser_rule(GRule::IfExpr.as_str(), |g| {
+        g.node(Node::IfExpr, |g| {
+            g.call_rule(GRule::KwIf);
             // Accept both `if (cond)` and `if cond` in expression position.
             g.choice(
                 |g| {
-                    g.call("lparen");
-                    g.call("expr");
-                    g.call("rparen");
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Rparen);
                 },
                 |g| {
-                    g.call("expr");
+                    g.call_rule(GRule::Expr);
                 },
             );
             // Inline the block shape here so we don't accidentally fall into
             // `{ ... }` as an object literal in expression contexts.
-            g.node(K::Block, |g| {
-                g.call("lbrace");
+            g.node(Node::Block, |g| {
+                g.call_rule(GRule::Lbrace);
                 g.zero_or_more(|g| {
-                    g.call("stmt");
+                    g.call_rule(GRule::Stmt);
                 });
-                g.call("rbrace");
+                g.call_rule(GRule::Rbrace);
             });
             g.optional(|g| {
-                g.call("kw_else");
-                g.node(K::Block, |g| {
-                    g.call("lbrace");
+                g.call_rule(GRule::KwElse);
+                g.node(Node::Block, |g| {
+                    g.call_rule(GRule::Lbrace);
                     g.zero_or_more(|g| {
-                        g.call("stmt");
+                        g.call_rule(GRule::Stmt);
                     });
-                    g.call("rbrace");
+                    g.call_rule(GRule::Rbrace);
                 });
             });
         });
     });
 
-    g.parser_rule("new_expr", |g| {
-        g.node(K::NewExpr, |g| {
-            g.call("kw_new");
+    g.parser_rule(GRule::NewExpr.as_str(), |g| {
+        g.node(Node::NewExpr, |g| {
+            g.call_rule(GRule::KwNew);
             // `new Array` / `new Array()` — `Array` is the `ArrayKw` token, not `ident`.
             g.choice(
                 |g| {
-                    g.call("ident");
+                    g.call_rule(GRule::Ident);
                 },
                 |g| {
                     cfg_flags::v2(g);
-                    g.call("kw_array");
+                    g.call_rule(GRule::KwArray);
                 },
             );
             g.optional(|g| {
-                g.call("call_expr_suffix");
+                g.call_rule(GRule::CallExprSuffix);
             });
         });
     });

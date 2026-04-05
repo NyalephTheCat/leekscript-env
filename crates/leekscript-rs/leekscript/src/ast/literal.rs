@@ -1,4 +1,4 @@
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Lex;
 use sipha::tree::ast::AstToken;
 use sipha::tree::red::SyntaxToken;
 use sipha::types::{IntoSyntaxKind, SyntaxKind};
@@ -14,7 +14,7 @@ pub struct LitStr(SyntaxToken);
 impl AstToken for LitStr {
     #[inline]
     fn can_cast(kind: SyntaxKind) -> bool {
-        kind == K::String.into_syntax_kind()
+        kind == Lex::String.into_syntax_kind()
     }
 
     #[inline]

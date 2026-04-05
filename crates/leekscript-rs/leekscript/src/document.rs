@@ -22,7 +22,7 @@ use sipha::tree::emit::{EmitOptions, syntax_root_to_string};
 use sipha::tree::walk::{Visitor, WalkOptions, WalkResult};
 
 #[cfg(feature = "partial-reparse")]
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 #[cfg(feature = "partial-reparse")]
 use sipha::parse::incremental::TextEdit;
 #[cfg(feature = "partial-reparse")]
@@ -30,36 +30,36 @@ use sipha::parse::partial_reparse::{PartialReparseConfig, reparse_partial_or_fal
 #[cfg(feature = "partial-reparse")]
 use sipha::types::SyntaxKind;
 
-/// Kinds that can appear as a direct child of [`K::Root`] from the `stmt` rule — boundaries for
+/// Kinds that can appear as a direct child of [`Node::Root`] from the `stmt` rule — boundaries for
 /// [`reparse_partial_or_fallback`](sipha::parse::partial_reparse::reparse_partial_or_fallback).
 #[cfg(feature = "partial-reparse")]
 const STMT_BOUNDARY_KINDS: &[SyntaxKind] = &[
-    K::IncludeStmt as SyntaxKind,
-    K::ReturnStmt as SyntaxKind,
-    K::BreakStmt as SyntaxKind,
-    K::ContinueStmt as SyntaxKind,
-    K::GlobalDecl as SyntaxKind,
-    K::ElseStmt as SyntaxKind,
-    K::SwitchStmt as SyntaxKind,
-    K::VarDecl as SyntaxKind,
-    K::FunctionDecl as SyntaxKind,
-    K::ClassDecl as SyntaxKind,
-    K::IfStmt as SyntaxKind,
-    K::ForStmt as SyntaxKind,
-    K::ForeachStmt as SyntaxKind,
-    K::DoWhileStmt as SyntaxKind,
-    K::TryStmt as SyntaxKind,
-    K::ThrowStmt as SyntaxKind,
-    K::ImportStmt as SyntaxKind,
-    K::ExportStmt as SyntaxKind,
-    K::GotoStmt as SyntaxKind,
-    K::PackageStmt as SyntaxKind,
-    K::ConstDecl as SyntaxKind,
-    K::WhileStmt as SyntaxKind,
-    K::MatchStmt as SyntaxKind,
-    K::Stmt as SyntaxKind,
-    K::EmptyStmt as SyntaxKind,
-    K::ErrorStmt as SyntaxKind,
+    Node::IncludeStmt as SyntaxKind,
+    Node::ReturnStmt as SyntaxKind,
+    Node::BreakStmt as SyntaxKind,
+    Node::ContinueStmt as SyntaxKind,
+    Node::GlobalDecl as SyntaxKind,
+    Node::ElseStmt as SyntaxKind,
+    Node::SwitchStmt as SyntaxKind,
+    Node::VarDecl as SyntaxKind,
+    Node::FunctionDecl as SyntaxKind,
+    Node::ClassDecl as SyntaxKind,
+    Node::IfStmt as SyntaxKind,
+    Node::ForStmt as SyntaxKind,
+    Node::ForeachStmt as SyntaxKind,
+    Node::DoWhileStmt as SyntaxKind,
+    Node::TryStmt as SyntaxKind,
+    Node::ThrowStmt as SyntaxKind,
+    Node::ImportStmt as SyntaxKind,
+    Node::ExportStmt as SyntaxKind,
+    Node::GotoStmt as SyntaxKind,
+    Node::PackageStmt as SyntaxKind,
+    Node::ConstDecl as SyntaxKind,
+    Node::WhileStmt as SyntaxKind,
+    Node::MatchStmt as SyntaxKind,
+    Node::Stmt as SyntaxKind,
+    Node::EmptyStmt as SyntaxKind,
+    Node::ErrorStmt as SyntaxKind,
 ];
 
 /// Failure when splicing source or re-parsing after an edit.
@@ -217,7 +217,7 @@ impl LeekDoc {
             let edits = [edit];
             let built = crate::grammar::built_graph();
             let graph = built.as_graph();
-            if let Some(stmt_rule) = graph.rule_id("stmt") {
+            if let Some(stmt_rule) = graph.rule_id(crate::grammar::GRule::Stmt.as_str()) {
                 let config = PartialReparseConfig {
                     boundary_kinds: STMT_BOUNDARY_KINDS,
                     boundary_rule: stmt_rule,

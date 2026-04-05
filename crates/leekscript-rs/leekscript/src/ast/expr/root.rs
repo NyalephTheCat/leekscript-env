@@ -1,8 +1,8 @@
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 use sipha::AstNode;
 use sipha::prelude::*;
 
-/// Full expression from the `expr` / `assign` rule (`K::Expr`).
+/// Full expression from the `expr` / `assign` rule (`Node::Expr`).
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::Expr)]
+#[ast(kind = Node::Expr)]
 pub struct ExprRoot(SyntaxNode);

@@ -1,12 +1,12 @@
 //! Experimental template parameter lists (`<T, U>`) on declarations.
 
 use crate::Span;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::{Lex, Node};
 use sipha::AstNode;
 use sipha::prelude::*;
 
 #[derive(Debug, Clone, AstNode)]
-#[ast(kind = K::TemplateParams)]
+#[ast(kind = Node::TemplateParams)]
 pub struct TemplateParams(SyntaxNode);
 
 impl TemplateParams {
@@ -15,7 +15,7 @@ impl TemplateParams {
     pub fn names(&self) -> Vec<String> {
         self.syntax()
             .child_tokens()
-            .filter(|t| t.kind_as::<K>() == Some(K::Ident))
+            .filter(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
             .map(|t| t.text().to_string())
             .collect()
     }
@@ -25,7 +25,7 @@ impl TemplateParams {
     pub fn name_spans(&self) -> Vec<(String, Span)> {
         self.syntax()
             .child_tokens()
-            .filter(|t| t.kind_as::<K>() == Some(K::Ident))
+            .filter(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
             .map(|t| (t.text().to_string(), t.text_range()))
             .collect()
     }

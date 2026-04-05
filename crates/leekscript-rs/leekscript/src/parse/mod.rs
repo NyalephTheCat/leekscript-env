@@ -4,8 +4,7 @@ mod recovery;
 pub(crate) mod version;
 
 pub use error::{ParseError, ParseErrorInner};
-#[cfg(feature = "partial-reparse")]
-pub use recovery::{parse_rule_at_offset, parse_rule_at_offset_with_built};
+pub use lang_directive::language_options_with_source_directives;
 pub use recovery::{
     ParsedWithRecovery, parse_doc_or_recover, parse_doc_with_recovery,
     parse_doc_with_recovery_limited, parse_doc_with_recovery_limited_with_built,
@@ -14,9 +13,10 @@ pub use recovery::{
     parse_signature_doc_with_recovery_limited_with_built,
     parse_signature_doc_with_recovery_with_built,
 };
-pub use lang_directive::language_options_with_source_directives;
+#[cfg(feature = "partial-reparse")]
+pub use recovery::{parse_rule_at_offset, parse_rule_at_offset_with_built};
 pub use version::{
-    ExperimentalFeatures, LanguageOptions, Version, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE,
+    ExperimentalFeatures, FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE, LanguageOptions, Version,
 };
 
 use std::cell::RefCell;
@@ -24,11 +24,26 @@ use std::cell::RefCell;
 use crate::grammar;
 use sipha::prelude::*;
 
+#[inline]
+fn new_parse_engine() -> Engine {
+    let e = Engine::with_capacity(8192, 8192);
+    // Packrat memo matches the grammar’s `allow_rule_cycles(true)` (indirect expr recursion).
+    #[cfg(feature = "std")]
+    {
+        e.with_memo()
+    }
+    #[cfg(not(feature = "std"))]
+    {
+        e
+    }
+}
+
 thread_local! {
     /// Reuse allocation-heavy parse buffers between calls on the same thread (Criterion, LSP, CLI).
     /// [`RefCell::try_borrow_mut`] avoids panics if parsing is re-entered on the same thread.
     /// Larger initial capacities than [`Engine::new`] reduce reallocations on big inputs (e.g. std stubs).
-    static REUSABLE_PARSE_ENGINE: RefCell<Engine> = RefCell::new(Engine::with_capacity(8192, 8192));
+    /// With `std`, the engine uses sipha packrat memoisation (see [`Engine::with_memo`]).
+    static REUSABLE_PARSE_ENGINE: RefCell<Engine> = RefCell::new(new_parse_engine());
 }
 
 /// Run `f` with a thread-local [`Engine`] when possible (see [`REUSABLE_PARSE_ENGINE`]).
@@ -37,7 +52,7 @@ pub(crate) fn with_reusable_engine<R>(f: impl FnOnce(&mut Engine) -> R) -> R {
         if let Ok(mut engine) = cell.try_borrow_mut() {
             f(&mut *engine)
         } else {
-            f(&mut Engine::with_capacity(8192, 8192))
+            f(&mut new_parse_engine())
         }
     })
 }
@@ -168,9 +183,6 @@ fn parse_doc_buffer_with_built_and_context(
 ///
 /// `lang` is usually a [`LanguageOptions`] or a [`Version`] (which implies no experimental flags).
 /// Leading `leeklang:` comments are merged on top of `lang` (see [`language_options_with_source_directives`]).
-///
-/// If the `grammar-v4-only` Cargo feature is enabled, only [`Version::V4`] is supported as the
-/// base dialect; older [`Version`] values will not match the lexer/parser graph correctly.
 pub fn parse_doc(src: &str, lang: impl Into<LanguageOptions>) -> Result<ParsedDoc, ParseError> {
     let opts = language_options_with_source_directives(src, lang);
     parse_doc_with_context(src, opts.parse_context())

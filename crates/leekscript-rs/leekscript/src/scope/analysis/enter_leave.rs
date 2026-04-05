@@ -13,53 +13,53 @@ use crate::scope::extract::{
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::{ScopeId, ScopeKind, SymbolKind};
 use crate::syntax::attached_parsed_doxygen;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Node;
 
 use super::analyzer::Analyzer;
 use super::spans::{
-    catch_param_span, class_name_span, foreach_bind_spans, for_stmt_init_var_spans,
+    catch_param_span, class_name_span, for_stmt_init_var_spans, foreach_bind_spans,
     function_name_span, global_name_span, lambda_param_spans, var_decl_name_span,
 };
 
 pub(crate) fn sync_enter(a: &mut Analyzer, node: &SyntaxNode) {
-    match node.kind_as::<K>() {
-        Some(K::FunctionDecl) => enter_function_decl(a, node),
-        Some(K::AnonFunctionExpr) => enter_anon_function_expr(a, node),
-        Some(K::Block) => enter_block(a, node),
-        Some(K::ClassDecl) => enter_class_decl(a, node),
-        Some(K::ClassMember) => enter_class_member(a, node),
-        Some(K::VarDecl) => enter_var_decl(a, node),
-        Some(K::GlobalDecl) => enter_global_decl(a, node),
-        Some(K::ForeachStmt) => enter_foreach(a, node),
-        Some(K::ForStmt) => enter_for_stmt(a, node),
-        Some(K::LambdaExpr) => enter_lambda_expr(a, node),
-        Some(K::CatchClause) => enter_catch(a, node),
+    match node.kind_as::<Node>() {
+        Some(Node::FunctionDecl) => enter_function_decl(a, node),
+        Some(Node::AnonFunctionExpr) => enter_anon_function_expr(a, node),
+        Some(Node::Block) => enter_block(a, node),
+        Some(Node::ClassDecl) => enter_class_decl(a, node),
+        Some(Node::ClassMember) => enter_class_member(a, node),
+        Some(Node::VarDecl) => enter_var_decl(a, node),
+        Some(Node::GlobalDecl) => enter_global_decl(a, node),
+        Some(Node::ForeachStmt) => enter_foreach(a, node),
+        Some(Node::ForStmt) => enter_for_stmt(a, node),
+        Some(Node::LambdaExpr) => enter_lambda_expr(a, node),
+        Some(Node::CatchClause) => enter_catch(a, node),
         _ => {}
     }
 }
 
 pub(crate) fn sync_leave(a: &mut Analyzer, node: &SyntaxNode) {
-    match node.kind_as::<K>() {
-        Some(K::Block) => leave_block(a, node),
-        Some(K::FunctionDecl) => {
+    match node.kind_as::<Node>() {
+        Some(Node::Block) => leave_block(a, node),
+        Some(Node::FunctionDecl) => {
             a.fn_template_stack.pop();
             a.scope_stack.pop();
         }
-        Some(K::ClassMember) => {
+        Some(Node::ClassMember) => {
             let cn = a.class_name_stack.last().cloned().unwrap_or_default();
             if try_extract_class_method(node, &cn).is_some() {
                 a.scope_stack.pop();
             }
         }
-        Some(K::ClassDecl) => {
+        Some(Node::ClassDecl) => {
             a.class_name_stack.pop();
             a.class_template_stack.pop();
             a.scope_stack.pop();
         }
-        Some(K::ForStmt) | Some(K::LambdaExpr) => {
+        Some(Node::ForStmt) | Some(Node::LambdaExpr) => {
             a.scope_stack.pop();
         }
-        Some(K::AnonFunctionExpr) => {
+        Some(Node::AnonFunctionExpr) => {
             a.fn_template_stack.pop();
             a.scope_stack.pop();
         }
@@ -155,10 +155,7 @@ fn enter_class_decl(a: &mut Analyzer, node: &SyntaxNode) {
     let outer = a.current_scope();
     let cname = cd.name().unwrap_or_default();
     let cspan = class_name_span(&cd).unwrap_or_else(|| node.text_range());
-    let class_templates = cd
-        .template_params()
-        .map(|p| p.names())
-        .unwrap_or_default();
+    let class_templates = cd.template_params().map(|p| p.names()).unwrap_or_default();
     if a.phase.is_build_scopes() {
         let doc = attached_parsed_doxygen(node);
         a.graph.declare(
@@ -176,9 +173,7 @@ fn enter_class_decl(a: &mut Analyzer, node: &SyntaxNode) {
     a.class_template_stack.push(class_templates.clone());
     let class_sc = a.push_child_scope(Some(outer), ScopeKind::Class);
     if a.phase.is_build_scopes() {
-        a.graph
-            .class_body_scope_by_name
-            .insert(cname, class_sc);
+        a.graph.class_body_scope_by_name.insert(cname, class_sc);
         if let Some(tp) = cd.template_params() {
             for (tp_name, tp_span) in tp.name_spans() {
                 a.graph.declare(
@@ -199,11 +194,7 @@ fn enter_class_decl(a: &mut Analyzer, node: &SyntaxNode) {
 
 fn enter_class_member(a: &mut Analyzer, node: &SyntaxNode) {
     let cn = a.class_name_stack.last().cloned().unwrap_or_default();
-    let class_templates: Vec<String> = a
-        .class_template_stack
-        .last()
-        .cloned()
-        .unwrap_or_default();
+    let class_templates: Vec<String> = a.class_template_stack.last().cloned().unwrap_or_default();
     if let Some(m) = try_extract_class_method(node, &cn) {
         let class_sc = a.current_scope();
         if a.phase.is_build_scopes() {

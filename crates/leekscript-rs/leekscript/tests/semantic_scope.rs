@@ -4,9 +4,7 @@ use leekscript::scope::{
     ExprTypeKey, LeekTy, Reference, SemanticCode, SemanticSeverity, SymbolKind,
     run_semantic_analysis,
 };
-use leekscript::{
-    ExperimentalFeatures, LanguageOptions, Version, parse_doc, parse_signature_doc,
-};
+use leekscript::{ExperimentalFeatures, LanguageOptions, Version, parse_doc, parse_signature_doc};
 
 macro_rules! parse_with_templates {
     ($src:literal) => {
@@ -212,7 +210,11 @@ fn anon_function_in_object_literal_params_resolve() {
 
 #[test]
 fn lambda_param_resolves_in_body() {
-    let doc = parse_doc("function f() { var g = (a => a + 1); return g; }", Version::V4).expect("parse");
+    let doc = parse_doc(
+        "function f() { var g = (a => a + 1); return g; }",
+        Version::V4,
+    )
+    .expect("parse");
     let a = run_semantic_analysis(doc.root(), Version::V4);
     assert!(
         !a.diagnostics
@@ -268,9 +270,7 @@ fn keyword_integer_lexes_as_one_token_not_in_teger() {
     .expect("parse");
     let a = run_semantic_analysis(doc.root(), Version::V4);
     assert!(
-        !a.diagnostics
-            .iter()
-            .any(|d| d.message.contains("teger")),
+        !a.diagnostics.iter().any(|d| d.message.contains("teger")),
         "{:?}",
         a.diagnostics
     );
@@ -322,8 +322,7 @@ fn incompatible_initializer_has_code_and_related_span() {
         bad[0]
     );
     assert!(
-        bad[0].message.contains("expected `integer`")
-            && bad[0].message.contains("found `boolean`"),
+        bad[0].message.contains("expected `integer`") && bad[0].message.contains("found `boolean`"),
         "message should name expected and found types: {:?}",
         bad[0].message
     );
@@ -333,7 +332,8 @@ fn incompatible_initializer_has_code_and_related_span() {
 /// (e.g. `C` inside `C.M` as the second argument to `min`).
 #[test]
 fn typed_var_initializer_min_with_static_field_no_false_mismatch() {
-    let src = "class C { static final integer M = 40; static f() { integer n = min(1 + 1, C.M); } }";
+    let src =
+        "class C { static final integer M = 40; static f() { integer n = min(1 + 1, C.M); } }";
     let doc = parse_doc(src, Version::V4).expect("parse");
     let a = run_semantic_analysis(doc.root(), Version::V4);
     let bad: Vec<_> = a
@@ -705,9 +705,9 @@ fn template_type_param_resolves_in_function() {
     let doc = parse_with_templates!("function id<T>(T x) { return x; }");
     let a = run_semantic_analysis(doc.root(), Version::V4);
     assert!(
-        !a.diagnostics.iter().any(|d| {
-            d.code == SemanticCode::UndefinedName && d.message.contains("`T`")
-        }),
+        !a.diagnostics
+            .iter()
+            .any(|d| { d.code == SemanticCode::UndefinedName && d.message.contains("`T`") }),
         "{:?}",
         a.diagnostics
     );
@@ -755,9 +755,9 @@ fn generic_class_field_and_method_use_class_type_param() {
         .expect("value field");
     assert_eq!(value.declared_ty, Some(LeekTy::TypeParam("T".into())));
     assert!(
-        !a.diagnostics.iter().any(|d| {
-            d.code == SemanticCode::UndefinedName && d.message.contains("`T`")
-        }),
+        !a.diagnostics
+            .iter()
+            .any(|d| { d.code == SemanticCode::UndefinedName && d.message.contains("`T`") }),
         "{:?}",
         a.diagnostics
     );
@@ -771,7 +771,8 @@ fn generic_anon_function_template_params_resolve() {
     let a = run_semantic_analysis(doc.root(), Version::V4);
     assert!(
         !a.diagnostics.iter().any(|d| {
-            d.code == SemanticCode::UndefinedName && (d.message.contains("`U`") || d.message.contains("`x`"))
+            d.code == SemanticCode::UndefinedName
+                && (d.message.contains("`U`") || d.message.contains("`x`"))
         }),
         "{:?}",
         a.diagnostics
@@ -799,29 +800,36 @@ fn instanceof_does_not_narrow_type_parameter() {
         .iter()
         .filter(|r| r.name == "x" && r.resolved.is_some())
         .any(|r| a.expr_type_at(r.span) == Some(&t_ty));
-    assert!(still_t, "expected `x` to keep type T in some ref, {:?}", a.expr_types);
+    assert!(
+        still_t,
+        "expected `x` to keep type T in some ref, {:?}",
+        a.expr_types
+    );
 }
 
 #[test]
 fn multiline_typed_var_decl_parses_as_single_ternary() {
-    use leekscript::syntax::kinds::K;
+    use leekscript::syntax::kinds::Node;
 
     let src = "function f(integer prevItemId) {\n\treal chainBonus = (prevItemId >= 0) ?\n\t\t1.0 :\n\t\t0.0\n}";
     let doc = parse_doc(src, LanguageOptions::v4_experimental_all()).expect("parse");
     let ternaries = doc
         .root()
         .descendant_nodes()
-        .filter(|n| n.kind_as::<K>() == Some(K::TernaryExpr))
+        .filter(|n| n.kind_as::<Node>() == Some(Node::TernaryExpr))
         .count();
-    assert_eq!(ternaries, 1, "multiline ?: should be one ternary expression");
+    assert_eq!(
+        ternaries, 1,
+        "multiline ?: should be one ternary expression"
+    );
     let vd = doc
         .root()
         .descendant_nodes()
-        .find(|n| n.kind_as::<K>() == Some(K::VarDecl))
+        .find(|n| n.kind_as::<Node>() == Some(Node::VarDecl))
         .expect("var decl");
     assert!(
         vd.descendant_nodes()
-            .any(|n| n.kind_as::<K>() == Some(K::TernaryExpr)),
+            .any(|n| n.kind_as::<Node>() == Some(Node::TernaryExpr)),
         "ternary must be under VarDecl initializer, VarDecl children: {:?}",
         vd.child_nodes().map(|c| c.kind()).collect::<Vec<_>>()
     );
@@ -831,7 +839,11 @@ fn multiline_typed_var_decl_parses_as_single_ternary() {
         .iter()
         .filter(|d| d.code == SemanticCode::IncompatibleInitializer)
         .collect();
-    assert!(bad.is_empty(), "unexpected initializer errors: {:?}", a.diagnostics);
+    assert!(
+        bad.is_empty(),
+        "unexpected initializer errors: {:?}",
+        a.diagnostics
+    );
 }
 
 #[test]
@@ -876,11 +888,12 @@ fn typed_param_integer_union_null_is_stored_as_nullable_integer() {
     );
 }
 
-/// `[key: val]` must infer as `Map<K, V>`; a leading `K::Trivia` node under `ArrayExpr` must not
+/// `[key: val]` must infer as `Map<K, V>`; a leading `Node::Trivia` node under `ArrayExpr` must not
 /// break the `Expr` + `BracketMapExpr` shape (otherwise only `key` is seen → `Array<K>`).
 #[test]
 fn map_literal_key_colon_value_infers_map_even_with_leading_trivia_node() {
-    let src = "class Cell {}\nfunction f(Cell from) {\n\tMap<Cell, integer> initial = [from: 0];\n}";
+    let src =
+        "class Cell {}\nfunction f(Cell from) {\n\tMap<Cell, integer> initial = [from: 0];\n}";
     let doc = parse_doc(src, LanguageOptions::v4_experimental_all()).expect("parse");
     let a = run_semantic_analysis(doc.root(), Version::V4);
     let bad: Vec<_> = a
@@ -961,8 +974,7 @@ function f(Combo combo) { var x = combo.consequences.score; }";
         .diagnostics
         .iter()
         .filter(|d| {
-            d.code == SemanticCode::NullableChainAccess
-                && d.severity == SemanticSeverity::Warning
+            d.code == SemanticCode::NullableChainAccess && d.severity == SemanticSeverity::Warning
         })
         .collect();
     assert_eq!(warns.len(), 1, "{:?}", a.diagnostics);
@@ -1015,7 +1027,7 @@ fn nullable_array_index_propagates_and_warns() {
 #[test]
 fn logical_or_precedence_looser_than_relational_gt() {
     use leekscript::ast::IfStmt;
-    use leekscript::syntax::kinds::K;
+    use leekscript::syntax::kinds::{Lex, Node};
     use sipha::prelude::AstNode;
     let src = "function f() { if (best == null || combo.score > best.score) {} }";
     let doc = parse_doc(src, Version::V4).expect("parse");
@@ -1029,15 +1041,15 @@ fn logical_or_precedence_looser_than_relational_gt() {
     let or_only = cond
         .descendant_nodes()
         .find(|n| {
-            n.kind_as::<K>() == Some(K::BinaryExpr)
-                && n.child_tokens().any(|t| t.kind_as::<K>() == Some(K::OrOr))
+            n.kind_as::<Node>() == Some(Node::BinaryExpr)
+                && n.child_tokens().any(|t| t.kind_as::<Lex>() == Some(Lex::OrOr))
         })
         .expect("|| BinaryExpr");
     let gt_only = cond
         .descendant_nodes()
         .find(|n| {
-            n.kind_as::<K>() == Some(K::BinaryExpr)
-                && n.child_tokens().any(|t| t.kind_as::<K>() == Some(K::Gt))
+            n.kind_as::<Node>() == Some(Node::BinaryExpr)
+                && n.child_tokens().any(|t| t.kind_as::<Lex>() == Some(Lex::Gt))
         })
         .expect("> BinaryExpr");
     let r_or = or_only.text_range();

@@ -1,5 +1,5 @@
 use crate::ast::types::{TypeExpr, TypePrimaryType};
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Lex;
 use sipha::tree::ast::AstNode;
 
 use crate::scope::leek_ty::LeekTy;
@@ -67,17 +67,17 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType, template_names: &[String
         return LeekTy::Class(id);
     }
     for t in p.syntax().child_tokens() {
-        match t.kind_as::<K>() {
-            Some(K::VoidKw) => return LeekTy::Void,
-            Some(K::BooleanKw) => return LeekTy::Boolean,
-            Some(K::AnyKw) => return LeekTy::Any,
-            Some(K::IntegerKw) => return LeekTy::Integer,
-            Some(K::RealKw) => return LeekTy::Real,
-            Some(K::StringTypeKw) => return LeekTy::String,
-            Some(K::NullKw) => return LeekTy::Null,
-            Some(K::ObjectKw) => return LeekTy::Any,
-            Some(K::ClassTypeKw) => return LeekTy::Class("Class".into()),
-            Some(K::ArrayKw) => {
+        match t.kind_as::<Lex>() {
+            Some(Lex::VoidKw) => return LeekTy::Void,
+            Some(Lex::BooleanKw) => return LeekTy::Boolean,
+            Some(Lex::AnyKw) => return LeekTy::Any,
+            Some(Lex::IntegerKw) => return LeekTy::Integer,
+            Some(Lex::RealKw) => return LeekTy::Real,
+            Some(Lex::StringTypeKw) => return LeekTy::String,
+            Some(Lex::NullKw) => return LeekTy::Null,
+            Some(Lex::ObjectKw) => return LeekTy::Any,
+            Some(Lex::ClassTypeKw) => return LeekTy::Class("Class".into()),
+            Some(Lex::ArrayKw) => {
                 let args = p.generic_argument_roots();
                 let el = args
                     .first()
@@ -85,7 +85,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType, template_names: &[String
                     .unwrap_or(LeekTy::Any);
                 return LeekTy::Array(Box::new(el));
             }
-            Some(K::SetTypeKw) => {
+            Some(Lex::SetTypeKw) => {
                 let args = p.generic_argument_roots();
                 let el = args
                     .first()
@@ -93,7 +93,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType, template_names: &[String
                     .unwrap_or(LeekTy::Any);
                 return LeekTy::Array(Box::new(el));
             }
-            Some(K::MapKw) => {
+            Some(Lex::MapKw) => {
                 let args = p.generic_argument_roots();
                 let k = args
                     .get(0)
@@ -105,7 +105,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType, template_names: &[String
                     .unwrap_or(LeekTy::Any);
                 return LeekTy::Map(Box::new(k), Box::new(v));
             }
-            Some(K::IntervalKw) => {
+            Some(Lex::IntervalKw) => {
                 let args = p.generic_argument_roots();
                 let inner = args
                     .first()
@@ -113,7 +113,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType, template_names: &[String
                     .unwrap_or(LeekTy::Unknown);
                 return LeekTy::Interval(Box::new(LeekTy::interval_inner(inner)));
             }
-            Some(K::FunctionTypeKw) => {
+            Some(Lex::FunctionTypeKw) => {
                 let args = p.generic_argument_roots();
                 let ret = args
                     .last()

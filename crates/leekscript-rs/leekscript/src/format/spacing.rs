@@ -1,256 +1,256 @@
 //! Whether to insert a space between two consecutive non-trivia tokens.
 
 use crate::format::options::FormatOptions;
-use crate::syntax::kinds::K;
+use crate::syntax::kinds::Lex;
 
 #[inline]
-fn is_ident_or_literal(k: K) -> bool {
+fn is_ident_or_literal(k: Lex) -> bool {
     matches!(
         k,
-        K::Ident | K::Number | K::String | K::Pi | K::Infinity | K::TrueKw | K::FalseKw | K::NullKw
+        Lex::Ident | Lex::Number | Lex::String | Lex::Pi | Lex::Infinity | Lex::TrueKw | Lex::FalseKw | Lex::NullKw
     )
 }
 
 #[inline]
-fn is_class_member_modifier(k: K) -> bool {
+fn is_class_member_modifier(k: Lex) -> bool {
     matches!(
         k,
-        K::PublicKw | K::PrivateKw | K::ProtectedKw | K::StaticKw | K::FinalKw
+        Lex::PublicKw | Lex::PrivateKw | Lex::ProtectedKw | Lex::StaticKw | Lex::FinalKw
     )
 }
 
 #[inline]
-fn is_type_keyword(k: K) -> bool {
+fn is_type_keyword(k: Lex) -> bool {
     matches!(
         k,
-        K::IntegerKw
-            | K::RealKw
-            | K::StringTypeKw
-            | K::BooleanKw
-            | K::AnyKw
-            | K::ClassTypeKw
-            | K::ObjectKw
-            | K::ArrayKw
-            | K::SetTypeKw
-            | K::MapKw
-            | K::FunctionTypeKw
-            | K::IntervalKw
-            | K::VoidKw
+        Lex::IntegerKw
+            | Lex::RealKw
+            | Lex::StringTypeKw
+            | Lex::BooleanKw
+            | Lex::AnyKw
+            | Lex::ClassTypeKw
+            | Lex::ObjectKw
+            | Lex::ArrayKw
+            | Lex::SetTypeKw
+            | Lex::MapKw
+            | Lex::FunctionTypeKw
+            | Lex::IntervalKw
+            | Lex::VoidKw
     )
 }
 
 #[inline]
-fn is_keyword_word(k: K) -> bool {
+fn is_keyword_word(k: Lex) -> bool {
     matches!(
         k,
         // Operator-ish keywords
-        K::InstanceofKw | K::XorKw | K::NotKw | K::InKw | K::AsKw | K::IsKw
+        Lex::InstanceofKw | Lex::XorKw | Lex::NotKw | Lex::InKw | Lex::AsKw | Lex::IsKw
             // Literal keywords
-            | K::TrueKw
-            | K::FalseKw
-            | K::NullKw
+            | Lex::TrueKw
+            | Lex::FalseKw
+            | Lex::NullKw
             // Language keywords
-            | K::VarKw
-            | K::LetKw
-            | K::BreakKw
-            | K::ContinueKw
-            | K::DoKw
-            | K::ReturnKw
-            | K::FunctionKw
-            | K::IfKw
-            | K::ElseKw
-            | K::ForKw
-            | K::WhileKw
-            | K::IncludeKw
-            | K::MatchKw
-            | K::ClassKw
-            | K::NewKw
-            | K::ThisKw
-            | K::SuperKw
-            | K::SwitchKw
-            | K::CaseKw
-            | K::DefaultKw
-            | K::GlobalKw
-            | K::ExtendsKw
-            | K::PublicKw
-            | K::PrivateKw
-            | K::ProtectedKw
-            | K::StaticKw
-            | K::FinalKw
-            | K::ConstructorKw
+            | Lex::VarKw
+            | Lex::LetKw
+            | Lex::BreakKw
+            | Lex::ContinueKw
+            | Lex::DoKw
+            | Lex::ReturnKw
+            | Lex::FunctionKw
+            | Lex::IfKw
+            | Lex::ElseKw
+            | Lex::ForKw
+            | Lex::WhileKw
+            | Lex::IncludeKw
+            | Lex::MatchKw
+            | Lex::ClassKw
+            | Lex::NewKw
+            | Lex::ThisKw
+            | Lex::SuperKw
+            | Lex::SwitchKw
+            | Lex::CaseKw
+            | Lex::DefaultKw
+            | Lex::GlobalKw
+            | Lex::ExtendsKw
+            | Lex::PublicKw
+            | Lex::PrivateKw
+            | Lex::ProtectedKw
+            | Lex::StaticKw
+            | Lex::FinalKw
+            | Lex::ConstructorKw
             // Type keywords / reserved spellings
-            | K::VoidKw
-            | K::BooleanKw
-            | K::AnyKw
-            | K::IntegerKw
-            | K::RealKw
-            | K::StringTypeKw
-            | K::ClassTypeKw
-            | K::ObjectKw
-            | K::ArrayKw
-            | K::SetTypeKw
-            | K::MapKw
-            | K::FunctionTypeKw
+            | Lex::VoidKw
+            | Lex::BooleanKw
+            | Lex::AnyKw
+            | Lex::IntegerKw
+            | Lex::RealKw
+            | Lex::StringTypeKw
+            | Lex::ClassTypeKw
+            | Lex::ObjectKw
+            | Lex::ArrayKw
+            | Lex::SetTypeKw
+            | Lex::MapKw
+            | Lex::FunctionTypeKw
             // Java v3 reserved words present in lexer
-            | K::AbstractKw
-            | K::AwaitKw
-            | K::ByteKw
-            | K::CatchKw
-            | K::CharKw
-            | K::ConstKw
-            | K::DoubleKw
-            | K::EnumKw
-            | K::EvalKw
-            | K::ExportKw
-            | K::FinallyKw
-            | K::FloatKw
-            | K::GotoKw
-            | K::ImplementsKw
-            | K::ImportKw
-            | K::IntKw
-            | K::InterfaceKw
-            | K::LongKw
-            | K::NativeKw
-            | K::PackageKw
-            | K::ShortKw
-            | K::SynchronizedKw
-            | K::ThrowKw
-            | K::ThrowsKw
-            | K::TransientKw
-            | K::TryKw
-            | K::TypeofKw
-            | K::VolatileKw
-            | K::WithKw
-            | K::YieldKw
+            | Lex::AbstractKw
+            | Lex::AwaitKw
+            | Lex::ByteKw
+            | Lex::CatchKw
+            | Lex::CharKw
+            | Lex::ConstKw
+            | Lex::DoubleKw
+            | Lex::EnumKw
+            | Lex::EvalKw
+            | Lex::ExportKw
+            | Lex::FinallyKw
+            | Lex::FloatKw
+            | Lex::GotoKw
+            | Lex::ImplementsKw
+            | Lex::ImportKw
+            | Lex::IntKw
+            | Lex::InterfaceKw
+            | Lex::LongKw
+            | Lex::NativeKw
+            | Lex::PackageKw
+            | Lex::ShortKw
+            | Lex::SynchronizedKw
+            | Lex::ThrowKw
+            | Lex::ThrowsKw
+            | Lex::TransientKw
+            | Lex::TryKw
+            | Lex::TypeofKw
+            | Lex::VolatileKw
+            | Lex::WithKw
+            | Lex::YieldKw
     )
 }
 
 #[inline]
-fn is_wordish(k: K) -> bool {
-    k == K::Ident
-        || k == K::Number
-        || k == K::String
-        || k == K::Pi
-        || k == K::Infinity
+fn is_wordish(k: Lex) -> bool {
+    k == Lex::Ident
+        || k == Lex::Number
+        || k == Lex::String
+        || k == Lex::Pi
+        || k == Lex::Infinity
         || is_keyword_word(k)
 }
 
 #[inline]
-fn is_unary_prefix(k: K) -> bool {
+fn is_unary_prefix(k: Lex) -> bool {
     matches!(
         k,
-        K::Bang | K::Tilde | K::Plus | K::Minus | K::PlusPlus | K::MinusMinus
+        Lex::Bang | Lex::Tilde | Lex::Plus | Lex::Minus | Lex::PlusPlus | Lex::MinusMinus
     )
 }
 
 #[inline]
-fn closes_expr_atom(p: K) -> bool {
+fn closes_expr_atom(p: Lex) -> bool {
     matches!(
         p,
-        K::RParen | K::RBracket | K::RBrace | K::String | K::Number | K::Ident
+        Lex::RParen | Lex::RBracket | Lex::RBrace | Lex::String | Lex::Number | Lex::Ident
     )
 }
 
 #[inline]
-fn keyword_before_paren(p: K) -> bool {
+fn keyword_before_paren(p: Lex) -> bool {
     matches!(
         p,
-        K::IfKw | K::WhileKw | K::ForKw | K::SwitchKw | K::CatchKw | K::FunctionTypeKw
+        Lex::IfKw | Lex::WhileKw | Lex::ForKw | Lex::SwitchKw | Lex::CatchKw | Lex::FunctionTypeKw
     )
 }
 
 #[inline]
-fn is_binary_op(k: K) -> bool {
+fn is_binary_op(k: Lex) -> bool {
     matches!(
         k,
-        K::Plus
-            | K::Minus
-            | K::Star
-            | K::Slash
-            | K::Percent
-            | K::Eq
-            | K::EqEq
-            | K::NotEq
-            | K::EqEqEq
-            | K::NotEqEq
-            | K::Lt
-            | K::Lte
-            | K::Gt
-            | K::Gte
-            | K::AndAnd
-            | K::OrOr
-            | K::Coalesce
-            | K::CoalesceEq
-            | K::StarStar
-            | K::StarStarEq
-            | K::Shl
-            | K::Shr
-            | K::UShr
-            | K::ShlEq
-            | K::ShrEq
-            | K::UShrEq
-            | K::TripleShl
-            | K::TripleShlEq
-            | K::BitAnd
-            | K::BitOr
-            | K::BitXor
-            | K::BitAndEq
-            | K::BitOrEq
-            | K::BitXorEq
-            | K::PlusEq
-            | K::MinusEq
-            | K::StarEq
-            | K::SlashEq
-            | K::PercentEq
-            | K::Arrow
-            | K::InstanceofKw
-            | K::InKw
-            | K::IsKw
-            | K::AsKw
-            | K::XorKw
-            | K::NotKw
+        Lex::Plus
+            | Lex::Minus
+            | Lex::Star
+            | Lex::Slash
+            | Lex::Percent
+            | Lex::Eq
+            | Lex::EqEq
+            | Lex::NotEq
+            | Lex::EqEqEq
+            | Lex::NotEqEq
+            | Lex::Lt
+            | Lex::Lte
+            | Lex::Gt
+            | Lex::Gte
+            | Lex::AndAnd
+            | Lex::OrOr
+            | Lex::Coalesce
+            | Lex::CoalesceEq
+            | Lex::StarStar
+            | Lex::StarStarEq
+            | Lex::Shl
+            | Lex::Shr
+            | Lex::UShr
+            | Lex::ShlEq
+            | Lex::ShrEq
+            | Lex::UShrEq
+            | Lex::TripleShl
+            | Lex::TripleShlEq
+            | Lex::BitAnd
+            | Lex::BitOr
+            | Lex::BitXor
+            | Lex::BitAndEq
+            | Lex::BitOrEq
+            | Lex::BitXorEq
+            | Lex::PlusEq
+            | Lex::MinusEq
+            | Lex::StarEq
+            | Lex::SlashEq
+            | Lex::PercentEq
+            | Lex::Arrow
+            | Lex::InstanceofKw
+            | Lex::InKw
+            | Lex::IsKw
+            | Lex::AsKw
+            | Lex::XorKw
+            | Lex::NotKw
     )
 }
 
 /// Insert a space between `prev` and `next` when both are semantic tokens.
 ///
-/// When `in_type_syntax` is true (inside type-syntax CST nodes such as [`K::TypeExpr`],
-/// [`K::TypeUnionType`], [`K::TypeNullableType`], [`K::TypePrimaryType`], or
-/// [`K::BuiltinTypeNameExpr`], [`K::TemplateParams`]), spacing of
+/// When `in_type_syntax` is true (inside type-syntax CST nodes such as [`Node::TypeExpr`],
+/// [`Node::TypeUnionType`], [`Node::TypeNullableType`], [`Node::TypePrimaryType`], or
+/// [`Node::BuiltinTypeNameExpr`], [`Node::TemplateParams`]), spacing of
 /// `|`, `<`, and `>` follows [`FormatOptions::space_around_type_operators`] (`false` →
 /// `integer|real`, `Array<number>`; `true` → `integer | real`, `Array < number >`).
 #[must_use]
 pub fn needs_space_between(
-    prev: Option<K>,
-    next: K,
+    prev: Option<Lex>,
+    next: Lex,
     opts: &FormatOptions,
     in_type_syntax: bool,
 ) -> bool {
     let Some(p) = prev else {
         return false;
     };
-    if p == next && matches!(p, K::PlusPlus | K::MinusMinus) {
+    if p == next && matches!(p, Lex::PlusPlus | Lex::MinusMinus) {
         return false;
     }
 
     // No space before closers and separators (prefix `++`/`--` falls through — e.g. `for (;; ++i)`).
     if matches!(
         next,
-        K::Semi
-            | K::Comma
-            | K::RParen
-            | K::RBracket
-            | K::RBrace
-            | K::Dot
-            | K::PlusPlus
-            | K::MinusMinus
+        Lex::Semi
+            | Lex::Comma
+            | Lex::RParen
+            | Lex::RBracket
+            | Lex::RBrace
+            | Lex::Dot
+            | Lex::PlusPlus
+            | Lex::MinusMinus
     ) {
-        if matches!(next, K::PlusPlus | K::MinusMinus) {
+        if matches!(next, Lex::PlusPlus | Lex::MinusMinus) {
             if closes_expr_atom(p) {
                 // `x ++` postfix — no space before ++
                 return false;
             }
-        } else if next == K::Dot {
+        } else if next == Lex::Dot {
             return false;
         } else {
             return false;
@@ -258,15 +258,15 @@ pub fn needs_space_between(
     }
 
     // No space immediately after `(` `[` except option for inside parens
-    if matches!(p, K::LParen | K::LBracket) {
-        if next == K::RParen || next == K::RBracket {
+    if matches!(p, Lex::LParen | Lex::LBracket) {
+        if next == Lex::RParen || next == Lex::RBracket {
             return opts.space_inside_parens;
         }
         return opts.space_inside_parens;
     }
 
-    if p == K::LBrace {
-        if next == K::RBrace {
+    if p == Lex::LBrace {
+        if next == Lex::RBrace {
             return opts.space_inside_parens;
         }
         // `{` before statement — layout is handled in the block printer, not a space.
@@ -274,66 +274,66 @@ pub fn needs_space_between(
     }
 
     // No space after `.` (member access)
-    if p == K::Dot {
+    if p == Lex::Dot {
         return false;
     }
 
     // `,` then next token — `a, b` / `f(a, b)` (not `,)` / `,,`).
-    if p == K::Comma && opts.space_after_comma {
+    if p == Lex::Comma && opts.space_after_comma {
         return !matches!(
             next,
-            K::Comma | K::Semi | K::RParen | K::RBracket | K::RBrace
+            Lex::Comma | Lex::Semi | Lex::RParen | Lex::RBracket | Lex::RBrace
         );
     }
 
     // `;` then next — `x; y`, `for (init; cond; step)`; not `;;`, `;)`, `;]`, `;}`.
-    if p == K::Semi {
-        return !matches!(next, K::Semi | K::RParen | K::RBracket | K::RBrace);
+    if p == Lex::Semi {
+        return !matches!(next, Lex::Semi | Lex::RParen | Lex::RBracket | Lex::RBrace);
     }
 
     // Type / generic punctuation — not comparisons (`a < b`) or bitwise or (`x | y`), which are not
     // formatted under TypeExpr / BuiltinTypeNameExpr.
     if in_type_syntax
-        && (matches!(p, K::BitOr | K::Lt | K::Gt) || matches!(next, K::BitOr | K::Lt | K::Gt))
+        && (matches!(p, Lex::BitOr | Lex::Lt | Lex::Gt) || matches!(next, Lex::BitOr | Lex::Lt | Lex::Gt))
     {
         return opts.space_around_type_operators;
     }
 
     // Nullable `T?` then name (`Map? get(...)`) or ternary `a ? b` — not `Map?get` / `a?b`.
     // `?.` optional chaining stays glued; `?|` / `? <` / `? >` use the type-operator rule above.
-    if p == K::Question {
-        if next == K::Dot {
+    if p == Lex::Question {
+        if next == Lex::Dot {
             return false;
         }
         return true;
     }
 
     // `else` / `catch` / `finally` after `}`
-    if p == K::RBrace && matches!(next, K::ElseKw | K::CatchKw | K::FinallyKw) {
+    if p == Lex::RBrace && matches!(next, Lex::ElseKw | Lex::CatchKw | Lex::FinallyKw) {
         return opts.newline_before_else_catch_finally;
     }
 
     // `do { ... } while (...)` requires a space after `}`.
-    if p == K::RBrace && next == K::WhileKw {
+    if p == Lex::RBrace && next == Lex::WhileKw {
         return true;
     }
 
     // `)continue`, `)return`, `)fullDangerMap[…] = …` — single-line `if (…) stmt` / expression
-    if p == K::RParen {
-        if next == K::LBrace {
+    if p == Lex::RParen {
+        if next == Lex::LBrace {
             return true;
         }
-        if matches!(next, K::ContinueKw | K::BreakKw | K::ReturnKw | K::ThrowKw) {
+        if matches!(next, Lex::ContinueKw | Lex::BreakKw | Lex::ReturnKw | Lex::ThrowKw) {
             return true;
         }
-        if is_ident_or_literal(next) || matches!(next, K::ThisKw | K::SuperKw) {
+        if is_ident_or_literal(next) || matches!(next, Lex::ThisKw | Lex::SuperKw) {
             return true;
         }
     }
 
     // Keyword + `(` spacing
-    if next == K::LParen {
-        if p == K::FunctionKw {
+    if next == Lex::LParen {
+        if p == Lex::FunctionKw {
             return opts.space_before_function_decl_paren;
         }
         if keyword_before_paren(p) {
@@ -344,54 +344,54 @@ pub fn needs_space_between(
         if is_binary_op(p) {
             return opts.space_around_binary_ops;
         }
-        if p == K::Eq {
+        if p == Lex::Eq {
             return opts.space_around_assign;
         }
         // `return (e)`, `throw (e)`, etc. — `(` block must not glue to the keyword (see LParen branch
         // above: without this, we fall through to `return false` before the generic keyword rule runs).
         if matches!(
             p,
-            K::ReturnKw | K::ThrowKw | K::TypeofKw | K::VoidKw | K::CaseKw | K::GlobalKw
+            Lex::ReturnKw | Lex::ThrowKw | Lex::TypeofKw | Lex::VoidKw | Lex::CaseKw | Lex::GlobalKw
         ) {
             return true;
         }
         // Calls: `foo(`
-        if p == K::Ident || p == K::RParen {
+        if p == Lex::Ident || p == Lex::RParen {
             return false;
         }
         return false;
     }
 
     // Keyword + `{` spacing (e.g. `do {}`, `else {}`, `try {}`).
-    if next == K::LBrace
+    if next == Lex::LBrace
         && matches!(
             p,
-            K::DoKw | K::ElseKw | K::TryKw | K::CatchKw | K::FinallyKw
+            Lex::DoKw | Lex::ElseKw | Lex::TryKw | Lex::CatchKw | Lex::FinallyKw
         )
     {
         return true;
     }
 
     // `class Foo {`, type / name before block body (`foo {` is rare; ternary `:` spacing needs AST).
-    if next == K::LBrace && p == K::Ident {
+    if next == Lex::LBrace && p == Lex::Ident {
         return true;
     }
 
     // `function f() => Map {` — built-in / keyword types are tokens like `MapKw`, not `Ident`.
-    if next == K::LBrace && is_type_keyword(p) {
+    if next == Lex::LBrace && is_type_keyword(p) {
         return true;
     }
 
     // `!=` split across two tokens (`!` + `=`) must not use assignment spacing.
-    if p == K::Bang && next == K::Eq {
+    if p == Lex::Bang && next == Lex::Eq {
         return false;
     }
 
     // Assignment `=` (not `==`)
-    if next == K::Eq {
+    if next == Lex::Eq {
         return opts.space_around_assign;
     }
-    if p == K::Eq {
+    if p == Lex::Eq {
         return opts.space_around_assign;
     }
 
@@ -404,11 +404,11 @@ pub fn needs_space_between(
     if is_unary_prefix(next) {
         if matches!(
             p,
-            K::LParen | K::LBracket | K::LBrace | K::Semi | K::Comma | K::Colon
+            Lex::LParen | Lex::LBracket | Lex::LBrace | Lex::Semi | Lex::Comma | Lex::Colon
         ) {
             return false;
         }
-        if is_binary_op(p) || p == K::Eq {
+        if is_binary_op(p) || p == Lex::Eq {
             return opts.space_around_binary_ops;
         }
         return false;
@@ -417,27 +417,27 @@ pub fn needs_space_between(
     // `return` / `throw` / `typeof` / `void` / `new` style
     if matches!(
         p,
-        K::ReturnKw | K::ThrowKw | K::TypeofKw | K::VoidKw | K::NewKw | K::CaseKw | K::GlobalKw
+        Lex::ReturnKw | Lex::ThrowKw | Lex::TypeofKw | Lex::VoidKw | Lex::NewKw | Lex::CaseKw | Lex::GlobalKw
     ) {
-        return next != K::Semi && next != K::RBrace;
+        return next != Lex::Semi && next != Lex::RBrace;
     }
 
     // Types before ident in declarations: `integer x`
     if matches!(
         p,
-        K::IntegerKw
-            | K::RealKw
-            | K::StringTypeKw
-            | K::BooleanKw
-            | K::AnyKw
-            | K::ClassTypeKw
-            | K::ObjectKw
-            | K::ArrayKw
-            | K::SetTypeKw
-            | K::MapKw
-            | K::FunctionTypeKw
-            | K::IntervalKw
-    ) && matches!(next, K::Ident)
+        Lex::IntegerKw
+            | Lex::RealKw
+            | Lex::StringTypeKw
+            | Lex::BooleanKw
+            | Lex::AnyKw
+            | Lex::ClassTypeKw
+            | Lex::ObjectKw
+            | Lex::ArrayKw
+            | Lex::SetTypeKw
+            | Lex::MapKw
+            | Lex::FunctionTypeKw
+            | Lex::IntervalKw
+    ) && matches!(next, Lex::Ident)
     {
         return true;
     }
@@ -445,14 +445,14 @@ pub fn needs_space_between(
     // Class member modifiers should be spaced: `private static final foo() {}`.
     if is_class_member_modifier(p)
         && (is_class_member_modifier(next)
-            || matches!(next, K::Ident | K::ConstructorKw)
+            || matches!(next, Lex::Ident | Lex::ConstructorKw)
             || is_type_keyword(next))
     {
         return true;
     }
 
     // `var` / `let` / `const` before name
-    if matches!(p, K::VarKw | K::LetKw | K::ConstKw) && matches!(next, K::Ident) {
+    if matches!(p, Lex::VarKw | Lex::LetKw | Lex::ConstKw) && matches!(next, Lex::Ident) {
         return true;
     }
 
@@ -462,8 +462,8 @@ pub fn needs_space_between(
     }
 
     // Two word-like tokens: `let x`, `return foo`, `3.14`, actually number+ident rare
-    if (is_ident_or_literal(p) || matches!(p, K::ThisKw | K::SuperKw))
-        && (is_ident_or_literal(next) || matches!(next, K::ThisKw | K::SuperKw))
+    if (is_ident_or_literal(p) || matches!(p, Lex::ThisKw | Lex::SuperKw))
+        && (is_ident_or_literal(next) || matches!(next, Lex::ThisKw | Lex::SuperKw))
     {
         return true;
     }
@@ -471,13 +471,13 @@ pub fn needs_space_between(
     // Keyword followed by wordish
     if matches!(
         p,
-        K::FunctionKw | K::ClassKw | K::ExtendsKw | K::ImplementsKw | K::PackageKw | K::ImportKw
-    ) && (is_ident_or_literal(next) || next == K::LBrace)
+        Lex::FunctionKw | Lex::ClassKw | Lex::ExtendsKw | Lex::ImplementsKw | Lex::PackageKw | Lex::ImportKw
+    ) && (is_ident_or_literal(next) || next == Lex::LBrace)
     {
-        return next != K::LParen;
+        return next != Lex::LParen;
     }
 
-    if p == K::GotoKw && next == K::Ident {
+    if p == Lex::GotoKw && next == Lex::Ident {
         return true;
     }
 

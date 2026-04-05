@@ -1,24 +1,25 @@
+//! Statements, the start rule, blocks, class members, and control flow.
 use super::cfg_flags;
+use super::GRule;
 use crate::parse::version::{FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE};
-use crate::syntax::kinds::K;
-use sipha::prelude::parse::GrammarChoiceFn;
+use crate::syntax::kinds::Node;
 use sipha::prelude::*;
 
 pub fn define(g: &mut GrammarBuilder) {
     // Start rule must be rule 0.
-    g.parser_rule("start", |g| {
-        g.node(K::Root, |g| {
+    g.parser_rule(GRule::Start.as_str(), |g| {
+        g.node(Node::Root, |g| {
             g.zero_or_more(|g| {
                 g.choice(
                     |g| {
                         g.if_flag(FLAG_PARSE_RECOVERY);
-                        g.recover_until("top_level_sync", |g| {
-                            g.call("stmt");
+                        g.recover_until_rule(GRule::TopLevelSync, |g| {
+                            g.call_rule(GRule::Stmt);
                         });
                     },
                     |g| {
                         g.if_not_flag(FLAG_PARSE_RECOVERY);
-                        g.call("stmt");
+                        g.call_rule(GRule::Stmt);
                     },
                 );
             });
@@ -28,833 +29,319 @@ pub fn define(g: &mut GrammarBuilder) {
         g.accept();
     });
 
-    // `stmt` keyword ladder is large; expression statements almost never start with a letter
-    // (identifiers/calls) when we can prove the next byte is a non-keyword starter instead.
-    g.parser_rule("stmt_empty_statement", |g| {
-        g.node(K::EmptyStmt, |g| {
-            g.call("semi");
+    g.parser_rule(GRule::StmtEmptyStatement.as_str(), |g| {
+        g.node(Node::EmptyStmt, |g| {
+            g.call_rule(GRule::Semi);
         });
     });
 
-    g.parser_rule("stmt_expr_statement", |g| {
-        g.node(K::Stmt, |g| {
-            g.call("expr");
+    g.parser_rule(GRule::StmtExprStatement.as_str(), |g| {
+        g.node(Node::Stmt, |g| {
+            g.call_rule(GRule::Expr);
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
-    // `var` / `let` / typed locals plus ident-led exprs (`foo()`), for leading bytes that are never
-    // the first letter of another top-level keyword (see `stmt_lc_*` for shared letters).
-    g.parser_rule("stmt_var_decl_or_expr", |g| {
-        g.choice(
+    g.parser_rule(GRule::Stmt.as_str(), |g| {
+        sipha::choices!(
+            g,
             |g| {
-                g.call("var_decl");
+                g.call_rule(GRule::StmtEmptyStatement);
             },
             |g| {
-                g.call("stmt_expr_statement");
+                g.call_rule(GRule::IncludeStmt);
             },
-        );
-    });
-
-    // Per-leading-letter subsets of the historical stmt ladder, preserving global alternative order
-    // (indices in the old flat `choices` list). `var_decl` is always kept where typed `ident` /
-    // `integer` / … can start with that byte.
-
-    g.parser_rule("stmt_lc_b", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("break_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_c", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("continue_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("class_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            |g| {
+                g.call_rule(GRule::ReturnStmt);
+            },
+            |g| {
+                g.call_rule(GRule::BreakStmt);
+            },
+            |g| {
+                g.call_rule(GRule::ContinueStmt);
+            },
+            |g| {
+                g.call_rule(GRule::GlobalDecl);
+            },
+            |g| {
+                g.call_rule(GRule::ElseStmt);
+            },
+            |g| {
                 cfg_flags::v3(g);
-                cfg_flags::exp_lexical_const(g);
-                g.call("const_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_d", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("do_while_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_e", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("else_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+                g.call_rule(GRule::SwitchStmt);
+            },
+            |g| {
+                g.call_rule(GRule::VarDecl);
+            },
+            |g| {
+                g.call_rule(GRule::FunctionDecl);
+            },
+            |g| {
+                g.call_rule(GRule::ClassDecl);
+            },
+            |g| {
+                g.call_rule(GRule::IfStmt);
+            },
+            |g| {
+                g.call_rule(GRule::ForStmt);
+            },
+            |g| {
+                g.call_rule(GRule::DoWhileStmt);
+            },
+            |g| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_exceptions(g);
+                g.call_rule(GRule::TryStmt);
+            },
+            |g| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_exceptions(g);
+                g.call_rule(GRule::ThrowStmt);
+            },
+            |g| {
                 cfg_flags::v3(g);
                 cfg_flags::exp_modules(g);
-                g.call("export_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_f", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("function_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("for_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_g", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("global_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+                g.call_rule(GRule::ImportStmt);
+            },
+            |g| {
+                cfg_flags::v3(g);
+                cfg_flags::exp_modules(g);
+                g.call_rule(GRule::ExportStmt);
+            },
+            |g| {
                 cfg_flags::v3(g);
                 cfg_flags::exp_goto(g);
-                g.call("goto_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_i", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("include_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("if_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+                g.call_rule(GRule::GotoStmt);
+            },
+            |g| {
                 cfg_flags::v3(g);
                 cfg_flags::exp_modules(g);
-                g.call("import_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_m", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v4(g);
-                cfg_flags::exp_match(g);
-                g.call("match_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_p", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_modules(g);
-                g.call("package_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_r", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("return_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_s", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                g.call("switch_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_t", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_exceptions(g);
-                g.call("try_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_exceptions(g);
-                g.call("throw_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt_lc_w", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("while_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ]);
-    });
-
-    g.parser_rule("stmt", |g| {
-        // v2 keywords are ASCII case-insensitive (`VAR`, `ReTuRn`). Only bytes outside lowercase
-        // `a`–`z` use this full ladder; lowercase still uses per-letter fast paths above.
-        let keyword_stmt_fallback: Vec<GrammarChoiceFn> = vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("include_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("return_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("break_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("continue_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("global_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("else_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                g.call("switch_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("var_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("function_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("class_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("if_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("for_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("do_while_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_exceptions(g);
-                g.call("try_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_exceptions(g);
-                g.call("throw_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_modules(g);
-                g.call("import_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_modules(g);
-                g.call("export_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_goto(g);
-                g.call("goto_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                cfg_flags::v3(g);
-                cfg_flags::exp_modules(g);
-                g.call("package_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+                g.call_rule(GRule::PackageStmt);
+            },
+            |g| {
                 cfg_flags::v3(g);
                 cfg_flags::exp_lexical_const(g);
-                g.call("const_decl");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("while_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+                g.call_rule(GRule::ConstDecl);
+            },
+            |g| {
+                g.call_rule(GRule::WhileStmt);
+            },
+            |g| {
                 cfg_flags::v4(g);
                 cfg_flags::exp_match(g);
-                g.call("match_stmt");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ];
-
-        // Lowercase letters that never start a second top-level keyword share one ladder.
-        let stmt_lc_simple = CharClass::from_bytes(b"ahjklnoquvxyz");
-
-        let fast_expr_starters = CharClass::EMPTY
-            .with_range(b'0', b'9')
-            .union(CharClass::from_bytes(b"(\"'[{<."))
-            .union(CharClass::from_bytes(b"!+-~"));
-
-        let mut letter_arms: Vec<(CharClass, GrammarChoiceFn)> = Vec::with_capacity(14);
-        letter_arms.push((
-            stmt_lc_simple,
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_var_decl_or_expr");
-            }),
-        ));
-        for (byte, rule) in [
-            (b'b', "stmt_lc_b"),
-            (b'c', "stmt_lc_c"),
-            (b'd', "stmt_lc_d"),
-            (b'e', "stmt_lc_e"),
-            (b'f', "stmt_lc_f"),
-            (b'g', "stmt_lc_g"),
-            (b'i', "stmt_lc_i"),
-            (b'm', "stmt_lc_m"),
-            (b'p', "stmt_lc_p"),
-            (b'r', "stmt_lc_r"),
-            (b's', "stmt_lc_s"),
-            (b't', "stmt_lc_t"),
-            (b'w', "stmt_lc_w"),
-        ] {
-            letter_arms.push((
-                CharClass::from_byte(byte),
-                Box::new(move |g: &mut GrammarBuilder| {
-                    g.call(rule);
-                }),
-            ));
-        }
-
-        let mut arms: Vec<(CharClass, GrammarChoiceFn)> = Vec::with_capacity(3 + letter_arms.len());
-        arms.push((
-            CharClass::from_byte(b';'),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_empty_statement");
-            }),
-        ));
-        arms.push((
-            fast_expr_starters,
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("stmt_expr_statement");
-            }),
-        ));
-        arms.extend(letter_arms);
-
-        g.byte_dispatch(
-            arms,
-            Some(Box::new(move |g: &mut GrammarBuilder| {
-                g.choices(keyword_stmt_fallback);
-            })),
-        );
-    });
-
-    // --- `top_level_sync` helpers: same lookahead order as the historical flat list, split by
-    // first byte so recovery skips the irrelevant keyword arms on ASCII letters.
-
-    g.parser_rule("top_sync_lc_b", |g| {
-        g.lookahead(|g| {
-            g.call("kw_break");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_c", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.lookahead(|g| {
-                    g.call("kw_class");
-                });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.lookahead(|g| {
-                    g.call("kw_continue");
-                });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.lookahead(|g| {
-                    cfg_flags::v3(g);
-                    cfg_flags::exp_lexical_const(g);
-                    g.call("kw_const");
-                });
-            }),
-        ]);
-    });
-
-    g.parser_rule("top_sync_lc_d", |g| {
-        g.lookahead(|g| {
-            g.call("kw_do");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_e", |g| {
-        g.choice(
-            |g| {
-                g.lookahead(|g| {
-                    g.call("kw_else");
-                });
+                g.call_rule(GRule::MatchStmt);
             },
             |g| {
-                g.lookahead(|g| {
-                    cfg_flags::v3(g);
-                    cfg_flags::exp_modules(g);
-                    g.call("kw_export");
-                });
+                g.call_rule(GRule::StmtExprStatement);
             },
         );
     });
 
-    g.parser_rule("top_sync_lc_f", |g| {
-        g.choice(
-            |g| {
-                g.lookahead(|g| {
-                    g.call("kw_function");
-                });
-            },
-            |g| {
-                g.lookahead(|g| {
-                    g.call("kw_for");
-                });
-            },
-        );
-    });
-
-    g.parser_rule("top_sync_lc_g", |g| {
-        g.choice(
-            |g| {
-                g.lookahead(|g| {
-                    g.call("kw_global");
-                });
-            },
-            |g| {
-                g.lookahead(|g| {
-                    cfg_flags::v3(g);
-                    cfg_flags::exp_goto(g);
-                    g.call("kw_goto");
-                });
-            },
-        );
-    });
-
-    g.parser_rule("top_sync_lc_i", |g| {
-        g.choices(vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.lookahead(|g| {
-                    g.call("kw_if");
-                });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.lookahead(|g| {
-                    g.call("kw_include");
-                });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.lookahead(|g| {
-                    cfg_flags::v3(g);
-                    cfg_flags::exp_modules(g);
-                    g.call("kw_import");
-                });
-            }),
-        ]);
-    });
-
-    g.parser_rule("top_sync_lc_l", |g| {
-        g.lookahead(|g| {
-            cfg_flags::exp_let(g);
-            g.call("kw_let");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_m", |g| {
-        g.lookahead(|g| {
-            cfg_flags::v4(g);
-            cfg_flags::exp_match(g);
-            g.call("kw_match");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_p", |g| {
-        g.lookahead(|g| {
-            cfg_flags::v3(g);
-            cfg_flags::exp_modules(g);
-            g.call("kw_package");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_r", |g| {
-        g.lookahead(|g| {
-            g.call("kw_return");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_s", |g| {
-        g.lookahead(|g| {
-            cfg_flags::v3(g);
-            g.call("kw_switch");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_t", |g| {
-        g.choice(
-            |g| {
-                g.lookahead(|g| {
-                    cfg_flags::v3(g);
-                    cfg_flags::exp_exceptions(g);
-                    g.call("kw_try");
-                });
-            },
-            |g| {
-                g.lookahead(|g| {
-                    cfg_flags::v3(g);
-                    cfg_flags::exp_exceptions(g);
-                    g.call("kw_throw");
-                });
-            },
-        );
-    });
-
-    g.parser_rule("top_sync_lc_v", |g| {
-        g.lookahead(|g| {
-            g.call("kw_var");
-        });
-    });
-
-    g.parser_rule("top_sync_lc_w", |g| {
-        g.lookahead(|g| {
-            g.call("kw_while");
-        });
-    });
-
-    // Statement-boundary sync for `recover_until` at module scope: trivia, then `;` (consumed) or a
-    // keyword that can start a top-level statement. Keywords use [`GrammarBuilder::lookahead`] so
-    // we do not eat the keyword — the following `stmt` parse must see it.
-    g.parser_rule("top_level_sync", |g| {
+    g.parser_rule(GRule::TopLevelSync.as_str(), |g| {
         g.skip();
-        let full_alts: Vec<GrammarChoiceFn> = vec![
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("semi");
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+        sipha::choices!(
+            g,
+            |g| {
+                g.call_rule(GRule::Semi);
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_function");
+                    g.call_rule(GRule::KwFunction);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_class");
+                    g.call_rule(GRule::KwClass);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_var");
+                    g.call_rule(GRule::KwVar);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::exp_let(g);
-                    g.call("kw_let");
+                    g.call_rule(GRule::KwLet);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_global");
+                    g.call_rule(GRule::KwGlobal);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_if");
+                    g.call_rule(GRule::KwIf);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_for");
+                    g.call_rule(GRule::KwFor);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_while");
+                    g.call_rule(GRule::KwWhile);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_do");
+                    g.call_rule(GRule::KwDo);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_return");
+                    g.call_rule(GRule::KwReturn);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_break");
+                    g.call_rule(GRule::KwBreak);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_continue");
+                    g.call_rule(GRule::KwContinue);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_include");
+                    g.call_rule(GRule::KwInclude);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
-                    g.call("kw_else");
+                    g.call_rule(GRule::KwElse);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.lookahead(|g| {
-                    cfg_flags::v3(g);
-                    g.call("kw_switch");
-                });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
-                    cfg_flags::exp_exceptions(g);
-                    g.call("kw_try");
+                    g.call_rule(GRule::KwSwitch);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
                     cfg_flags::exp_exceptions(g);
-                    g.call("kw_throw");
+                    g.call_rule(GRule::KwTry);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
+                g.lookahead(|g| {
+                    cfg_flags::v3(g);
+                    cfg_flags::exp_exceptions(g);
+                    g.call_rule(GRule::KwThrow);
+                });
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
                     cfg_flags::exp_modules(g);
-                    g.call("kw_import");
+                    g.call_rule(GRule::KwImport);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
                     cfg_flags::exp_modules(g);
-                    g.call("kw_export");
+                    g.call_rule(GRule::KwExport);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
                     cfg_flags::exp_goto(g);
-                    g.call("kw_goto");
+                    g.call_rule(GRule::KwGoto);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
                     cfg_flags::exp_modules(g);
-                    g.call("kw_package");
+                    g.call_rule(GRule::KwPackage);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v3(g);
                     cfg_flags::exp_lexical_const(g);
-                    g.call("kw_const");
+                    g.call_rule(GRule::KwConst);
                 });
-            }),
-            Box::new(|g: &mut GrammarBuilder| {
+            },
+            |g| {
                 g.lookahead(|g| {
                     cfg_flags::v4(g);
                     cfg_flags::exp_match(g);
-                    g.call("kw_match");
+                    g.call_rule(GRule::KwMatch);
                 });
-            }),
-        ];
-
-        let mut arms: Vec<(CharClass, GrammarChoiceFn)> = vec![(
-            CharClass::from_byte(b';'),
-            Box::new(|g: &mut GrammarBuilder| {
-                g.call("semi");
-            }),
-        )];
-        for (byte, rule) in [
-            (b'b', "top_sync_lc_b"),
-            (b'c', "top_sync_lc_c"),
-            (b'd', "top_sync_lc_d"),
-            (b'e', "top_sync_lc_e"),
-            (b'f', "top_sync_lc_f"),
-            (b'g', "top_sync_lc_g"),
-            (b'i', "top_sync_lc_i"),
-            (b'l', "top_sync_lc_l"),
-            (b'm', "top_sync_lc_m"),
-            (b'p', "top_sync_lc_p"),
-            (b'r', "top_sync_lc_r"),
-            (b's', "top_sync_lc_s"),
-            (b't', "top_sync_lc_t"),
-            (b'v', "top_sync_lc_v"),
-            (b'w', "top_sync_lc_w"),
-        ] {
-            arms.push((
-                CharClass::from_byte(byte),
-                Box::new(move |g: &mut GrammarBuilder| {
-                    g.call(rule);
-                }),
-            ));
-        }
-
-        g.byte_dispatch(
-            arms,
-            Some(Box::new(move |g: &mut GrammarBuilder| {
-                g.choices(full_alts);
-            })),
+            },
         );
     });
 
-    g.parser_rule("class_decl", |g| {
-        g.node(K::ClassDecl, |g| {
-            g.call("kw_class");
-            g.call("ident");
+    g.parser_rule(GRule::ClassDecl.as_str(), |g| {
+        g.node(Node::ClassDecl, |g| {
+            g.call_rule(GRule::KwClass);
+            g.call_rule(GRule::Ident);
             g.optional(|g| {
                 cfg_flags::exp_templates(g);
-                g.call("decl_template_params");
+                g.call_rule(GRule::DeclTemplateParams);
             });
             g.optional(|g| {
-                g.call("kw_extends");
-                g.call("ident");
+                g.call_rule(GRule::KwExtends);
+                g.call_rule(GRule::Ident);
             });
-            g.call("class_body");
+            g.call_rule(GRule::ClassBody);
         });
     });
 
     // `function f<T, U>(…)`, `class C<T>`, `function<T>(…) {}` — comma-separated idents (not lambdas: `<T>` clashes with set literals).
-    g.parser_rule("decl_template_params", |g| {
-        g.node(K::TemplateParams, |g| {
-            g.call("op_lt");
-            g.call("ident");
+    g.parser_rule(GRule::DeclTemplateParams.as_str(), |g| {
+        g.node(Node::TemplateParams, |g| {
+            g.call_rule(GRule::OpLt);
+            g.call_rule(GRule::Ident);
             g.zero_or_more(|g| {
-                g.call("comma");
-                g.call("ident");
+                g.call_rule(GRule::Comma);
+                g.call_rule(GRule::Ident);
             });
             g.optional(|g| {
-                g.call("comma");
+                g.call_rule(GRule::Comma);
             });
-            g.call("type_gt");
+            g.call_rule(GRule::TypeGt);
         });
     });
 
-    g.parser_rule("class_body", |g| {
-        g.node(K::Block, |g| {
-            g.call("lbrace");
+    g.parser_rule(GRule::ClassBody.as_str(), |g| {
+        g.node(Node::Block, |g| {
+            g.call_rule(GRule::Lbrace);
             g.zero_or_more(|g| {
                 g.choice(
                     |g| {
-                        g.call("class_member");
+                        g.call_rule(GRule::ClassMember);
                     },
                     |g| {
-                        g.call("stmt");
+                        g.call_rule(GRule::Stmt);
                     },
                 );
             });
-            g.call("rbrace");
+            g.call_rule(GRule::Rbrace);
         });
     });
 
-    g.parser_rule("access_modifier", |g| {
-        g.choice3(
+    g.parser_rule(GRule::AccessModifier.as_str(), |g| {
+        sipha::choices!(
+            g,
             |g| {
-                g.call("kw_public");
+                g.call_rule(GRule::KwPublic);
             },
             |g| {
-                g.call("kw_private");
+                g.call_rule(GRule::KwPrivate);
             },
             |g| {
-                g.call("kw_protected");
+                g.call_rule(GRule::KwProtected);
             },
         );
     });
@@ -862,465 +349,469 @@ pub fn define(g: &mut GrammarBuilder) {
     // Some LeekScript code (including the AI fixtures) uses type-keywords as identifiers,
     // e.g. `string string() { ... }`. Accept those keywords in identifier positions where
     // the Java parser is permissive.
-    g.parser_rule("name", |g| {
+    g.parser_rule(GRule::Name.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("ident");
+                g.call_rule(GRule::Ident);
             },
             |g| {
-                g.choices(vec![
-                    Box::new(|g| {
-                        g.call("kw_string_type");
-                    }),
-                    Box::new(|g| {
-                        g.call("kw_integer");
-                    }),
-                    Box::new(|g| {
-                        g.call("kw_real");
-                    }),
-                    Box::new(|g| {
-                        g.call("kw_boolean");
-                    }),
-                    Box::new(|g| {
-                        g.call("kw_any");
-                    }),
-                    Box::new(|g| {
-                        g.call("kw_void");
-                    }),
-                    Box::new(|g| {
+                sipha::choices!(
+                    g,
+                    |g| {
+                        g.call_rule(GRule::KwStringType);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwInteger);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwReal);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwBoolean);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwAny);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwVoid);
+                    },
+                    |g| {
                         cfg_flags::v3(g);
-                        g.call("kw_default");
-                    }),
-                    Box::new(|g| {
-                        g.call("kw_include");
-                    }),
-                    Box::new(|g| {
-                        g.call("kw_function");
-                    }),
-                ]);
+                        g.call_rule(GRule::KwDefault);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwInclude);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwFunction);
+                    },
+                );
             },
         );
     });
 
-    g.parser_rule("class_member", |g| {
-        g.node(K::ClassMember, |g| {
-            g.choices(vec![
-                Box::new(|g| {
+    g.parser_rule(GRule::ClassMember.as_str(), |g| {
+        g.node(Node::ClassMember, |g| {
+            sipha::choices!(
+                g,
+                |g| {
                     g.optional(|g| {
-                        g.call("access_modifier");
+                        g.call_rule(GRule::AccessModifier);
                     });
-                    g.call("kw_constructor");
-                    g.call("lparen");
+                    g.call_rule(GRule::KwConstructor);
+                    g.call_rule(GRule::Lparen);
                     g.optional(|g| {
-                        g.call("method_fn_param");
+                        g.call_rule(GRule::MethodFnParam);
                         g.zero_or_more(|g| {
-                            g.call("comma");
-                            g.call("method_fn_param");
+                            g.call_rule(GRule::Comma);
+                            g.call_rule(GRule::MethodFnParam);
                         });
                         g.optional(|g| {
-                            g.call("comma");
+                            g.call_rule(GRule::Comma);
                         });
                     });
-                    g.call("rparen");
-                    g.call("block");
-                }),
-                Box::new(|g| {
+                    g.call_rule(GRule::Rparen);
+                    g.call_rule(GRule::Block);
+                },
+                |g| {
                     g.optional(|g| {
-                        g.call("access_modifier");
+                        g.call_rule(GRule::AccessModifier);
                     });
                     g.optional(|g| {
-                        g.call("kw_static");
+                        g.call_rule(GRule::KwStatic);
                     });
                     g.optional(|g| {
-                        g.call("kw_final");
+                        g.call_rule(GRule::KwFinal);
                     });
                     // Support both typed and untyped members:
                     // - `boolean foo(...) {}` / `SomeType bar = ...`
                     // - `foo(...) {}` (implicit return type)
                     g.choice(
                         |g| {
-                            g.call("ls_type");
-                            g.call("name");
+                            g.call_rule(GRule::LsType);
+                            g.call_rule(GRule::Name);
                         },
                         |g| {
-                            g.call("name");
+                            g.call_rule(GRule::Name);
                         },
                     );
-                    g.choices(vec![
-                        Box::new(|g| {
-                            g.call("eq");
-                            g.call("expr");
+                    sipha::choices!(
+                        g,
+                        |g| {
+                            g.call_rule(GRule::Eq);
+                            g.call_rule(GRule::Expr);
                             g.optional(|g| {
-                                g.call("semi");
+                                g.call_rule(GRule::Semi);
                             });
-                        }),
-                        Box::new(|g| {
-                            g.call("lparen");
+                        },
+                        |g| {
+                            g.call_rule(GRule::Lparen);
                             g.optional(|g| {
-                                g.call("method_fn_param");
+                                g.call_rule(GRule::MethodFnParam);
                                 g.zero_or_more(|g| {
-                                    g.call("comma");
-                                    g.call("method_fn_param");
+                                    g.call_rule(GRule::Comma);
+                                    g.call_rule(GRule::MethodFnParam);
                                 });
                                 g.optional(|g| {
-                                    g.call("comma");
+                                    g.call_rule(GRule::Comma);
                                 });
                             });
-                            g.call("rparen");
-                            g.call("block");
-                        }),
+                            g.call_rule(GRule::Rparen);
+                            g.call_rule(GRule::Block);
+                        },
                         // Allow class fields without an initializer, e.g. `private Foo bar`
                         // (common in the AI scripts). This must be last so `ident (...) {}` still
                         // parses as a method and `ident = expr` parses as an assignment.
-                        Box::new(|g| {
+                        |g| {
                             g.optional(|g| {
-                                g.call("semi");
+                                g.call_rule(GRule::Semi);
                             });
-                        }),
-                    ]);
-                }),
-            ]);
+                        },
+                    );
+                },
+            );
         });
     });
 
-    g.parser_rule("block", |g| {
-        g.node(K::Block, |g| {
-            g.call("lbrace");
+    g.parser_rule(GRule::Block.as_str(), |g| {
+        g.node(Node::Block, |g| {
+            g.call_rule(GRule::Lbrace);
             g.zero_or_more(|g| {
-                g.call("stmt");
+                g.call_rule(GRule::Stmt);
             });
-            g.call("rbrace");
+            g.call_rule(GRule::Rbrace);
         });
     });
 
-    g.parser_rule("stmt_or_block", |g| {
+    g.parser_rule(GRule::StmtOrBlock.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("block");
+                g.call_rule(GRule::Block);
             },
             |g| {
-                g.node(K::Stmt, |g| {
-                    g.call("stmt");
+                g.node(Node::Stmt, |g| {
+                    g.call_rule(GRule::Stmt);
                 });
             },
         );
     });
 
-    g.parser_rule("return_stmt", |g| {
-        g.node(K::ReturnStmt, |g| {
-            g.call("kw_return");
+    g.parser_rule(GRule::ReturnStmt.as_str(), |g| {
+        g.node(Node::ReturnStmt, |g| {
+            g.call_rule(GRule::KwReturn);
             g.optional(|g| {
-                g.call("op_question");
+                g.call_rule(GRule::OpQuestion);
             });
             // Do not parse `return for (…)` as `return` + expr: permissive `number` can lex
             // `for` / `var` as NUMBER, yielding a bogus call parse and hiding the real `for` stmt.
             g.optional(|g| {
                 g.neg_lookahead(|g| {
-                    g.call("kw_for");
+                    g.call_rule(GRule::KwFor);
                 });
-                g.call("expr");
+                g.call_rule(GRule::Expr);
             });
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
-    g.parser_rule("global_decl", |g| {
-        g.node(K::GlobalDecl, |g| {
-            g.call("kw_global");
+    g.parser_rule(GRule::GlobalDecl.as_str(), |g| {
+        g.node(Node::GlobalDecl, |g| {
+            g.call_rule(GRule::KwGlobal);
             g.optional(|g| {
-                g.call("ls_type");
+                g.call_rule(GRule::LsType);
             });
-            g.call("ident");
+            g.call_rule(GRule::Ident);
             g.optional(|g| {
-                g.call("eq");
-                g.call("expr");
+                g.call_rule(GRule::Eq);
+                g.call_rule(GRule::Expr);
             });
             g.zero_or_more(|g| {
-                g.call("comma");
-                g.call("ident");
+                g.call_rule(GRule::Comma);
+                g.call_rule(GRule::Ident);
                 g.optional(|g| {
-                    g.call("eq");
-                    g.call("expr");
+                    g.call_rule(GRule::Eq);
+                    g.call_rule(GRule::Expr);
                 });
             });
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
-    g.parser_rule("else_stmt", |g| {
-        g.node(K::ElseStmt, |g| {
-            g.call("kw_else");
-            g.call("stmt_or_block");
+    g.parser_rule(GRule::ElseStmt.as_str(), |g| {
+        g.node(Node::ElseStmt, |g| {
+            g.call_rule(GRule::KwElse);
+            g.call_rule(GRule::StmtOrBlock);
         });
     });
 
-    g.parser_rule("switch_stmt", |g| {
-        g.node(K::SwitchStmt, |g| {
-            g.call("kw_switch");
-            g.call("lparen");
-            g.call("expr");
-            g.call("rparen");
-            g.call("lbrace");
+    g.parser_rule(GRule::SwitchStmt.as_str(), |g| {
+        g.node(Node::SwitchStmt, |g| {
+            g.call_rule(GRule::KwSwitch);
+            g.call_rule(GRule::Lparen);
+            g.call_rule(GRule::Expr);
+            g.call_rule(GRule::Rparen);
+            g.call_rule(GRule::Lbrace);
             g.zero_or_more(|g| {
-                g.call("switch_arm");
+                g.call_rule(GRule::SwitchArm);
             });
-            g.call("rbrace");
+            g.call_rule(GRule::Rbrace);
         });
     });
 
-    g.parser_rule("switch_arm", |g| {
-        g.node(K::SwitchArm, |g| {
+    g.parser_rule(GRule::SwitchArm.as_str(), |g| {
+        g.node(Node::SwitchArm, |g| {
             g.one_or_more(|g| {
                 g.choice(
                     |g| {
-                        g.call("kw_case");
-                        g.call("expr");
-                        g.call("colon");
+                        g.call_rule(GRule::KwCase);
+                        g.call_rule(GRule::Expr);
+                        g.call_rule(GRule::Colon);
                     },
                     |g| {
-                        g.call("kw_default");
-                        g.call("colon");
+                        g.call_rule(GRule::KwDefault);
+                        g.call_rule(GRule::Colon);
                     },
                 );
             });
             g.zero_or_more(|g| {
-                g.call("stmt");
+                g.call_rule(GRule::Stmt);
             });
         });
     });
 
-    g.parser_rule("break_stmt", |g| {
-        g.node(K::BreakStmt, |g| {
-            g.call("kw_break");
+    g.parser_rule(GRule::BreakStmt.as_str(), |g| {
+        g.node(Node::BreakStmt, |g| {
+            g.call_rule(GRule::KwBreak);
             // `break 2` needs experimental loop levels; without it, reject a digit level so it is
             // not parsed as `break;` + expression statement `2`.
             g.choice(
                 |g| {
                     cfg_flags::exp_loop_levels(g);
                     g.optional(|g| {
-                        g.call("break_continue_level");
+                        g.call_rule(GRule::BreakContinueLevel);
                     });
                 },
                 |g| {
                     cfg_flags::not_exp_loop_levels(g);
                     g.neg_lookahead(|g| {
-                        g.call("break_continue_level");
+                        g.call_rule(GRule::BreakContinueLevel);
                     });
                 },
             );
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
-    g.parser_rule("continue_stmt", |g| {
-        g.node(K::ContinueStmt, |g| {
-            g.call("kw_continue");
+    g.parser_rule(GRule::ContinueStmt.as_str(), |g| {
+        g.node(Node::ContinueStmt, |g| {
+            g.call_rule(GRule::KwContinue);
             g.choice(
                 |g| {
                     cfg_flags::exp_loop_levels(g);
                     g.optional(|g| {
-                        g.call("break_continue_level");
+                        g.call_rule(GRule::BreakContinueLevel);
                     });
                 },
                 |g| {
                     cfg_flags::not_exp_loop_levels(g);
                     g.neg_lookahead(|g| {
-                        g.call("break_continue_level");
+                        g.call_rule(GRule::BreakContinueLevel);
                     });
                 },
             );
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
-    g.parser_rule("include_stmt", |g| {
-        g.node(K::IncludeStmt, |g| {
-            g.call("kw_include");
-            g.call("lparen");
-            g.call("string");
-            g.call("rparen");
+    g.parser_rule(GRule::IncludeStmt.as_str(), |g| {
+        g.node(Node::IncludeStmt, |g| {
+            g.call_rule(GRule::KwInclude);
+            g.call_rule(GRule::Lparen);
+            g.call_rule(GRule::String);
+            g.call_rule(GRule::Rparen);
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
-    g.parser_rule("var_decl", |g| {
-        g.node(K::VarDecl, |g| {
-            g.choices(vec![
-                Box::new(|g| {
-                    g.call("kw_var");
-                    g.call("var_decl_items");
-                }),
-                Box::new(|g| {
+    g.parser_rule(GRule::VarDecl.as_str(), |g| {
+        g.node(Node::VarDecl, |g| {
+            sipha::choices!(
+                g,
+                |g| {
+                    g.call_rule(GRule::KwVar);
+                    g.call_rule(GRule::VarDeclItems);
+                },
+                |g| {
                     cfg_flags::exp_let(g);
-                    g.call("kw_let");
-                    g.call("var_decl_items");
-                }),
-                Box::new(|g| {
+                    g.call_rule(GRule::KwLet);
+                    g.call_rule(GRule::VarDeclItems);
+                },
+                |g| {
                     // Java / LeekScript v2+: `Map<K, V> m = [:]` without `var`/`let`.
                     cfg_flags::v2(g);
-                    g.call("ls_type");
-                    g.call("typed_var_decl_items");
-                }),
-            ]);
+                    g.call_rule(GRule::LsType);
+                    g.call_rule(GRule::TypedVarDeclItems);
+                },
+            );
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
     // `ident (= expr)? ( , ident (= expr)? )*`
-    g.parser_rule("var_decl_items", |g| {
-        g.call("ident");
+    g.parser_rule(GRule::VarDeclItems.as_str(), |g| {
+        g.call_rule(GRule::Ident);
         g.optional(|g| {
-            g.call("assign_op");
-            g.call("expr");
+            g.call_rule(GRule::AssignOp);
+            g.call_rule(GRule::Expr);
         });
         g.zero_or_more(|g| {
-            g.call("comma");
-            g.call("ident");
+            g.call_rule(GRule::Comma);
+            g.call_rule(GRule::Ident);
             g.optional(|g| {
-                g.call("assign_op");
-                g.call("expr");
+                g.call_rule(GRule::AssignOp);
+                g.call_rule(GRule::Expr);
             });
         });
     });
 
     // Same as `var_decl_items` but after a leading type (shared by all names).
-    g.parser_rule("typed_var_decl_items", |g| {
-        g.call("ident");
+    g.parser_rule(GRule::TypedVarDeclItems.as_str(), |g| {
+        g.call_rule(GRule::Ident);
         g.optional(|g| {
-            g.call("assign_op");
-            g.call("expr");
+            g.call_rule(GRule::AssignOp);
+            g.call_rule(GRule::Expr);
         });
         g.zero_or_more(|g| {
-            g.call("comma");
-            g.call("ident");
+            g.call_rule(GRule::Comma);
+            g.call_rule(GRule::Ident);
             g.optional(|g| {
-                g.call("assign_op");
-                g.call("expr");
+                g.call_rule(GRule::AssignOp);
+                g.call_rule(GRule::Expr);
             });
         });
     });
 
-    g.parser_rule("function_decl", |g| {
-        g.node(K::FunctionDecl, |g| {
-            g.call("kw_function");
-            g.call("name");
+    g.parser_rule(GRule::FunctionDecl.as_str(), |g| {
+        g.node(Node::FunctionDecl, |g| {
+            g.call_rule(GRule::KwFunction);
+            g.call_rule(GRule::Name);
             g.optional(|g| {
                 cfg_flags::exp_templates(g);
-                g.call("decl_template_params");
+                g.call_rule(GRule::DeclTemplateParams);
             });
-            g.call("lparen");
+            g.call_rule(GRule::Lparen);
             g.optional(|g| {
-                g.call("function_fn_param");
+                g.call_rule(GRule::FunctionFnParam);
                 g.zero_or_more(|g| {
-                    g.call("comma");
-                    g.call("function_fn_param");
+                    g.call_rule(GRule::Comma);
+                    g.call_rule(GRule::FunctionFnParam);
                 });
                 g.optional(|g| {
-                    g.call("comma");
+                    g.call_rule(GRule::Comma);
                 });
             });
-            g.call("rparen");
+            g.call_rule(GRule::Rparen);
             g.optional(|g| {
-                g.call("arrow");
-                g.call("ls_type");
+                g.call_rule(GRule::Arrow);
+                g.call_rule(GRule::LsType);
             });
             g.choice(
                 |g| {
                     g.if_flag(FLAG_SIGNATURE_MODE);
                     g.choice(
                         |g| {
-                            g.call("semi");
+                            g.call_rule(GRule::Semi);
                         },
                         |g| {
-                            g.call("block");
+                            g.call_rule(GRule::Block);
                         },
                     );
                 },
                 |g| {
                     g.if_not_flag(FLAG_SIGNATURE_MODE);
-                    g.call("block");
+                    g.call_rule(GRule::Block);
                 },
             );
         });
     });
 
     // Typed params before bare names so `(n)` is not parsed as type `n`.
-    g.parser_rule("fn_param_core", |g| {
+    g.parser_rule(GRule::FnParamCore.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("ls_type");
+                g.call_rule(GRule::LsType);
                 g.optional(|g| {
-                    g.call("op_at");
+                    g.call_rule(GRule::OpAt);
                 });
                 // Match `name` / class members: `string string` parameter names use type keywords.
-                g.call("name");
+                g.call_rule(GRule::Name);
             },
             |g| {
                 g.optional(|g| {
-                    g.call("op_at");
+                    g.call_rule(GRule::OpAt);
                 });
-                g.call("ident");
+                g.call_rule(GRule::Ident);
             },
         );
     });
 
     // Method / constructor parameters — optional default with `= expr`.
-    g.parser_rule("method_fn_param", |g| {
-        g.node(K::FnParam, |g| {
-            g.call("fn_param_core");
+    g.parser_rule(GRule::MethodFnParam.as_str(), |g| {
+        g.node(Node::FnParam, |g| {
+            g.call_rule(GRule::FnParamCore);
             g.optional(|g| {
-                g.call("eq");
-                g.call("expr");
+                g.call_rule(GRule::Eq);
+                g.call_rule(GRule::Expr);
             });
         });
     });
 
     // Top-level / anonymous `function` parameters — `= expr` only with experimental fn optional params.
-    g.parser_rule("function_fn_param", |g| {
-        g.node(K::FnParam, |g| {
-            g.call("fn_param_core");
+    g.parser_rule(GRule::FunctionFnParam.as_str(), |g| {
+        g.node(Node::FnParam, |g| {
+            g.call_rule(GRule::FnParamCore);
             g.optional(|g| {
                 cfg_flags::exp_fn_optional_params(g);
-                g.call("eq");
-                g.call("expr");
+                g.call_rule(GRule::Eq);
+                g.call_rule(GRule::Expr);
             });
         });
     });
 
-    g.parser_rule("param", |g| {
-        g.call("function_fn_param");
+    g.parser_rule(GRule::Param.as_str(), |g| {
+        g.call_rule(GRule::FunctionFnParam);
     });
 
-    g.parser_rule("if_stmt", |g| {
-        g.node(K::IfStmt, |g| {
-            g.call("kw_if");
+    g.parser_rule(GRule::IfStmt.as_str(), |g| {
+        g.node(Node::IfStmt, |g| {
+            g.call_rule(GRule::KwIf);
             // Accept both `if (cond)` and `if cond` (fixture style).
             g.choice(
                 |g| {
-                    g.call("lparen");
-                    g.call("expr");
-                    g.call("rparen");
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Rparen);
                 },
                 |g| {
-                    g.call("expr");
+                    g.call_rule(GRule::Expr);
                 },
             );
-            g.call("stmt_or_block");
+            g.call_rule(GRule::StmtOrBlock);
             g.optional(|g| {
-                g.call("kw_else");
-                g.call("stmt_or_block");
+                g.call_rule(GRule::KwElse);
+                g.call_rule(GRule::StmtOrBlock);
             });
         });
     });
@@ -1329,288 +820,289 @@ pub fn define(g: &mut GrammarBuilder) {
     // optional type, optional `var`/`let`, optional `@`, name, then
     // `:` value-decl `in` expr | `in` expr | `=` init `;` cond `;` update.
     // Try `for (` … `)` before paren-free forms; key:value foreach before `in`.
-    g.parser_rule("for_stmt", |g| {
-        g.choices(vec![
-            Box::new(|g| {
-                g.node(K::ForeachStmt, |g| {
-                    g.call("kw_for");
-                    g.call("lparen");
-                    g.call("for_loop_var");
-                    g.call("colon");
-                    g.call("for_loop_var");
-                    g.call("kw_in");
-                    g.call("expr");
-                    g.call("rparen");
-                    g.call("stmt_or_block");
+    g.parser_rule(GRule::ForStmt.as_str(), |g| {
+        sipha::choices!(
+            g,
+            |g| {
+                g.node(Node::ForeachStmt, |g| {
+                    g.call_rule(GRule::KwFor);
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::Colon);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::KwIn);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Rparen);
+                    g.call_rule(GRule::StmtOrBlock);
                 });
-            }),
-            Box::new(|g| {
-                g.node(K::ForeachStmt, |g| {
-                    g.call("kw_for");
-                    g.call("lparen");
-                    g.call("for_loop_var");
-                    g.call("kw_in");
-                    g.call("expr");
-                    g.call("rparen");
-                    g.call("stmt_or_block");
+            },
+            |g| {
+                g.node(Node::ForeachStmt, |g| {
+                    g.call_rule(GRule::KwFor);
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::KwIn);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Rparen);
+                    g.call_rule(GRule::StmtOrBlock);
                 });
-            }),
+            },
             // Classic `for ( ; cond ; step )` / `for (;;)` — init omitted (first `;` immediately).
-            Box::new(|g| {
-                g.node(K::ForStmt, |g| {
-                    g.call("kw_for");
-                    g.call("lparen");
-                    g.call("semi");
+            |g| {
+                g.node(Node::ForStmt, |g| {
+                    g.call_rule(GRule::KwFor);
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::Semi);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                    g.call("semi");
+                    g.call_rule(GRule::Semi);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                    g.call("rparen");
-                    g.call("stmt_or_block");
+                    g.call_rule(GRule::Rparen);
+                    g.call_rule(GRule::StmtOrBlock);
                 });
-            }),
-            Box::new(|g| {
-                g.node(K::ForStmt, |g| {
-                    g.call("kw_for");
-                    g.call("lparen");
-                    g.call("for_loop_var");
-                    g.call("eq");
-                    g.call("expr");
-                    g.call("semi");
+            },
+            |g| {
+                g.node(Node::ForStmt, |g| {
+                    g.call_rule(GRule::KwFor);
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::Eq);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Semi);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                    g.call("semi");
+                    g.call_rule(GRule::Semi);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                    g.call("rparen");
-                    g.call("stmt_or_block");
+                    g.call_rule(GRule::Rparen);
+                    g.call_rule(GRule::StmtOrBlock);
                 });
-            }),
-            Box::new(|g| {
-                g.node(K::ForeachStmt, |g| {
-                    g.call("kw_for");
-                    g.call("for_loop_var");
-                    g.call("colon");
-                    g.call("for_loop_var");
-                    g.call("kw_in");
-                    g.call("expr");
-                    g.call("stmt_or_block");
+            },
+            |g| {
+                g.node(Node::ForeachStmt, |g| {
+                    g.call_rule(GRule::KwFor);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::Colon);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::KwIn);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::StmtOrBlock);
                 });
-            }),
-            Box::new(|g| {
-                g.node(K::ForeachStmt, |g| {
-                    g.call("kw_for");
-                    g.call("for_loop_var");
-                    g.call("kw_in");
-                    g.call("expr");
-                    g.call("stmt_or_block");
+            },
+            |g| {
+                g.node(Node::ForeachStmt, |g| {
+                    g.call_rule(GRule::KwFor);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::KwIn);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::StmtOrBlock);
                 });
-            }),
-            Box::new(|g| {
-                g.node(K::ForStmt, |g| {
-                    g.call("kw_for");
-                    g.call("for_loop_var");
-                    g.call("eq");
-                    g.call("expr");
-                    g.call("semi");
+            },
+            |g| {
+                g.node(Node::ForStmt, |g| {
+                    g.call_rule(GRule::KwFor);
+                    g.call_rule(GRule::ForLoopVar);
+                    g.call_rule(GRule::Eq);
+                    g.call_rule(GRule::Expr);
+                    g.call_rule(GRule::Semi);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                    g.call("semi");
+                    g.call_rule(GRule::Semi);
                     g.optional(|g| {
-                        g.call("expr");
+                        g.call_rule(GRule::Expr);
                     });
-                    g.call("stmt_or_block");
+                    g.call_rule(GRule::StmtOrBlock);
                 });
-            }),
-        ]);
+            },
+        );
     });
 
     // After optional type / `var`, optional `@`, one variable name (Java `forBlock`).
     // Typed branch first so `(integer k = …)` wins; `(k in xs)` uses the untyped branch.
-    g.parser_rule("for_loop_var", |g| {
+    g.parser_rule(GRule::ForLoopVar.as_str(), |g| {
         g.choice(
             |g| {
-                g.call("ls_type");
+                g.call_rule(GRule::LsType);
                 g.optional(|g| {
-                    g.call("op_at");
+                    g.call_rule(GRule::OpAt);
                 });
-                g.call("ident");
+                g.call_rule(GRule::Ident);
             },
             |g| {
                 g.optional(|g| {
                     g.choice(
                         |g| {
-                            g.call("kw_var");
+                            g.call_rule(GRule::KwVar);
                         },
                         |g| {
                             cfg_flags::exp_let(g);
-                            g.call("kw_let");
+                            g.call_rule(GRule::KwLet);
                         },
                     );
                 });
                 g.optional(|g| {
-                    g.call("op_at");
+                    g.call_rule(GRule::OpAt);
                 });
-                g.call("ident");
+                g.call_rule(GRule::Ident);
             },
         );
     });
 
-    g.parser_rule("do_while_stmt", |g| {
-        g.node(K::DoWhileStmt, |g| {
-            g.call("kw_do");
-            g.call("stmt_or_block");
-            g.call("kw_while");
-            g.call("lparen");
-            g.call("expr");
-            g.call("rparen");
+    g.parser_rule(GRule::DoWhileStmt.as_str(), |g| {
+        g.node(Node::DoWhileStmt, |g| {
+            g.call_rule(GRule::KwDo);
+            g.call_rule(GRule::StmtOrBlock);
+            g.call_rule(GRule::KwWhile);
+            g.call_rule(GRule::Lparen);
+            g.call_rule(GRule::Expr);
+            g.call_rule(GRule::Rparen);
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
-    g.parser_rule("while_stmt", |g| {
-        g.node(K::WhileStmt, |g| {
-            g.call("kw_while");
-            g.call("lparen");
-            g.call("expr");
-            g.call("rparen");
-            g.call("stmt_or_block");
+    g.parser_rule(GRule::WhileStmt.as_str(), |g| {
+        g.node(Node::WhileStmt, |g| {
+            g.call_rule(GRule::KwWhile);
+            g.call_rule(GRule::Lparen);
+            g.call_rule(GRule::Expr);
+            g.call_rule(GRule::Rparen);
+            g.call_rule(GRule::StmtOrBlock);
         });
     });
 
     // Not in leekscript-java `WordCompiler` (lexer token only).
-    g.parser_rule("try_stmt", |g| {
-        g.node(K::TryStmt, |g| {
-            g.call("kw_try");
-            g.call("block");
+    g.parser_rule(GRule::TryStmt.as_str(), |g| {
+        g.node(Node::TryStmt, |g| {
+            g.call_rule(GRule::KwTry);
+            g.call_rule(GRule::Block);
             g.zero_or_more(|g| {
-                g.node(K::CatchClause, |g| {
-                    g.call("kw_catch");
-                    g.call("lparen");
-                    g.call("ls_type");
-                    g.call("ident");
-                    g.call("rparen");
-                    g.call("block");
+                g.node(Node::CatchClause, |g| {
+                    g.call_rule(GRule::KwCatch);
+                    g.call_rule(GRule::Lparen);
+                    g.call_rule(GRule::LsType);
+                    g.call_rule(GRule::Ident);
+                    g.call_rule(GRule::Rparen);
+                    g.call_rule(GRule::Block);
                 });
             });
             g.optional(|g| {
-                g.call("kw_finally");
-                g.call("block");
+                g.call_rule(GRule::KwFinally);
+                g.call_rule(GRule::Block);
             });
         });
     });
 
     // Not in leekscript-java `WordCompiler` (lexer token only).
-    g.parser_rule("throw_stmt", |g| {
-        g.node(K::ThrowStmt, |g| {
-            g.call("kw_throw");
-            g.call("expr");
+    g.parser_rule(GRule::ThrowStmt.as_str(), |g| {
+        g.node(Node::ThrowStmt, |g| {
+            g.call_rule(GRule::KwThrow);
+            g.call_rule(GRule::Expr);
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
     // Not in leekscript-java `WordCompiler` (lexer token only).
-    g.parser_rule("import_stmt", |g| {
-        g.node(K::ImportStmt, |g| {
-            g.call("kw_import");
+    g.parser_rule(GRule::ImportStmt.as_str(), |g| {
+        g.node(Node::ImportStmt, |g| {
+            g.call_rule(GRule::KwImport);
             g.choice(
                 |g| {
-                    g.call("string");
+                    g.call_rule(GRule::String);
                 },
                 |g| {
-                    g.call("ident");
+                    g.call_rule(GRule::Ident);
                     g.zero_or_more(|g| {
-                        g.call("dot");
-                        g.call("ident");
+                        g.call_rule(GRule::Dot);
+                        g.call_rule(GRule::Ident);
                     });
                 },
             );
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
     // Not in leekscript-java `WordCompiler` (lexer token only).
-    g.parser_rule("export_stmt", |g| {
-        g.node(K::ExportStmt, |g| {
-            g.call("kw_export");
-            g.call("block");
+    g.parser_rule(GRule::ExportStmt.as_str(), |g| {
+        g.node(Node::ExportStmt, |g| {
+            g.call_rule(GRule::KwExport);
+            g.call_rule(GRule::Block);
         });
     });
 
     // Not in leekscript-java `WordCompiler` (lexer token only).
-    g.parser_rule("goto_stmt", |g| {
-        g.node(K::GotoStmt, |g| {
-            g.call("kw_goto");
-            g.call("ident");
+    g.parser_rule(GRule::GotoStmt.as_str(), |g| {
+        g.node(Node::GotoStmt, |g| {
+            g.call_rule(GRule::KwGoto);
+            g.call_rule(GRule::Ident);
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
     // Not in leekscript-java `WordCompiler` (lexer token only).
-    g.parser_rule("package_stmt", |g| {
-        g.node(K::PackageStmt, |g| {
-            g.call("kw_package");
-            g.call("ident");
+    g.parser_rule(GRule::PackageStmt.as_str(), |g| {
+        g.node(Node::PackageStmt, |g| {
+            g.call_rule(GRule::KwPackage);
+            g.call_rule(GRule::Ident);
             g.zero_or_more(|g| {
-                g.call("dot");
-                g.call("ident");
+                g.call_rule(GRule::Dot);
+                g.call_rule(GRule::Ident);
             });
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
     // Not in leekscript-java `WordCompiler` (`CONST` exists in the lexer only).
-    g.parser_rule("const_decl", |g| {
-        g.node(K::ConstDecl, |g| {
-            g.call("kw_const");
-            g.call("var_decl_items");
+    g.parser_rule(GRule::ConstDecl.as_str(), |g| {
+        g.node(Node::ConstDecl, |g| {
+            g.call_rule(GRule::KwConst);
+            g.call_rule(GRule::VarDeclItems);
             g.optional(|g| {
-                g.call("semi");
+                g.call_rule(GRule::Semi);
             });
         });
     });
 
     // LeekScript extension; not in leekscript-java `LexicalParser` / `WordCompiler`.
-    g.parser_rule("match_stmt", |g| {
-        g.node(K::MatchStmt, |g| {
-            g.call("kw_match");
-            g.call("expr");
-            g.call("lbrace");
+    g.parser_rule(GRule::MatchStmt.as_str(), |g| {
+        g.node(Node::MatchStmt, |g| {
+            g.call_rule(GRule::KwMatch);
+            g.call_rule(GRule::Expr);
+            g.call_rule(GRule::Lbrace);
             g.zero_or_more(|g| {
-                g.call("match_case");
+                g.call_rule(GRule::MatchCase);
             });
-            g.call("rbrace");
+            g.call_rule(GRule::Rbrace);
         });
     });
 
-    g.parser_rule("match_case", |g| {
+    g.parser_rule(GRule::MatchCase.as_str(), |g| {
         // pattern ":" stmt
         // pattern is either an expression or the wildcard `..`
         g.choice(
             |g| {
-                g.call("dotdot");
+                g.call_rule(GRule::Dotdot);
             },
             |g| {
-                g.call("expr");
+                g.call_rule(GRule::Expr);
             },
         );
-        g.call("colon");
-        g.call("stmt");
+        g.call_rule(GRule::Colon);
+        g.call_rule(GRule::Stmt);
     });
 }

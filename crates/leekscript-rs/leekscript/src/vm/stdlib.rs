@@ -34,7 +34,6 @@ fn num_binary_merge(v: f64, a: &Value, b: &Value) -> Value {
     })
 }
 
-
 thread_local! {
     static RAND_STATE: Cell<u64> = Cell::new(0x6a09_e667_f3bc_c909);
 }
@@ -409,9 +408,7 @@ fn nf_byte_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let x = u64_bits(one_num(args)?);
     let b = x.to_le_bytes();
-    let r = u64::from_le_bytes([
-        b[7], b[6], b[5], b[4], b[3], b[2], b[1], b[0],
-    ]);
+    let r = u64::from_le_bytes([b[7], b[6], b[5], b[4], b[3], b[2], b[1], b[0]]);
     Ok(Value::num_int(r as i64))
 }
 
@@ -487,11 +484,7 @@ fn nf_char_at(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::String(s) => s.as_str(),
         _ => return Err(VmError::ExpectedString),
     };
-    let i = f64_as_i64_trunc(
-        args[1]
-            .as_number()
-            .ok_or(VmError::ExpectedNumber)?,
-    );
+    let i = f64_as_i64_trunc(args[1].as_number().ok_or(VmError::ExpectedNumber)?);
     let ix = usize::try_from(i).ok().filter(|&ix| ix < s.chars().count());
     let out = ix
         .and_then(|ix| s.chars().nth(ix))
@@ -509,11 +502,7 @@ fn nf_code_point_at(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::String(s) => s.as_str(),
         _ => return Err(VmError::ExpectedString),
     };
-    let i = f64_as_i64_trunc(
-        args[1]
-            .as_number()
-            .ok_or(VmError::ExpectedNumber)?,
-    );
+    let i = f64_as_i64_trunc(args[1].as_number().ok_or(VmError::ExpectedNumber)?);
     if i < 0 {
         return Ok(Value::num_int(-1));
     }
@@ -596,11 +585,7 @@ fn nf_index_of(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
                 return Err(VmError::BadNativeArgs);
             };
             let el = &args[1];
-            let start = f64_as_i64_trunc(
-                args[2]
-                    .as_number()
-                    .ok_or(VmError::ExpectedNumber)?,
-            );
+            let start = f64_as_i64_trunc(args[2].as_number().ok_or(VmError::ExpectedNumber)?);
             let start = usize::try_from(start.max(0)).unwrap_or(0).min(a.len());
             ch(vm, 1)?;
             let mut found: Option<usize> = None;
@@ -677,9 +662,7 @@ fn nf_split(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
             let parts: Vec<Value> = if sep.is_empty() {
                 s.chars().map(|c| Value::String(c.to_string())).collect()
             } else {
-                s.split(sep)
-                    .map(|p| Value::String(p.to_string()))
-                    .collect()
+                s.split(sep).map(|p| Value::String(p.to_string())).collect()
             };
             Ok(Value::Array(parts))
         }
@@ -692,11 +675,7 @@ fn nf_split(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
                 Value::String(s) => s.as_str(),
                 _ => return Err(VmError::ExpectedString),
             };
-            let limit = f64_as_i64_trunc(
-                args[2]
-                    .as_number()
-                    .ok_or(VmError::ExpectedNumber)?,
-            );
+            let limit = f64_as_i64_trunc(args[2].as_number().ok_or(VmError::ExpectedNumber)?);
             ch(vm, 1 + java_utf16_len(s))?;
             let parts: Vec<Value> = split_string_limited(s, sep, limit)
                 .into_iter()
@@ -716,16 +695,8 @@ fn nf_substring(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::String(s) => s.as_str(),
         _ => return Err(VmError::ExpectedString),
     };
-    let start = f64_as_i64_trunc(
-        args[1]
-            .as_number()
-            .ok_or(VmError::ExpectedNumber)?,
-    );
-    let len = f64_as_i64_trunc(
-        args[2]
-            .as_number()
-            .ok_or(VmError::ExpectedNumber)?,
-    );
+    let start = f64_as_i64_trunc(args[1].as_number().ok_or(VmError::ExpectedNumber)?);
+    let len = f64_as_i64_trunc(args[2].as_number().ok_or(VmError::ExpectedNumber)?);
     ch(vm, 1 + (len.max(0) as u64) / 10)?;
     let start = usize::try_from(start.max(0)).unwrap_or(0);
     let mut it = s.chars().skip(start);
@@ -742,11 +713,7 @@ fn nf_sub_string(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::String(s) => s.as_str(),
         _ => return Err(VmError::ExpectedString),
     };
-    let start = f64_as_i64_trunc(
-        args[1]
-            .as_number()
-            .ok_or(VmError::ExpectedNumber)?,
-    );
+    let start = f64_as_i64_trunc(args[1].as_number().ok_or(VmError::ExpectedNumber)?);
     let sl = java_utf16_len(s);
     let st = start.max(0) as u64;
     ch(vm, 1 + sl.saturating_sub(st) / 10)?;
