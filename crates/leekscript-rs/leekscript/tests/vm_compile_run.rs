@@ -2,7 +2,7 @@
 
 use leekscript::vm::{
     BytecodeBuilder, CompileError, NativeFn, Opcode, Value, Vm, VmError, compile_chunk_v4,
-    compile_chunk_v4_with_includes, op_illegal,
+    compile_chunk_v4_with_includes, op_illegal, stdlib_global_constant_init,
 };
 
 #[test]
@@ -220,7 +220,11 @@ fn compile_and_run_mul_only() {
 #[test]
 fn compile_and_run_arithmetic_return() {
     let chunk = compile_chunk_v4("return 2 + 3 * 4;").expect("compile");
-    assert_eq!(chunk.local_slots, 0);
+    assert_eq!(
+        chunk.local_slots,
+        stdlib_global_constant_init().count(),
+        "prelude stdlib constants reserve locals"
+    );
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     let v = vm.run().expect("run");
     assert_eq!(v, Value::Number(14.0));
@@ -244,7 +248,7 @@ fn unary_minus() {
 
 #[test]
 fn native_call_roundtrip() {
-    fn add_two(args: &[Value]) -> Result<Value, VmError> {
+    fn add_two(_vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         let a = args.first().and_then(|v| v.as_number()).ok_or(VmError::ExpectedNumber)?;
         let b = args.get(1).and_then(|v| v.as_number()).ok_or(VmError::ExpectedNumber)?;
         Ok(Value::Number(a + b))
@@ -314,7 +318,10 @@ fn operations_and_ram_counters_after_run() {
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     vm.run().expect("run");
     assert!(vm.operations > 0);
-    assert_eq!(vm.ram_quads, 0);
+    let prelude_ram: u64 = stdlib_global_constant_init()
+        .map(|(_, v)| v.ram_quads())
+        .sum();
+    assert_eq!(vm.ram_quads, prelude_ram, "locals still hold stdlib constants");
 }
 
 #[test]
@@ -419,4 +426,33 @@ fn compound_assign_in_loop() {
     assert_eq!(vm.run().expect("run"), Value::Number(6.0));
 }
 
+#[test]
+fn stdlib_global_constants_from_sig() {
+    let chunk = compile_chunk_v4("return TYPE_NUMBER + SORT_DESC + COLOR_BLUE;").expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().expect("run"), Value::Number(257.0));
+}
+
+#[test]
+fn stdlib_natives_from_sig_core() {
+    let cases = [
+        ("return abs(-3);", Value::Number(3.0)),
+        ("return sqrt(4);", Value::Number(2.0)),
+        ("return length('ab');", Value::Number(2.0)),
+        ("return count([1, 2]);", Value::Number(2.0)),
+        (
+            "return join(['a', 'b'], '-');",
+            Value::String("a-b".into()),
+        ),
+        ("return indexOf('abc', 'b');", Value::Number(1.0)),
+        ("return abs(-2) + 1;", Value::Number(3.0)),
+    ];
+    for (src, want) in cases {
+        let chunk =
+            compile_chunk_v4(src).unwrap_or_else(|e| panic!("compile {src:?}: {e}"));
+        let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+        let got = vm.run().unwrap_or_else(|e| panic!("run {src:?}: {e}"));
+        assert_eq!(got, want, "src={src:?}");
+    }
+}
 

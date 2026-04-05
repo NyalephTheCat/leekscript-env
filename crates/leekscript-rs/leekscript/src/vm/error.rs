@@ -21,6 +21,12 @@ pub enum VmError {
     BadArgCount { expected: u8, got: usize },
     /// Operand was not a number where arithmetic expected one.
     ExpectedNumber,
+    /// Operand was not a string where a string was required.
+    ExpectedString,
+    /// Operand was not an array where an array was required.
+    ExpectedArray,
+    /// Native overload / argument types not supported at runtime.
+    BadNativeArgs,
     /// Local slot index out of range for the current frame.
     BadLocal(u16),
     /// [`Vm::max_operations`](super::Vm::max_operations) exceeded (Leek Wars `Error.TOO_MUCH_OPERATIONS`).
@@ -56,6 +62,9 @@ impl fmt::Display for VmError {
                 write!(f, "native call expected {expected} args, got {got}")
             }
             Self::ExpectedNumber => write!(f, "expected number"),
+            Self::ExpectedString => write!(f, "expected string"),
+            Self::ExpectedArray => write!(f, "expected array"),
+            Self::BadNativeArgs => write!(f, "native call argument types not supported"),
             Self::BadLocal(i) => write!(f, "local index {i} out of range"),
             Self::TooManyOperations {
                 limit,

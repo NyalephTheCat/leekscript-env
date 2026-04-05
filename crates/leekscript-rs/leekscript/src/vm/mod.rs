@@ -9,7 +9,10 @@
 //! - [`Opcode`] — fixed `u8` instruction tags and operand layouts.
 //! - [`DISPATCH`](interpreter::DISPATCH) — a full **256-entry** function-pointer table (one handler
 //!   per possible opcode byte). Unused tags still resolve to [`op_illegal`](interpreter::op_illegal).
-//! - [`Vm`](interpreter::Vm) — stack machine, constant pool, locals, optional [`NativeFn`](interpreter::NativeFn) table.
+//! - [`Vm`](interpreter::Vm) — stack machine, constant pool, locals, [`NativeFn`](interpreter::NativeFn) table
+//!   (defaults from [`default_natives`](default_natives) when using [`Vm::from_compiled_chunk`](interpreter::Vm::from_compiled_chunk)).
+//! - [`stdlib_global_constant_init`](stdlib_global_constant_init) — `PI`, `TYPE_*`, `SORT_*`, `COLOR_*`, …
+//!   from `sig/core/stdlib.sig.const.leek`, bound at chunk start.
 //! - [`compile_chunk_v4`](compile::compile_chunk_v4) — CST → bytecode (`var` / `global` / `const`, `if`,
 //!   `while` / `do`-`while` / `for` / `for (x in arr)`, `break` / `continue`, `;`, `a[i]` / `m.field`,
 //!   ternary `?:`, `+=` / `-=` / …, simple `x = expr`, expressions, `return`). Loops emit
@@ -22,6 +25,7 @@ mod error;
 mod interpreter;
 mod java_ops;
 mod opcode;
+mod stdlib;
 mod value;
 
 pub use bytecode::{Bytecode, BytecodeBuilder};
@@ -34,4 +38,5 @@ pub use interpreter::{
     NativeFn, OpHandler, Vm, DEFAULT_MAX_OPERATIONS, DEFAULT_MAX_RAM_QUADS, DISPATCH, op_illegal,
 };
 pub use opcode::Opcode;
+pub use stdlib::{default_natives, native_id, stdlib_global_constant_init};
 pub use value::Value;

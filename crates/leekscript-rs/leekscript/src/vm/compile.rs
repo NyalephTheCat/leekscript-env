@@ -164,6 +164,7 @@ pub fn compile_chunk_v4_with_includes(
 
 fn compile_root(root: Root) -> Result<CompiledChunk, CompileError> {
     let mut cx = CompileCtx::default();
+    cx.emit_stdlib_global_constants();
     for stmt in AstNodeExt::children::<Stmt>(root.syntax()) {
         cx.compile_stmt(stmt)?;
     }
@@ -443,6 +444,16 @@ enum LoopTail {
 }
 
 impl CompileCtx {
+    /// `sig/core/stdlib.sig.const.leek` — no `ChargeOps` (environment setup, not user code).
+    fn emit_stdlib_global_constants(&mut self) {
+        for (name, v) in super::stdlib::stdlib_global_constant_init() {
+            let slot = self.alloc_local(name);
+            self.builder.emit_push_const(v);
+            self.builder.emit_opcode(Opcode::SetLocal);
+            self.builder.emit_u16_operand(slot);
+        }
+    }
+
     fn alloc_local(&mut self, name: &str) -> u16 {
         if let Some(&i) = self.locals.get(name) {
             return i;
@@ -1357,40 +1368,59 @@ impl CompileCtx {
         Ok(())
     }
 
+    /// Sipha postfix parsing: `ident ( args )` is `[Ident, CallExpr]` — the call node has only
+    /// argument expressions (callee is the preceding operand), not a callee child.
+    fn try_emit_ident_call_two_part(&mut self, parts: &[SyntaxElement]) -> Result<bool, CompileError> {
+        if parts.len() != 2 {
+            return Ok(false);
+        }
+        let SyntaxElement::Node(n) = &parts[1] else {
+            return Ok(false);
+        };
+        let Some(call) = CallExpr::cast(n.clone()) else {
+            return Ok(false);
+        };
+        let Some(name) = expr_element_as_plain_ident(&parts[0]) else {
+            return Ok(false);
+        };
+        if self.locals.contains_key(&name) {
+            return Err(CompileError::Unsupported(
+                "indirect calls (calling through a local variable) are not supported by the VM compiler",
+            ));
+        }
+        let args: Vec<Expr> = AstNodeExt::children::<Expr>(call.syntax()).collect();
+        let argc = u8::try_from(args.len())
+            .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
+        for a in &args {
+            self.compile_expr(a.clone())?;
+        }
+        if let Some(&fid) = self.function_by_name.get(&name) {
+            let o = java_ops::java_analyzed_ops_syntax(call.syntax());
+            if o > 0 {
+                self.builder.emit_charge_ops(o);
+            }
+            self.builder.emit_call_function(fid, argc);
+            return Ok(true);
+        }
+        if super::stdlib::native_id(&name).is_some() {
+            let arg_o: u32 = args.iter().map(|a| java_ops::java_analyzed_ops(a)).sum();
+            if arg_o > 0 {
+                self.builder.emit_charge_ops(arg_o);
+            }
+        }
+        if let Some(nid) = super::stdlib::native_id(&name) {
+            self.builder.emit_call_native(nid, argc);
+            return Ok(true);
+        }
+        Err(CompileError::Unsupported("call to unknown function"))
+    }
+
     fn try_compile_postfix_chain_on_parts(
         &mut self,
         parts: &[SyntaxElement],
     ) -> Result<bool, CompileError> {
-        // Sipha postfix parsing: `ident ( args )` is `[Ident, CallExpr]` — the call node has only
-        // argument expressions (callee is the preceding operand), not a callee child.
-        if parts.len() == 2 {
-            if let SyntaxElement::Node(n) = &parts[1] {
-                if let Some(call) = CallExpr::cast(n.clone()) {
-                    if let Some(name) = expr_element_as_plain_ident(&parts[0]) {
-                        if self.locals.contains_key(&name) {
-                            return Err(CompileError::Unsupported(
-                                "indirect calls (calling through a local variable) are not supported by the VM compiler",
-                            ));
-                        }
-                        let Some(&fid) = self.function_by_name.get(&name) else {
-                            return Err(CompileError::Unsupported("call to unknown function"));
-                        };
-                        let args: Vec<Expr> =
-                            AstNodeExt::children::<Expr>(call.syntax()).collect();
-                        let argc = u8::try_from(args.len())
-                            .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
-                        for a in &args {
-                            self.compile_expr(a.clone())?;
-                        }
-                        let o = java_ops::java_analyzed_ops_syntax(call.syntax());
-                        if o > 0 {
-                            self.builder.emit_charge_ops(o);
-                        }
-                        self.builder.emit_call_function(fid, argc);
-                        return Ok(true);
-                    }
-                }
-            }
+        if self.try_emit_ident_call_two_part(parts)? {
+            return Ok(true);
         }
         if parts.len() < 2 {
             return Ok(false);
@@ -1716,21 +1746,31 @@ impl CompileCtx {
         let name = expr_plain_ident_from_expr(callee).ok_or(CompileError::Unsupported(
             "call callee must be a simple identifier",
         ))?;
-        let Some(&fid) = self.function_by_name.get(&name) else {
-            return Err(CompileError::Unsupported("call to unknown function"));
-        };
         let argc = u8::try_from(args.len())
             .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
         for a in args {
             self.compile_expr(a.clone())?;
         }
         let expr = Expr::Call(call.clone());
-        let o = java_ops::java_analyzed_ops(&expr);
-        if o > 0 {
-            self.builder.emit_charge_ops(o);
+        if let Some(&fid) = self.function_by_name.get(&name) {
+            let o = java_ops::java_analyzed_ops(&expr);
+            if o > 0 {
+                self.builder.emit_charge_ops(o);
+            }
+            self.builder.emit_call_function(fid, argc);
+            return Ok(());
         }
-        self.builder.emit_call_function(fid, argc);
-        Ok(())
+        if super::stdlib::native_id(&name).is_some() {
+            let arg_o: u32 = args.iter().map(|a| java_ops::java_analyzed_ops(a)).sum();
+            if arg_o > 0 {
+                self.builder.emit_charge_ops(arg_o);
+            }
+        }
+        if let Some(nid) = super::stdlib::native_id(&name) {
+            self.builder.emit_call_native(nid, argc);
+            return Ok(());
+        }
+        Err(CompileError::Unsupported("call to unknown function"))
     }
 
     fn compile_array_literal(&mut self, arr: &ArrayExpr) -> Result<(), CompileError> {
@@ -1892,11 +1932,16 @@ impl CompileCtx {
         if parts.len() < 2 {
             return Ok(false);
         }
-        match self.emit_expr_head_operand(&parts[0])? {
-            None => return Ok(false),
-            Some(()) => {}
-        }
-        for p in parts.iter().skip(1) {
+        let bin_start: usize = if self.try_emit_ident_call_two_part(&parts[..2])? {
+            2
+        } else {
+            match self.emit_expr_head_operand(&parts[0])? {
+                None => return Ok(false),
+                Some(()) => {}
+            }
+            1
+        };
+        for p in parts.iter().skip(bin_start) {
             let SyntaxElement::Node(node) = p else {
                 return Ok(false);
             };
@@ -1904,8 +1949,8 @@ impl CompileCtx {
                 return Ok(false);
             }
         }
-        let mut prefix_len = 1usize;
-        for p in parts.iter().skip(1) {
+        let mut prefix_len = bin_start;
+        for p in parts.iter().skip(bin_start) {
             let SyntaxElement::Node(bin) = p else {
                 unreachable!("validated above");
             };
@@ -1994,6 +2039,9 @@ impl CompileCtx {
     fn compile_infix_suffix(&mut self, parts: &[SyntaxElement]) -> Result<(), CompileError> {
         if parts.is_empty() {
             return Err(CompileError::Unsupported("empty expression suffix"));
+        }
+        if parts.len() == 2 && self.try_emit_ident_call_two_part(parts)? {
+            return Ok(());
         }
         if parts.len() == 1 {
             return self.compile_suffix_atom(&parts[0]);

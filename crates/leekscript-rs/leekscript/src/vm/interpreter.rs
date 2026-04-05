@@ -18,8 +18,9 @@ pub const DEFAULT_MAX_OPERATIONS: u64 = 20_000_000;
 pub const DEFAULT_MAX_RAM_QUADS: u64 = 12_500_000;
 
 /// Host-provided native (`System.debug`, fight APIs, …). Receives arguments in call order (first
-/// parameter is `args[0]`).
-pub type NativeFn = fn(&[Value]) -> Result<Value, VmError>;
+/// parameter is `args[0]`). Charge work with [`Vm::add_operations`](Vm::add_operations) to mirror
+/// Java `LeekFunctions.getOperations()` and runtime `ai.ops(...)` in `*Class` / `ArrayLeekValue`.
+pub type NativeFn = fn(&mut Vm, &[Value]) -> Result<Value, VmError>;
 
 /// One handler per possible `u8` opcode; index `0` is [`Opcode::Illegal`](Opcode::Illegal).
 pub type OpHandler = fn(&mut Vm) -> Result<(), VmError>;
@@ -96,6 +97,7 @@ impl Vm {
     /// [`Self::set_local_count`](Self::set_local_count), and [`Self::set_functions`](Self::set_functions).
     pub fn from_compiled_chunk(chunk: super::compile::CompiledChunk) -> Result<Self, VmError> {
         let mut vm = Self::new(chunk.bytecode);
+        vm.set_natives(super::stdlib::default_natives());
         vm.set_functions(chunk.functions);
         vm.set_local_count(chunk.local_slots)?;
         Ok(vm)
@@ -186,6 +188,11 @@ impl Vm {
             }
             None => Value::Null,
         }
+    }
+
+    /// Add to the instruction counter (Leek Wars `AI.ops` / `addCounter`).
+    pub fn add_operations(&mut self, n: u64) -> Result<(), VmError> {
+        self.charge_ops(n)
     }
 
     fn charge_ops(&mut self, n: u64) -> Result<(), VmError> {
@@ -473,10 +480,8 @@ fn op_call_native(vm: &mut Vm) -> Result<(), VmError> {
     for slot in (0..argc).rev() {
         args[slot] = vm.pop_stack()?;
     }
-    let out = native(&args)?;
+    let out = native(vm, &args)?;
     vm.push_stack(out)?;
-    // Java charges each standard function from `LeekFunctions.mOperations`; use 1 as a minimal stub.
-    vm.charge_ops(1)?;
     Ok(())
 }
 
