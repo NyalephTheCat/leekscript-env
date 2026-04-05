@@ -13,7 +13,27 @@ use std::cell::Cell;
 
 use super::error::VmError;
 use super::interpreter::{NativeFn, Vm};
-use super::value::Value;
+use super::value::{NumberBits, Value};
+
+#[inline]
+fn num_unary_preserve(v: f64, src: &Value) -> Value {
+    Value::Number(match src.number_bits() {
+        Some(NumberBits::Real(_)) => NumberBits::Real(v),
+        Some(NumberBits::Int(_)) | None => NumberBits::coerce_integerish_f64(v),
+    })
+}
+
+#[inline]
+fn num_binary_merge(v: f64, a: &Value, b: &Value) -> Value {
+    let prefer_real = matches!(a.number_bits(), Some(NumberBits::Real(_)))
+        || matches!(b.number_bits(), Some(NumberBits::Real(_)));
+    Value::Number(if prefer_real {
+        NumberBits::Real(v)
+    } else {
+        NumberBits::coerce_integerish_f64(v)
+    })
+}
+
 
 thread_local! {
     static RAND_STATE: Cell<u64> = Cell::new(0x6a09_e667_f3bc_c909);
@@ -27,6 +47,26 @@ fn ch(vm: &mut Vm, n: u64) -> Result<(), VmError> {
 /// UTF-16 code unit count, matching Java `String.length()` for cost formulas.
 fn java_utf16_len(s: &str) -> u64 {
     s.encode_utf16().count() as u64
+}
+
+/// Java `String.indexOf(String, int)` on UTF-16 code units (`fromIndex < 0` ⇒ `0`).
+fn index_of_utf16_from(haystack: &str, needle: &str, from_index: i64) -> i64 {
+    let hay: Vec<u16> = haystack.encode_utf16().collect();
+    let needle_u: Vec<u16> = needle.encode_utf16().collect();
+    let from = from_index.max(0) as usize;
+    if needle_u.is_empty() {
+        return from.min(hay.len()) as i64;
+    }
+    if from > hay.len() {
+        return -1;
+    }
+    let last = hay.len().saturating_sub(needle_u.len());
+    for i in from..=last {
+        if hay[i..i + needle_u.len()] == needle_u[..] {
+            return i as i64;
+        }
+    }
+    -1
 }
 
 fn rng_u64() -> u64 {
@@ -127,127 +167,127 @@ fn digit_hist(mut n: i64) -> [u8; 10] {
 fn nf_abs(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.abs()))
+    Ok(num_unary_preserve(a.abs(), &args[0]))
 }
 
 fn nf_acos(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 30)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.acos()))
+    Ok(Value::num_real(a.acos()))
 }
 
 fn nf_asin(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 30)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.asin()))
+    Ok(Value::num_real(a.asin()))
 }
 
 fn nf_atan(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 30)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.atan()))
+    Ok(Value::num_real(a.atan()))
 }
 
 fn nf_atan2(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 35)?;
     let (y, x) = two_nums(args)?;
-    Ok(Value::Number(y.atan2(x)))
+    Ok(Value::num_real(y.atan2(x)))
 }
 
 fn nf_ceil(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.ceil()))
+    Ok(num_unary_preserve(a.ceil(), &args[0]))
 }
 
 fn nf_floor(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.floor()))
+    Ok(num_unary_preserve(a.floor(), &args[0]))
 }
 
 fn nf_round(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.round()))
+    Ok(num_unary_preserve(a.round(), &args[0]))
 }
 
 fn nf_sqrt(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 8)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.sqrt()))
+    Ok(num_unary_preserve(a.sqrt(), &args[0]))
 }
 
 fn nf_cos(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 30)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.cos()))
+    Ok(Value::num_real(a.cos()))
 }
 
 fn nf_sin(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 30)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.sin()))
+    Ok(Value::num_real(a.sin()))
 }
 
 fn nf_tan(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 30)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.tan()))
+    Ok(Value::num_real(a.tan()))
 }
 
 fn nf_exp(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 40)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.exp()))
+    Ok(Value::num_real(a.exp()))
 }
 
 fn nf_log(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 39)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.ln()))
+    Ok(Value::num_real(a.ln()))
 }
 
 fn nf_log10(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 23)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.log10()))
+    Ok(Value::num_real(a.log10()))
 }
 
 fn nf_log2(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 23)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.log2()))
+    Ok(Value::num_real(a.log2()))
 }
 
 fn nf_pow(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 140)?;
     let (b, e) = two_nums(args)?;
-    Ok(Value::Number(b.powf(e)))
+    Ok(Value::num_real(b.powf(e)))
 }
 
 fn nf_cbrt(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 62)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.cbrt()))
+    Ok(Value::num_real(a.cbrt()))
 }
 
 fn nf_hypot(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 187)?;
     let (a, b) = two_nums(args)?;
-    Ok(Value::Number(a.hypot(b)))
+    Ok(Value::num_real(a.hypot(b)))
 }
 
 fn nf_min(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let (a, b) = two_nums(args)?;
-    Ok(Value::Number(a.min(b)))
+    Ok(num_binary_merge(a.min(b), &args[0], &args[1]))
 }
 
 fn nf_max(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let (a, b) = two_nums(args)?;
-    Ok(Value::Number(a.max(b)))
+    Ok(num_binary_merge(a.max(b), &args[0], &args[1]))
 }
 
 fn nf_sign(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -260,19 +300,19 @@ fn nf_sign(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     } else {
         0.0
     };
-    Ok(Value::Number(s))
+    Ok(num_unary_preserve(s, &args[0]))
 }
 
 fn nf_to_degrees(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 5)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.to_degrees()))
+    Ok(num_unary_preserve(a.to_degrees(), &args[0]))
 }
 
 fn nf_to_radians(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 5)?;
     let a = one_num(args)?;
-    Ok(Value::Number(a.to_radians()))
+    Ok(num_unary_preserve(a.to_radians(), &args[0]))
 }
 
 fn nf_is_nan(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -300,10 +340,10 @@ fn nf_number(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     }
     match &args[0] {
         Value::Number(n) => Ok(Value::Number(*n)),
-        Value::String(s) => Ok(Value::Number(s.trim().parse::<f64>().unwrap_or(f64::NAN))),
-        Value::Bool(b) => Ok(Value::Number(f64::from(*b as u8))),
-        Value::Null => Ok(Value::Number(0.0)),
-        _ => Ok(Value::Number(f64::NAN)),
+        Value::String(s) => Ok(Value::num_real(s.trim().parse::<f64>().unwrap_or(f64::NAN))),
+        Value::Bool(b) => Ok(Value::num_int(i64::from(*b as u8))),
+        Value::Null => Ok(Value::num_int(0)),
+        _ => Ok(Value::num_real(f64::NAN)),
     }
 }
 
@@ -312,7 +352,7 @@ fn nf_rand(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     if !args.is_empty() {
         return Err(bad_argc(0, args.len()));
     }
-    Ok(Value::Number(rng01_open()))
+    Ok(Value::num_real(rng01_open()))
 }
 
 fn nf_rand_real(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -320,7 +360,7 @@ fn nf_rand_real(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let (a, b) = two_nums(args)?;
     let lo = a.min(b);
     let hi = a.max(b);
-    Ok(Value::Number(lo + (hi - lo) * rng01_open()))
+    Ok(Value::num_real(lo + (hi - lo) * rng01_open()))
 }
 
 fn nf_rand_float(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -333,11 +373,16 @@ fn nf_rand_int(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let lo = f64_as_i64_trunc(a.min(b));
     let hi = f64_as_i64_trunc(a.max(b));
     if hi <= lo {
-        return Ok(Value::Number(lo as f64));
+        return Ok(Value::num_int(lo));
     }
     let span = (hi - lo) as u64;
     let u = rng_u64() % span;
-    Ok(Value::Number((lo as i128 + u as i128) as f64))
+    let sum = (lo as i128).saturating_add(u as i128);
+    Ok(Value::num_int(i64::try_from(sum).unwrap_or(if sum >= 0 {
+        i64::MAX
+    } else {
+        i64::MIN
+    })))
 }
 
 // --- integer / bits ---
@@ -345,19 +390,19 @@ fn nf_rand_int(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 fn nf_bit_count(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let x = u64_bits(one_num(args)?);
-    Ok(Value::Number(x.count_ones() as f64))
+    Ok(Value::num_int(i64::from(x.count_ones())))
 }
 
 fn nf_bit_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let x = u64_bits(one_num(args)?);
-    Ok(Value::Number(x.reverse_bits() as i64 as f64))
+    Ok(Value::num_int(x.reverse_bits() as i64))
 }
 
 fn nf_bits_to_real(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let bits = u64_bits(one_num(args)?);
-    Ok(Value::Number(f64::from_bits(bits)))
+    Ok(Value::num_real(f64::from_bits(bits)))
 }
 
 fn nf_byte_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -367,19 +412,19 @@ fn nf_byte_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let r = u64::from_le_bytes([
         b[7], b[6], b[5], b[4], b[3], b[2], b[1], b[0],
     ]);
-    Ok(Value::Number(r as i64 as f64))
+    Ok(Value::num_int(r as i64))
 }
 
 fn nf_leading_zeros(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let x = u64_bits(one_num(args)?);
-    Ok(Value::Number(x.leading_zeros() as f64))
+    Ok(Value::num_int(i64::from(x.leading_zeros())))
 }
 
 fn nf_trailing_zeros(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let x = u64_bits(one_num(args)?);
-    Ok(Value::Number(x.trailing_zeros() as f64))
+    Ok(Value::num_int(i64::from(x.trailing_zeros())))
 }
 
 fn nf_rotate_left(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -387,7 +432,7 @@ fn nf_rotate_left(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let (a, b) = two_nums(args)?;
     let x = u64_bits(a);
     let r = (f64_as_i64_trunc(b).rem_euclid(64)) as u32;
-    Ok(Value::Number(x.rotate_left(r) as i64 as f64))
+    Ok(Value::num_int(x.rotate_left(r) as i64))
 }
 
 fn nf_rotate_right(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -395,13 +440,13 @@ fn nf_rotate_right(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let (a, b) = two_nums(args)?;
     let x = u64_bits(a);
     let r = (f64_as_i64_trunc(b).rem_euclid(64)) as u32;
-    Ok(Value::Number(x.rotate_right(r) as i64 as f64))
+    Ok(Value::num_int(x.rotate_right(r) as i64))
 }
 
 fn nf_raw_bits(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?; // Java `realBits`
     let a = one_num(args)?;
-    Ok(Value::Number(f64::to_bits(a) as i64 as f64))
+    Ok(Value::num_int(f64::to_bits(a) as i64))
 }
 
 fn nf_binary(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -430,7 +475,7 @@ fn nf_length_str(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 15)?; // LeekFunctions
     ch(vm, 1)?; // StringClass.length
     let s = one_string(args)?;
-    Ok(Value::Number(s.chars().count() as f64))
+    Ok(Value::num_int(s.chars().count() as i64))
 }
 
 fn nf_char_at(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -469,12 +514,25 @@ fn nf_code_point_at(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
             .as_number()
             .ok_or(VmError::ExpectedNumber)?,
     );
-    let ix = usize::try_from(i).ok().filter(|&ix| ix < s.chars().count());
-    let cp = ix
-        .and_then(|ix| s.chars().nth(ix))
-        .map(|c| c as u32 as f64)
-        .unwrap_or(-1.0);
-    Ok(Value::Number(cp))
+    if i < 0 {
+        return Ok(Value::num_int(-1));
+    }
+    let units: Vec<u16> = s.encode_utf16().collect();
+    let Some(idx) = usize::try_from(i).ok().filter(|&ix| ix < units.len()) else {
+        return Ok(Value::num_int(-1));
+    };
+    let c1 = u32::from(units[idx]);
+    let cp = if (0xD800..=0xDBFF).contains(&c1) && idx + 1 < units.len() {
+        let c2 = u32::from(units[idx + 1]);
+        if (0xDC00..=0xDFFF).contains(&c2) {
+            0x10000 + ((c1 - 0xD800) << 10) + (c2 - 0xDC00)
+        } else {
+            c1
+        }
+    } else {
+        c1
+    };
+    Ok(Value::num_int(i64::from(cp)))
 }
 
 fn nf_contains(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -502,8 +560,10 @@ fn nf_index_of(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
             (Value::String(hay), Value::String(needle)) => {
                 let sl = java_utf16_len(hay);
                 ch(vm, 1 + sl / 10)?;
-                let ix = hay.find(needle.as_str()).map(|b| hay[..b].chars().count() as f64);
-                Ok(Value::Number(ix.unwrap_or(-1.0)))
+                let ix = hay
+                    .find(needle.as_str())
+                    .map(|b| hay[..b].chars().count() as i64);
+                Ok(Value::num_int(ix.unwrap_or(-1)))
             }
             (Value::Array(a), el) => {
                 ch(vm, 1)?;
@@ -518,13 +578,22 @@ fn nf_index_of(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
                 if found.is_none() {
                     ch(vm, a.len() as u64)?;
                 }
-                Ok(Value::Number(found.map(|i| i as f64).unwrap_or(-1.0)))
+                Ok(Value::num_int(found.map(|i| i as i64).unwrap_or(-1)))
             }
             _ => Err(VmError::BadNativeArgs),
         },
         3 => {
+            if let (Value::String(hay), Value::String(needle), start_v) =
+                (&args[0], &args[1], &args[2])
+            {
+                let from = f64_as_i64_trunc(start_v.as_number().ok_or(VmError::ExpectedNumber)?);
+                let sl = java_utf16_len(hay);
+                ch(vm, 1 + sl / 10)?;
+                let ix = index_of_utf16_from(hay, needle, from);
+                return Ok(Value::num_int(ix));
+            }
             let Value::Array(a) = &args[0] else {
-                return Err(VmError::ExpectedArray);
+                return Err(VmError::BadNativeArgs);
             };
             let el = &args[1];
             let start = f64_as_i64_trunc(
@@ -545,7 +614,7 @@ fn nf_index_of(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
             if found.is_none() {
                 ch(vm, a.len() as u64)?;
             }
-            Ok(Value::Number(found.map(|i| i as f64).unwrap_or(-1.0)))
+            Ok(Value::num_int(found.map(|i| i as i64).unwrap_or(-1)))
         }
         _ => Err(VmError::BadNativeArgs),
     }
@@ -572,17 +641,71 @@ fn nf_replace(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     Ok(Value::String(s.replace(old, new_s)))
 }
 
+fn split_string_limited(s: &str, sep: &str, limit: i64) -> Vec<String> {
+    if sep.is_empty() {
+        return s.chars().map(|c| c.to_string()).collect();
+    }
+    let max_parts = limit.max(1) as usize;
+    if max_parts == 1 {
+        return vec![s.to_string()];
+    }
+    let mut out = Vec::with_capacity(max_parts);
+    let mut rest = s;
+    let splits = max_parts.saturating_sub(1);
+    for _ in 0..splits {
+        if rest.is_empty() {
+            out.push(String::new());
+            break;
+        }
+        if let Some(i) = rest.find(sep) {
+            out.push(rest[..i].to_string());
+            rest = &rest[i + sep.len()..];
+        } else {
+            out.push(rest.to_string());
+            return out;
+        }
+    }
+    out.push(rest.to_string());
+    out
+}
+
 fn nf_split(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
-    let (s, sep) = two_strings(args)?;
-    ch(vm, 1 + java_utf16_len(s))?;
-    let parts: Vec<Value> = if sep.is_empty() {
-        s.chars().map(|c| Value::String(c.to_string())).collect()
-    } else {
-        s.split(sep)
-            .map(|p| Value::String(p.to_string()))
-            .collect()
-    };
-    Ok(Value::Array(parts))
+    match args.len() {
+        2 => {
+            let (s, sep) = two_strings(args)?;
+            ch(vm, 1 + java_utf16_len(s))?;
+            let parts: Vec<Value> = if sep.is_empty() {
+                s.chars().map(|c| Value::String(c.to_string())).collect()
+            } else {
+                s.split(sep)
+                    .map(|p| Value::String(p.to_string()))
+                    .collect()
+            };
+            Ok(Value::Array(parts))
+        }
+        3 => {
+            let s = match &args[0] {
+                Value::String(s) => s.as_str(),
+                _ => return Err(VmError::ExpectedString),
+            };
+            let sep = match &args[1] {
+                Value::String(s) => s.as_str(),
+                _ => return Err(VmError::ExpectedString),
+            };
+            let limit = f64_as_i64_trunc(
+                args[2]
+                    .as_number()
+                    .ok_or(VmError::ExpectedNumber)?,
+            );
+            ch(vm, 1 + java_utf16_len(s))?;
+            let parts: Vec<Value> = split_string_limited(s, sep, limit)
+                .into_iter()
+                .map(Value::String)
+                .collect();
+            Ok(Value::Array(parts))
+        }
+        _ => Err(VmError::BadNativeArgs),
+    }
 }
 
 fn nf_substring(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -651,7 +774,7 @@ fn nf_stringify(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     }
     match &args[0] {
         Value::String(s) => Ok(Value::String(s.clone())),
-        v => Ok(Value::String(v.to_leek_coerce_string())),
+        v => Ok(Value::String(v.to_java_string_builtin_v4())),
     }
 }
 
@@ -664,10 +787,10 @@ fn nf_count(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     }
     let n = match &args[0] {
         Value::Array(a) => a.len(),
-        Value::Map(m) => m.len(),
+        Value::Map(m) | Value::Object(m) => m.len(),
         _ => return Err(VmError::ExpectedArray),
     };
-    Ok(Value::Number(n as f64))
+    Ok(Value::num_int(n as i64))
 }
 
 fn nf_is_empty(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -713,13 +836,13 @@ fn nf_average(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     };
     ch(vm, 1 + 2 * a.len() as u64)?;
     if a.is_empty() {
-        return Ok(Value::Number(0.0));
+        return Ok(Value::num_int(0));
     }
     let mut sum = 0.0f64;
     for v in a {
         sum += v.as_number().ok_or(VmError::ExpectedNumber)?;
     }
-    Ok(Value::Number(sum / (a.len() as f64)))
+    Ok(Value::num_real(sum / (a.len() as f64)))
 }
 
 fn nf_sum(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -740,9 +863,9 @@ fn nf_sum(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         }
     }
     if all_int {
-        Ok(Value::Number(sum.round()))
+        Ok(Value::Number(NumberBits::coerce_integerish_f64(sum)))
     } else {
-        Ok(Value::Number(sum))
+        Ok(Value::num_real(sum))
     }
 }
 
@@ -751,33 +874,35 @@ fn nf_type_tag(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     if args.len() != 1 {
         return Err(bad_argc(1, args.len()));
     }
-    let t = match &args[0] {
-        Value::Null => 0.0,
-        Value::Number(_) => 1.0,
-        Value::Bool(_) => 2.0,
-        Value::String(_) => 3.0,
-        Value::Array(_) => 4.0,
-        Value::Map(_) => 8.0,
+    let t: i64 = match &args[0] {
+        Value::Null => 0,
+        Value::Number(_) => 1,
+        Value::Bool(_) => 2,
+        Value::String(_) => 3,
+        Value::Array(_) => 4,
+        Value::Class(_) => 6,
+        Value::Object(_) => 7,
+        Value::Map(_) => 8,
     };
-    Ok(Value::Number(t))
+    Ok(Value::num_int(t))
 }
 
 fn nf_get_blue(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let c = f64_as_i64_trunc(one_num(args)?);
-    Ok(Value::Number((c & 255) as f64))
+    Ok(Value::num_int(c & 255))
 }
 
 fn nf_get_green(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let c = f64_as_i64_trunc(one_num(args)?);
-    Ok(Value::Number(((c >> 8) & 255) as f64))
+    Ok(Value::num_int((c >> 8) & 255))
 }
 
 fn nf_get_red(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let c = f64_as_i64_trunc(one_num(args)?);
-    Ok(Value::Number(((c >> 16) & 255) as f64))
+    Ok(Value::num_int((c >> 16) & 255))
 }
 
 fn nf_get_color(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -789,7 +914,7 @@ fn nf_get_color(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let g = f64_as_i64_trunc(args[1].as_number().ok_or(VmError::ExpectedNumber)?);
     let r = f64_as_i64_trunc(args[2].as_number().ok_or(VmError::ExpectedNumber)?);
     let color = ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
-    Ok(Value::Number(color as f64))
+    Ok(Value::num_int(color))
 }
 
 fn nf_push(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -817,6 +942,25 @@ fn nf_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     Ok(Value::Array(a))
 }
 
+fn nf_debug(vm: &mut Vm, _args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 1)?;
+    Ok(Value::Null)
+}
+
+fn nf_json_encode(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 20)?;
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    Ok(Value::String(super::json::encode(&args[0])))
+}
+
+fn nf_json_decode(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 20)?;
+    let s = one_string(args)?;
+    super::json::decode(s).map_err(|_| VmError::BadNativeArgs)
+}
+
 fn nf_array_concat(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     if args.len() != 2 {
         return Err(bad_argc(2, args.len()));
@@ -842,26 +986,28 @@ fn nf_array_concat(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 #[must_use]
 pub fn stdlib_global_constant_init() -> impl Iterator<Item = (&'static str, Value)> {
     [
-        ("E", Value::Number(2.71828182846)),
-        ("Infinity", Value::Number(f64::INFINITY)),
-        ("NaN", Value::Number(f64::NAN)),
-        ("PI", Value::Number(3.14159265359)),
-        ("SORT_ASC", Value::Number(0.0)),
-        ("SORT_DESC", Value::Number(1.0)),
-        ("TYPE_ARRAY", Value::Number(4.0)),
-        ("TYPE_BOOLEAN", Value::Number(2.0)),
-        ("TYPE_CLASS", Value::Number(6.0)),
-        ("TYPE_FUNCTION", Value::Number(5.0)),
-        ("TYPE_INTERVAL", Value::Number(10.0)),
-        ("TYPE_MAP", Value::Number(8.0)),
-        ("TYPE_NULL", Value::Number(0.0)),
-        ("TYPE_NUMBER", Value::Number(1.0)),
-        ("TYPE_OBJECT", Value::Number(7.0)),
-        ("TYPE_SET", Value::Number(9.0)),
-        ("TYPE_STRING", Value::Number(3.0)),
-        ("COLOR_BLUE", Value::Number(255.0)),
-        ("COLOR_GREEN", Value::Number(65280.0)),
-        ("COLOR_RED", Value::Number(16711680.0)),
+        ("Array", Value::Class(super::value::PreludeClass::Array)),
+        ("E", Value::num_real(2.71828182846)),
+        ("Infinity", Value::num_real(f64::INFINITY)),
+        ("NaN", Value::num_real(f64::NAN)),
+        ("Null", Value::Class(super::value::PreludeClass::Null)),
+        ("PI", Value::num_real(3.14159265359)),
+        ("SORT_ASC", Value::num_int(0)),
+        ("SORT_DESC", Value::num_int(1)),
+        ("TYPE_ARRAY", Value::num_int(4)),
+        ("TYPE_BOOLEAN", Value::num_int(2)),
+        ("TYPE_CLASS", Value::num_int(6)),
+        ("TYPE_FUNCTION", Value::num_int(5)),
+        ("TYPE_INTERVAL", Value::num_int(10)),
+        ("TYPE_MAP", Value::num_int(8)),
+        ("TYPE_NULL", Value::num_int(0)),
+        ("TYPE_NUMBER", Value::num_int(1)),
+        ("TYPE_OBJECT", Value::num_int(7)),
+        ("TYPE_SET", Value::num_int(9)),
+        ("TYPE_STRING", Value::num_int(3)),
+        ("COLOR_BLUE", Value::num_int(255)),
+        ("COLOR_GREEN", Value::num_int(65280)),
+        ("COLOR_RED", Value::num_int(16711680)),
     ]
     .into_iter()
 }
@@ -923,8 +1069,8 @@ static STDLIB_NATIVES: &[(&str, NativeFn)] = &[
     ("split", nf_split),
     ("substring", nf_substring),
     ("subString", nf_sub_string),
-    ("toLowerCase", nf_to_lower_case),
-    ("toUpperCase", nf_to_upper_case),
+    ("toLower", nf_to_lower_case),
+    ("toUpper", nf_to_upper_case),
     ("string", nf_stringify),
     ("count", nf_count),
     ("isEmpty", nf_is_empty),
@@ -939,6 +1085,9 @@ static STDLIB_NATIVES: &[(&str, NativeFn)] = &[
     ("push", nf_push),
     ("reverse", nf_reverse),
     ("arrayConcat", nf_array_concat),
+    ("debug", nf_debug),
+    ("jsonDecode", nf_json_decode),
+    ("jsonEncode", nf_json_encode),
 ];
 
 /// Native id for a standard-library global, if implemented.

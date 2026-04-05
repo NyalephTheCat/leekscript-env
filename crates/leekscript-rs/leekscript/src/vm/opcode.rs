@@ -65,4 +65,15 @@ pub enum Opcode {
     TryEnd = 34,
     /// Pop thrown value; jump to innermost `catch` with that value pushed, or error if none.
     Throw = 35,
+    /// Pop rhs, lhs; push bool (`xor(truthy(lhs), truthy(rhs))` like Java `AI.xor`).
+    LogicalXor = 36,
+    /// Like [`MapBuild`](Self::MapBuild) but pushes [`Value::Object`](super::value::Value::Object).
+    ObjectBuild = 37,
+    /// Truncating integer division (`\`), Java-style toward zero.
+    IntDiv = 38,
+    /// Prelude class binding (`Array`, `Null`): `u8` [`super::value::PreludeClass`](super::value::PreludeClass) discriminant (not from constant pool).
+    PushPreludeClass = 39,
+    /// Pop **rhs**, then **key**; assign into local `slot`’s array/map (`null` base → push `null`, slot unchanged).
+    /// Pushes the assignment expression value (`null` or `rhs`).
+    SetElemLocal = 40,
 }

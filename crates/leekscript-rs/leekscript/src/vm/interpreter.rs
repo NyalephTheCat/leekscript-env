@@ -10,7 +10,7 @@ use super::bytecode::Bytecode;
 use super::compile::FunctionEntry;
 use super::error::VmError;
 use super::opcode::Opcode;
-use super::value::Value;
+use super::value::{NumberBits, PreludeClass, Value};
 
 /// Default operation budget (matches Java `AI.MAX_OPERATIONS`).
 pub const DEFAULT_MAX_OPERATIONS: u64 = 20_000_000;
@@ -37,6 +37,7 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::Sub as usize] = op_sub;
     table[Opcode::Mul as usize] = op_mul;
     table[Opcode::Div as usize] = op_div;
+    table[Opcode::IntDiv as usize] = op_int_div;
     table[Opcode::Mod as usize] = op_mod;
     table[Opcode::Neg as usize] = op_neg;
     table[Opcode::Return as usize] = op_return;
@@ -54,6 +55,7 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::Not as usize] = op_not;
     table[Opcode::ArrayBuild as usize] = op_array_build;
     table[Opcode::MapBuild as usize] = op_map_build;
+    table[Opcode::ObjectBuild as usize] = op_object_build;
     table[Opcode::GetElem as usize] = op_get_elem;
     table[Opcode::ChargeOps as usize] = op_charge_ops;
     table[Opcode::ArrayLen as usize] = op_array_len;
@@ -63,6 +65,9 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::TryBegin as usize] = op_try_begin;
     table[Opcode::TryEnd as usize] = op_try_end;
     table[Opcode::Throw as usize] = op_throw;
+    table[Opcode::LogicalXor as usize] = op_logical_xor;
+    table[Opcode::PushPreludeClass as usize] = op_push_prelude_class;
+    table[Opcode::SetElemLocal as usize] = op_set_elem_local;
     table
 };
 
@@ -304,6 +309,13 @@ fn op_push_null(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+fn op_push_prelude_class(vm: &mut Vm) -> Result<(), VmError> {
+    let tag = vm.read_u8()?;
+    let c = PreludeClass::from_u8(tag).ok_or(VmError::IllegalOpcode(vm.current_opcode))?;
+    vm.push_stack(Value::Class(c))?;
+    Ok(())
+}
+
 fn op_pop(vm: &mut Vm) -> Result<(), VmError> {
     vm.pop_stack()?;
     Ok(())
@@ -320,7 +332,8 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
     let b = vm.pop_stack()?;
     let a = vm.pop_stack()?;
     let out = match (&a, &b) {
-        (Value::String(_), _) | (_, Value::String(_)) => {
+        (Value::String(_), _) | (_, Value::String(_))
+        | (Value::Class(_), _) | (_, Value::Class(_)) => {
             let sa = a.to_leek_coerce_string();
             let sb = b.to_leek_coerce_string();
             let extra = (sa.len() + sb.len()) as u64;
@@ -352,49 +365,72 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
             vm.charge_ops(extra)?;
             Value::Map(Value::map_merge_java(mx, my))
         }
-        _ => Value::Number(a.to_real_for_compare() + b.to_real_for_compare()),
+        (Value::Map(mx), Value::Object(my)) | (Value::Object(mx), Value::Map(my))
+        | (Value::Object(mx), Value::Object(my)) => {
+            let extra = ((mx.len() + my.len()) * 3) as u64;
+            vm.charge_ops(extra)?;
+            Value::Object(Value::map_merge_java(mx, my))
+        }
+        _ => Value::Number(match (&a, &b) {
+            (Value::Number(an), Value::Number(bn)) => an.add(*bn),
+            _ => NumberBits::coerce_integerish_f64(
+                a.to_real_for_compare() + b.to_real_for_compare(),
+            ),
+        }),
     };
     vm.push_stack(out)?;
     Ok(())
 }
 
 fn op_sub(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    vm.push_stack(Value::Number(a - b))?;
+    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::Number(a.sub(b)))?;
     Ok(())
 }
 
 fn op_mul(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    vm.push_stack(Value::Number(a * b))?;
+    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::Number(a.mul(b)))?;
     Ok(())
 }
 
 fn op_div(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    if b == 0.0 {
-        return Err(VmError::DivByZero);
-    }
-    vm.push_stack(Value::Number(a / b))?;
+    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let out = a.div(b).map_err(|_| VmError::DivByZero)?;
+    vm.push_stack(Value::Number(out))?;
+    Ok(())
+}
+
+fn op_int_div(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let q = a.int_div(b).map_err(|_| VmError::DivByZero)?;
+    vm.push_stack(Value::Number(q))?;
     Ok(())
 }
 
 fn op_mod(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    let a = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    if b == 0.0 {
-        return Err(VmError::DivByZero);
-    }
-    vm.push_stack(Value::Number(a % b))?;
+    let b = vm.pop_stack()?;
+    let b_nb = b.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let a = vm.pop_stack()?;
+    let a_nb = match &a {
+        Value::Array(arr) => arr
+            .first()
+            .and_then(|v| v.number_bits())
+            .ok_or(VmError::ExpectedNumber)?,
+        _ => a.number_bits().ok_or(VmError::ExpectedNumber)?,
+    };
+    let m = a_nb.modulo(b_nb).map_err(|_| VmError::DivByZero)?;
+    vm.push_stack(Value::Number(m))?;
     Ok(())
 }
 
 fn op_neg(vm: &mut Vm) -> Result<(), VmError> {
-    let x = vm.pop_stack()?.as_number().ok_or(VmError::ExpectedNumber)?;
-    vm.push_stack(Value::Number(-x))?;
+    let x = vm.pop_stack()?.number_bits().ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::Number(x.neg()))?;
     Ok(())
 }
 
@@ -541,6 +577,15 @@ fn op_not(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+fn op_logical_xor(vm: &mut Vm) -> Result<(), VmError> {
+    let b = vm.pop_stack()?;
+    let a = vm.pop_stack()?;
+    let xa = a.truthy();
+    let xb = b.truthy();
+    vm.push_stack(Value::Bool((xa && !xb) || (!xa && xb)))?;
+    Ok(())
+}
+
 fn op_array_build(vm: &mut Vm) -> Result<(), VmError> {
     let n = vm.read_u16()? as usize;
     let mut elems = Vec::with_capacity(n);
@@ -565,6 +610,19 @@ fn op_map_build(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+fn op_object_build(vm: &mut Vm) -> Result<(), VmError> {
+    let n = vm.read_u16()? as usize;
+    let mut pairs = Vec::with_capacity(n);
+    for _ in 0..n {
+        let val = vm.pop_stack()?;
+        let key = vm.pop_stack()?;
+        pairs.push((key, val));
+    }
+    pairs.reverse();
+    vm.push_stack(Value::Object(pairs))?;
+    Ok(())
+}
+
 fn array_get(arr: &[Value], key: &Value) -> Value {
     let Some(n) = key.as_number() else {
         return Value::Null;
@@ -585,7 +643,7 @@ fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
     let container = vm.pop_stack()?;
     let out = match &container {
         Value::Array(arr) => array_get(arr, &key),
-        Value::Map(pairs) => pairs
+        Value::Map(pairs) | Value::Object(pairs) => pairs
             .iter()
             .find(|(k, _)| k == &key)
             .map(|(_, v)| v.clone())
@@ -596,23 +654,76 @@ fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+fn op_set_elem_local(vm: &mut Vm) -> Result<(), VmError> {
+    let slot = vm.read_u16()?;
+    let rhs = vm.pop_stack()?;
+    let key = vm.pop_stack()?;
+    let idx = usize::from(slot);
+    let container = vm
+        .locals
+        .get(idx)
+        .cloned()
+        .ok_or(VmError::BadLocal(slot))?;
+
+    match container {
+        Value::Null => {
+            vm.push_stack(Value::Null)?;
+        }
+        Value::Array(mut arr) => {
+            if let Some(n) = key.as_number() {
+                if n.is_finite() && n >= 0.0 {
+                    let i = n as usize;
+                    while arr.len() <= i {
+                        arr.push(Value::Null);
+                    }
+                    arr[i] = rhs.clone();
+                }
+            }
+            store_local(vm, slot, Value::Array(arr))?;
+            vm.push_stack(rhs)?;
+        }
+        Value::Map(mut pairs) => {
+            if let Some(pos) = pairs.iter().position(|(k, _)| k == &key) {
+                pairs[pos].1 = rhs.clone();
+            } else {
+                pairs.push((key.clone(), rhs.clone()));
+            }
+            store_local(vm, slot, Value::Map(pairs))?;
+            vm.push_stack(rhs)?;
+        }
+        Value::Object(mut pairs) => {
+            if let Some(pos) = pairs.iter().position(|(k, _)| k == &key) {
+                pairs[pos].1 = rhs.clone();
+            } else {
+                pairs.push((key.clone(), rhs.clone()));
+            }
+            store_local(vm, slot, Value::Object(pairs))?;
+            vm.push_stack(rhs)?;
+        }
+        _ => {
+            vm.push_stack(rhs)?;
+        }
+    }
+    Ok(())
+}
+
 fn op_array_len(vm: &mut Vm) -> Result<(), VmError> {
     let v = vm.pop_stack()?;
     let n = match &v {
-        Value::Array(a) => a.len() as f64,
-        _ => 0.0,
+        Value::Array(a) => a.len() as i64,
+        _ => 0,
     };
-    vm.push_stack(Value::Number(n))?;
+    vm.push_stack(Value::num_int(n))?;
     Ok(())
 }
 
 fn op_map_len(vm: &mut Vm) -> Result<(), VmError> {
     let v = vm.pop_stack()?;
     let n = match &v {
-        Value::Map(m) => m.len() as f64,
-        _ => 0.0,
+        Value::Map(m) | Value::Object(m) => m.len() as i64,
+        _ => 0,
     };
-    vm.push_stack(Value::Number(n))?;
+    vm.push_stack(Value::num_int(n))?;
     Ok(())
 }
 
@@ -620,7 +731,7 @@ fn op_map_entry_at(vm: &mut Vm) -> Result<(), VmError> {
     let idx_v = vm.pop_stack()?;
     let map_v = vm.pop_stack()?;
     let (k, val) = match (&map_v, idx_v.as_number()) {
-        (Value::Map(m), Some(n)) if n.is_finite() && n >= 0.0 => {
+        (Value::Map(m), Some(n)) | (Value::Object(m), Some(n)) if n.is_finite() && n >= 0.0 => {
             let i = n as usize;
             m.get(i)
                 .map(|p| (p.0.clone(), p.1.clone()))

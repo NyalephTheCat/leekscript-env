@@ -22,8 +22,9 @@ pub(crate) fn binary_op_kind(k: K) -> bool {
         k,
         K::Plus
             | K::Minus
-            | K::Star
+            |         K::Star
             | K::Slash
+            | K::Backslash
             | K::Percent
             | K::EqEq
             | K::NotEq
@@ -35,6 +36,7 @@ pub(crate) fn binary_op_kind(k: K) -> bool {
             | K::Gte
             | K::AndAnd
             | K::OrOr
+            | K::XorKw
     )
 }
 
@@ -99,7 +101,7 @@ pub(crate) fn prefix_before_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxEleme
 fn bin_fragment_extra_cost(op: K) -> u32 {
     match op {
         K::Star => MUL_COST,
-        K::Slash => DIV_COST,
+        K::Slash | K::Backslash => DIV_COST,
         K::Percent => MOD_COST,
         K::AndAnd | K::OrOr => 0,
         _ => 1,
@@ -198,8 +200,49 @@ pub(crate) fn java_analyzed_ops_syntax(n: &SyntaxNode) -> u32 {
     java_ops_syntax(n)
 }
 
+fn flatten_one_expr_layer(items: &[SyntaxElement]) -> Vec<SyntaxElement> {
+    let mut out = Vec::new();
+    for el in items {
+        if let SyntaxElement::Node(node) = el {
+            if node.kind() == K::Expr.into_syntax_kind() {
+                for c in node.children() {
+                    if syntax_el_is_trivia(&c) {
+                        continue;
+                    }
+                    out.push(c.clone());
+                }
+                continue;
+            }
+        }
+        out.push(el.clone());
+    }
+    out
+}
+
 fn java_ops_syntax(n: &SyntaxNode) -> u32 {
     if let Some(p) = ParenExpr::cast(n.clone()) {
+        if let Some(inner_e) = p.syntax().child::<Expr>() {
+            return java_analyzed_ops(&inner_e);
+        }
+        let lparen = K::LParen.into_syntax_kind();
+        let rparen = K::RParen.into_syntax_kind();
+        let full: Vec<_> = p
+            .syntax()
+            .children()
+            .filter(|e| !syntax_el_is_trivia(e))
+            .collect();
+        if let (Some(open_idx), Some(close_idx)) = (
+            full.iter()
+                .position(|e| matches!(e, SyntaxElement::Token(t) if t.kind() == lparen)),
+            full.iter()
+                .rposition(|e| matches!(e, SyntaxElement::Token(t) if t.kind() == rparen)),
+        ) {
+            if close_idx > open_idx + 1 {
+                let inner = &full[open_idx + 1..close_idx];
+                let flat = flatten_one_expr_layer(inner);
+                return java_ops_expr_flat(&flat);
+            }
+        }
         let inner: Vec<_> = p
             .syntax()
             .children()

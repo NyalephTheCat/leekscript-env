@@ -3,7 +3,7 @@
 use std::vec::Vec;
 
 use super::opcode::Opcode;
-use super::value::Value;
+use super::value::{PreludeClass, Value};
 
 /// Executable program: raw opcode stream plus constant pool.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -60,6 +60,11 @@ impl BytecodeBuilder {
         self.emit_u16_operand(pair_count);
     }
 
+    pub fn emit_object_build(&mut self, pair_count: u16) {
+        self.emit_opcode(Opcode::ObjectBuild);
+        self.emit_u16_operand(pair_count);
+    }
+
     pub fn emit_array_len(&mut self) {
         self.emit_opcode(Opcode::ArrayLen);
     }
@@ -112,6 +117,12 @@ impl BytecodeBuilder {
         let idx = self.intern_const(v);
         self.emit_opcode(Opcode::PushConst);
         self.code.extend_from_slice(&idx.to_le_bytes());
+    }
+
+    /// Prelude `Array` / `Null` globals: no constant pool entry (see [`Opcode::PushPreludeClass`](Opcode::PushPreludeClass)).
+    pub fn emit_push_prelude_class(&mut self, c: PreludeClass) {
+        self.emit_opcode(Opcode::PushPreludeClass);
+        self.emit_u8(c.to_u8());
     }
 
     pub fn emit_return(&mut self) {

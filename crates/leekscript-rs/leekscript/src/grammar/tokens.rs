@@ -402,20 +402,97 @@ pub fn define(g: &mut GrammarBuilder) {
             // `null`, or `combo` are swallowed as NUMBER and keywords / `!=` /
             // identifiers break (see formatter / `!=` lexing).
             //
+            // `+` / `-` are **not** part of the mantissa: `1+2` and `1+','+2` must
+            // tokenize as separate operators (Java / LeekScript).
+            //
             // Still avoid eating `..` (interval / dotdot) by forbidding a '.' that
             // is immediately followed by '.'.
-            g.choice(
+            g.choice4(
+                |g| {
+                    // `0x` / `0X` hexadecimal (includes `e`/`E` as hex digits).
+                    g.byte(b'0');
+                    g.choice(
+                        |g| {
+                            g.byte(b'x');
+                        },
+                        |g| {
+                            g.byte(b'X');
+                        },
+                    );
+                    g.one_or_more(|g| hex_digit(g));
+                    g.optional(|g| {
+                        g.byte(b'.');
+                        g.zero_or_more(|g| hex_digit(g));
+                    });
+                    g.optional(|g| {
+                        g.choice(
+                            |g| {
+                                g.byte(b'p');
+                            },
+                            |g| {
+                                g.byte(b'P');
+                            },
+                        );
+                        g.optional(|g| {
+                            g.choice(
+                                |g| {
+                                    g.byte(b'+');
+                                },
+                                |g| {
+                                    g.byte(b'-');
+                                },
+                            );
+                        });
+                        g.one_or_more(|g| {
+                            g.choice(
+                                |g| {
+                                    g.class(classes::DIGIT);
+                                },
+                                |g| {
+                                    g.byte(b'_');
+                                },
+                            );
+                        });
+                    });
+                },
+                |g| {
+                    // `0b` / `0B` binary.
+                    g.byte(b'0');
+                    g.choice(
+                        |g| {
+                            g.byte(b'b');
+                        },
+                        |g| {
+                            g.byte(b'B');
+                        },
+                    );
+                    g.one_or_more(|g| {
+                        g.choice3(
+                            |g| {
+                                g.byte(b'0');
+                            },
+                            |g| {
+                                g.byte(b'1');
+                            },
+                            |g| {
+                                g.byte(b'_');
+                            },
+                        );
+                    });
+                },
                 |g| {
                     g.class(classes::DIGIT);
-                    g.zero_or_more(|g| number_char(g));
-                    number_literal_tail(g);
+                    g.zero_or_more(|g| decimal_mantissa_char(g));
+                    decimal_number_literal_tail(g);
+                    optional_decimal_exponent(g);
                 },
                 |g| {
                     // `.5` style (leading dot, digit required after)
                     g.byte(b'.');
                     g.class(classes::DIGIT);
-                    g.zero_or_more(|g| number_char(g));
-                    number_literal_tail(g);
+                    g.zero_or_more(|g| decimal_mantissa_char(g));
+                    decimal_number_literal_tail(g);
+                    optional_decimal_exponent(g);
                 },
             );
         });
@@ -794,23 +871,27 @@ fn ident_reserved_word_shape_dyn(g: &mut GrammarBuilder) {
     );
 }
 
-/// Continuation after the initial digit / `.\d` prefix in the `number` lexer rule.
-fn number_literal_tail(g: &mut GrammarBuilder) {
-    g.zero_or_more(|g| {
-        g.choice(
-            |g| {
-                g.byte(b'.');
-                g.neg_lookahead(|g| {
-                    g.byte(b'.');
-                });
-            },
-            |g| number_char(g),
-        );
-    });
+fn hex_digit(g: &mut GrammarBuilder) {
+    g.choice4(
+        |g| {
+            g.class(classes::DIGIT);
+        },
+        |g| {
+            g.char_range('a', 'f');
+        },
+        |g| {
+            g.char_range('A', 'F');
+        },
+        |g| {
+            g.byte(b'_');
+        },
+    );
 }
 
-fn number_char(g: &mut GrammarBuilder) {
-    g.choice6(
+/// Mantissa / fractional characters for **decimal** literals: never `e`/`E` (exponent) and never
+/// bare `+`/`-` (binary operators).
+fn decimal_mantissa_char(g: &mut GrammarBuilder) {
+    g.choice5(
         |g| {
             g.class(classes::DIGIT);
         },
@@ -818,13 +899,18 @@ fn number_char(g: &mut GrammarBuilder) {
             g.byte(b'_');
         },
         |g| {
-            // 0x, 0b, exponents, etc. (ASCII a-z/A-Z)
-            g.choice(
+            g.choice4(
                 |g| {
-                    g.char_range('A', 'Z');
+                    g.char_range('A', 'D');
                 },
                 |g| {
-                    g.char_range('a', 'z');
+                    g.char_range('F', 'Z');
+                },
+                |g| {
+                    g.char_range('a', 'd');
+                },
+                |g| {
+                    g.char_range('f', 'z');
                 },
             );
         },
@@ -833,7 +919,37 @@ fn number_char(g: &mut GrammarBuilder) {
             g.byte(b'$');
         },
         |g| {
-            // Sign for exponent parts (we don't validate placement here).
+            leek_identifier_letters(g);
+        },
+    );
+}
+
+fn decimal_number_literal_tail(g: &mut GrammarBuilder) {
+    g.zero_or_more(|g| {
+        g.choice(
+            |g| {
+                g.byte(b'.');
+                g.neg_lookahead(|g| {
+                    g.byte(b'.');
+                });
+            },
+            |g| decimal_mantissa_char(g),
+        );
+    });
+}
+
+/// Decimal scientific notation: `1e+3`, `1e-3`, `1E10` (not hex `0x…e…`).
+fn optional_decimal_exponent(g: &mut GrammarBuilder) {
+    g.optional(|g| {
+        g.choice(
+            |g| {
+                g.byte(b'e');
+            },
+            |g| {
+                g.byte(b'E');
+            },
+        );
+        g.optional(|g| {
             g.choice(
                 |g| {
                     g.byte(b'+');
@@ -842,11 +958,18 @@ fn number_char(g: &mut GrammarBuilder) {
                     g.byte(b'-');
                 },
             );
-        },
-        |g| {
-            leek_identifier_letters(g);
-        },
-    );
+        });
+        g.one_or_more(|g| {
+            g.choice(
+                |g| {
+                    g.class(classes::DIGIT);
+                },
+                |g| {
+                    g.byte(b'_');
+                },
+            );
+        });
+    });
 }
 
 fn ident_start(g: &mut GrammarBuilder) {

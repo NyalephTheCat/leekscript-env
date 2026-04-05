@@ -451,6 +451,11 @@ function replace(string str, string oldChar, string newChar) => string;
 function split(string str, string sep) => Array<string>;
 
 /**
+ * @brief Like split(str, sep), but stops after at most `limit` segments (Java `String.split` limit).
+ */
+function split(string str, string sep, number limit) => Array<string>;
+
+/**
  * @brief Returns true if str starts with prefix, false otherwise.
  * @param[in] str The string to check if it starts with prefix.
  * @param[in] prefix The string to check if it starts with.
@@ -502,7 +507,7 @@ function subString(string str, integer start) => string;
  * @return The string in lowercase.
  * @cost O(n)
  */
-function toLowerCase(string str) => string;
+function toLower(string str) => string;
 
 /**
  * @brief Converts the string to uppercase.
@@ -510,7 +515,7 @@ function toLowerCase(string str) => string;
  * @return The string in uppercase.
  * @cost O(n)
  */
-function toUpperCase(string str) => string;
+function toUpper(string str) => string;
 
 /**
  * @brief Splits the array into sub-arrays of at most chunkSize elements.

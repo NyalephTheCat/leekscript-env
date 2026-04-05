@@ -297,16 +297,20 @@ pub fn define(g: &mut GrammarBuilder) {
                             g.call("op_bang");
                         }),
                         Box::new(|g| {
-                            g.call("op_plus");
+                            g.call("kw_not");
                         }),
-                        Box::new(|g| {
-                            g.call("op_minus");
-                        }),
+                        // Prefer `++` / `--` over unary `+` / `-` so `++i` is pre-increment, not `+(+i)`.
                         Box::new(|g| {
                             g.call("op_plusplus");
                         }),
                         Box::new(|g| {
                             g.call("op_minusminus");
+                        }),
+                        Box::new(|g| {
+                            g.call("op_plus");
+                        }),
+                        Box::new(|g| {
+                            g.call("op_minus");
                         }),
                         Box::new(|g| {
                             g.call("op_tilde");
@@ -882,7 +886,16 @@ pub fn define(g: &mut GrammarBuilder) {
     g.parser_rule("new_expr", |g| {
         g.node(K::NewExpr, |g| {
             g.call("kw_new");
-            g.call("ident");
+            // `new Array` / `new Array()` — `Array` is the `ArrayKw` token, not `ident`.
+            g.choice(
+                |g| {
+                    g.call("ident");
+                },
+                |g| {
+                    cfg_flags::v2(g);
+                    g.call("kw_array");
+                },
+            );
             g.optional(|g| {
                 g.call("call_expr_suffix");
             });

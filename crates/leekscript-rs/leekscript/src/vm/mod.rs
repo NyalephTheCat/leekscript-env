@@ -24,6 +24,7 @@ mod compile;
 mod error;
 mod interpreter;
 mod java_ops;
+mod json;
 mod opcode;
 mod stdlib;
 mod value;
@@ -39,4 +40,4 @@ pub use interpreter::{
 };
 pub use opcode::Opcode;
 pub use stdlib::{default_natives, native_id, stdlib_global_constant_init};
-pub use value::Value;
+pub use value::{NumberBits, PreludeClass, Value};

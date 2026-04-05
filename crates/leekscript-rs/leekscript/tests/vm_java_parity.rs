@@ -1,5 +1,10 @@
 //! Behavioural parity with the Java LeekScript test suite (`leek-wars-generator/leekscript`).
 //!
+//! For the full generated matrix from `src/test/java/test/Test*.java`, see `vm_java_suite.rs`:
+//! one ignored test per Java class (e.g. `java_vm_export_test_array`) plus `java_generator_vm_export_suite`.
+//! Cases include `.equals`, `.ops`, `.almost`, `.error` / `.warning` / `.noWarning`, limits, and
+//! version ranges from the Java factory methods. Regenerate: `python3 scripts/extract_java_vm_cases.py`.
+//!
 //! Expected strings are taken from `src/test/java/test/TestOperators.java` and `TestBoolean.java`
 //! (`.equals("…")` assertions, V4 / unversioned cases), plus hand-checked `TopLevel` / `AI.string`
 //! export shapes for control flow and collections. Run the Java tests locally to re-validate when
@@ -96,7 +101,7 @@ fn parity_mixed_compare_and_arith() {
 
 #[test]
 fn parity_string_export() {
-    assert_eq!(run_export("return 'hi';"), "'hi'");
+    assert_eq!(run_export("return 'hi';"), "\"hi\"");
 }
 
 #[test]
@@ -160,8 +165,8 @@ fn parity_index_ternary_compound_export() {
     assert_eq!(run_export("return [1, 2][0];"), "1");
     assert_eq!(run_export("return [:]['missing'];"), "null");
     assert_eq!(run_export("var m = ['a': 9]; return m.a;"), "9");
-    assert_eq!(run_export("return true ? 'yes' : 'no';"), "'yes'");
-    assert_eq!(run_export("return false ? 'yes' : 'no';"), "'no'");
+    assert_eq!(run_export("return true ? 'yes' : 'no';"), "\"yes\"");
+    assert_eq!(run_export("return false ? 'yes' : 'no';"), "\"no\"");
     assert_eq!(run_export("var x = 10; x -= 3; return x;"), "7");
 }
 

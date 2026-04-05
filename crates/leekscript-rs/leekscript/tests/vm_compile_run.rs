@@ -1,8 +1,8 @@
 //! Integration tests for the table-driven VM and V4 bytecode compiler.
 
 use leekscript::vm::{
-    BytecodeBuilder, CompileError, NativeFn, Opcode, Value, Vm, VmError, compile_chunk_v4,
-    compile_chunk_v4_with_includes, op_illegal, stdlib_global_constant_init,
+    BytecodeBuilder, CompileError, NativeFn, NumberBits, Opcode, Value, Vm, VmError,
+    compile_chunk_v4, compile_chunk_v4_with_includes, op_illegal, stdlib_global_constant_init,
 };
 
 #[test]
@@ -13,7 +13,7 @@ fn loop_bytecode_includes_charge_ops_for_java_style_budget() {
         "expected ChargeOps in while loop lowering"
     );
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(2.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(2));
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn foreach_over_array_sums() {
         "foreach lowering should use ArrayLen"
     );
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(6.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(6));
 }
 
 #[test]
@@ -44,14 +44,14 @@ fn global_decl_binds_local_slot() {
 fn const_decl_compiles_like_var() {
     let chunk = compile_chunk_v4("const n = 40; return n + 2;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(42.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(42));
 }
 
 #[test]
 fn empty_class_compiles_as_noop() {
     let chunk = compile_chunk_v4("class C {} return 1;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(1.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(1));
 }
 
 #[test]
@@ -66,7 +66,7 @@ fn function_decl_and_call() {
         "expected CallFunction"
     );
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(42.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(42));
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn switch_and_break() {
     "#;
     let chunk = compile_chunk_v4(src).expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(20.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(20));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn try_catch_throw() {
     let chunk = compile_chunk_v4(src).expect("compile");
     assert!(chunk.bytecode.code.contains(&(Opcode::Throw as u8)));
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(8.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(8));
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn foreach_key_value_over_map() {
         "map foreach should use MapEntryAt"
     );
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(30.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(30));
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn compile_with_includes_sees_lib_vars() {
     .expect("write main");
     let chunk = compile_chunk_v4_with_includes(&root, &root.join("main.leek")).expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Number(41.0));
+    assert_eq!(vm.run().unwrap(), Value::num_int(41));
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -199,8 +199,8 @@ fn map_merge_put_if_absent_matches_java() {
         panic!("expected map");
     };
     assert_eq!(m.len(), 1);
-    assert_eq!(m[0].0, Value::Number(1.0));
-    assert_eq!(m[0].1, Value::Number(2.0));
+    assert_eq!(m[0].0, Value::num_int(1));
+    assert_eq!(m[0].1, Value::num_int(2));
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn dispatch_table_is_full_and_defaults_to_illegal() {
 fn compile_and_run_mul_only() {
     let chunk = compile_chunk_v4("return 3 * 4;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(12.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(12));
 }
 
 #[test]
@@ -227,7 +227,7 @@ fn compile_and_run_arithmetic_return() {
     );
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     let v = vm.run().expect("run");
-    assert_eq!(v, Value::Number(14.0));
+    assert_eq!(v, Value::num_int(14));
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn compile_var_and_load() {
     let chunk = compile_chunk_v4("var x = 10; return x + 1;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     let v = vm.run().expect("run");
-    assert_eq!(v, Value::Number(11.0));
+    assert_eq!(v, Value::num_int(11));
 }
 
 #[test]
@@ -243,7 +243,7 @@ fn unary_minus() {
     let chunk = compile_chunk_v4("return - (3 + 2);").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     let v = vm.run().expect("run");
-    assert_eq!(v, Value::Number(-5.0));
+    assert_eq!(v, Value::num_int(-5));
 }
 
 #[test]
@@ -251,13 +251,13 @@ fn native_call_roundtrip() {
     fn add_two(_vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         let a = args.first().and_then(|v| v.as_number()).ok_or(VmError::ExpectedNumber)?;
         let b = args.get(1).and_then(|v| v.as_number()).ok_or(VmError::ExpectedNumber)?;
-        Ok(Value::Number(a + b))
+        Ok(Value::Number(NumberBits::coerce_integerish_f64(a + b)))
     }
     let n: NativeFn = add_two;
 
     let mut b = BytecodeBuilder::new();
-    b.emit_push_const(Value::Number(40.0));
-    b.emit_push_const(Value::Number(2.0));
+    b.emit_push_const(Value::num_int(40));
+    b.emit_push_const(Value::num_int(2));
     b.emit_call_native(0, 2);
     b.emit_return();
 
@@ -265,7 +265,7 @@ fn native_call_roundtrip() {
     vm.set_natives(vec![n]);
     vm.set_local_count(0).expect("locals");
     let v = vm.run().expect("run");
-    assert_eq!(v, Value::Number(42.0));
+    assert_eq!(v, Value::num_int(42));
 }
 
 #[test]
@@ -331,7 +331,7 @@ fn while_loop_and_assign_expr() {
     )
     .expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(3.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(3));
 }
 
 #[test]
@@ -341,7 +341,7 @@ fn for_loop_var_init() {
     )
     .expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(4.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(4));
 }
 
 #[test]
@@ -349,7 +349,7 @@ fn do_while_runs_body_once() {
     let chunk = compile_chunk_v4("var n = 0; do { n = n + 1; } while (false); return n;")
         .expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(1.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(1));
 }
 
 #[test]
@@ -359,7 +359,7 @@ fn break_exits_while() {
     )
     .expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(5.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(5));
 }
 
 #[test]
@@ -370,7 +370,7 @@ fn continue_skips_rest_of_while_body() {
     .expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     // 1 + 3 + 4 = 8 (skip adding when i is 2)
-    assert_eq!(vm.run().expect("run"), Value::Number(8.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(8));
 }
 
 #[test]
@@ -383,7 +383,7 @@ fn get_elem_opcode_emitted_for_index() {
 fn array_index_and_oob_null() {
     let chunk = compile_chunk_v4("return [7, 8][1];").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(8.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(8));
 
     let chunk = compile_chunk_v4("return [1][9];").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
@@ -394,26 +394,26 @@ fn array_index_and_oob_null() {
 fn map_subscript_and_dot_member() {
     let chunk = compile_chunk_v4("return [1: 2][1];").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(2.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(2));
 
     let chunk = compile_chunk_v4("var m = ['k': 5]; return m.k;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(5.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(5));
 }
 
 #[test]
 fn ternary_expression() {
     let chunk = compile_chunk_v4("return 1 ? 2 : 3;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(2.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(2));
 
     let chunk = compile_chunk_v4("return 0 ? 2 : 3;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(3.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(3));
 
     let chunk = compile_chunk_v4("return 1 + 2 ? 30 : 40;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(30.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(30));
 }
 
 #[test]
@@ -423,29 +423,43 @@ fn compound_assign_in_loop() {
     )
     .expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
-    assert_eq!(vm.run().expect("run"), Value::Number(6.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(6));
+}
+
+#[test]
+fn compile_paren_grouped_binary() {
+    let chunk = compile_chunk_v4("return (1 + 2) / 2;").expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::num_real(1.5));
+}
+
+#[test]
+fn compile_prefix_increment_return() {
+    let chunk = compile_chunk_v4("var i = 0; return ++i;").expect("compile ++i");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::num_int(1));
 }
 
 #[test]
 fn stdlib_global_constants_from_sig() {
     let chunk = compile_chunk_v4("return TYPE_NUMBER + SORT_DESC + COLOR_BLUE;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().expect("run"), Value::Number(257.0));
+    assert_eq!(vm.run().expect("run"), Value::num_int(257));
 }
 
 #[test]
 fn stdlib_natives_from_sig_core() {
     let cases = [
-        ("return abs(-3);", Value::Number(3.0)),
-        ("return sqrt(4);", Value::Number(2.0)),
-        ("return length('ab');", Value::Number(2.0)),
-        ("return count([1, 2]);", Value::Number(2.0)),
+        ("return abs(-3);", Value::num_int(3)),
+        ("return sqrt(4);", Value::num_int(2)),
+        ("return length('ab');", Value::num_int(2)),
+        ("return count([1, 2]);", Value::num_int(2)),
         (
             "return join(['a', 'b'], '-');",
             Value::String("a-b".into()),
         ),
-        ("return indexOf('abc', 'b');", Value::Number(1.0)),
-        ("return abs(-2) + 1;", Value::Number(3.0)),
+        ("return indexOf('abc', 'b');", Value::num_int(1)),
+        ("return abs(-2) + 1;", Value::num_int(3)),
     ];
     for (src, want) in cases {
         let chunk =
