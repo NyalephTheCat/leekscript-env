@@ -1,0 +1,26 @@
+[package]
+name = "leekscript-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+leekscript = { path = "../leekscript" }
+
+[lib]
+name = "leekscript_fuzz"
+path = "src/lib.rs"
+
+[workspace]
+members = []
+
+[[bin]]
+name = "pipeline"
+path = "fuzz_targets/pipeline.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,17 @@
+// leeklang: version=v4
+// Inspired by data-heavy entity models: fields, init method, fixed loadout list.
+class Unit {
+    integer id;
+    integer life;
+    integer cap;
+    Array<integer> loadout;
+    function init(integer i, integer c) {
+        id = i;
+        cap = c;
+        life = c;
+        loadout = [2, 4, 8];
+    }
+}
+var u = new Unit();
+u.init(7, 100);
+return u.id + u.life + u.loadout[0] + u.loadout[1] + u.loadout[2];

@@ -1,0 +1,5 @@
+// leeklang: version=v4
+// Stdlib calls: VM prelude supplies these; use `leekscript check --parse-only` if you skip stubs.
+var a = abs(-3);
+var s = join(["x", "y"], "-");
+return length(s) + sqrt(4) + count([1, 2]);

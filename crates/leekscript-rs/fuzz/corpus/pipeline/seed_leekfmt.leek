@@ -1,0 +1,3 @@
+// leeklang: version=v4
+// leekfmt: indent-width=2; semicolons=always
+function  f(  )  {  var  x=1  ;  return  x  ;  }

@@ -1,0 +1,3 @@
+// leeklang: version=v4 experimental-templates=true
+function first<T>(Array<T> a) => T;
+function clamp(integer x, integer lo, integer hi) => integer;

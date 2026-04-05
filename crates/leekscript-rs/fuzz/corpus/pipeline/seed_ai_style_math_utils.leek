@@ -1,0 +1,13 @@
+// leeklang: version=v4
+// Inspired by small static utility classes (clamp / blend), but original API names.
+class Blend {
+    static real clamp01(real t) {
+        if (t < 0) return 0;
+        if (t > 1) return 1;
+        return t;
+    }
+    static real mix(real a, real b, real t) {
+        return a + (b - a) * Blend.clamp01(t);
+    }
+}
+return Blend.mix(10, 20, 0.25);

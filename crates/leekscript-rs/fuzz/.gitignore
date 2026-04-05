@@ -1,0 +1,5 @@
+/target/
+/artifacts/
+
+# libFuzzer writes SHA-1-named shards here; keep only handwritten `seed_*` in git.
+/corpus/pipeline/[0-9a-f]*

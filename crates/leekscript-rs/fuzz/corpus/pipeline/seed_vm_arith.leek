@@ -1,0 +1,4 @@
+// leeklang: version=v4
+var a = 1 + 2 * 3;
+var b = [10, 20, 30];
+return a + b[1] - (4 / 2);

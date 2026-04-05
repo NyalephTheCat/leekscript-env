@@ -1,0 +1,9 @@
+// leeklang: version=v4 experimental-exceptions=true
+var r = 0;
+try {
+    throw 7;
+    r = 1;
+} catch (integer e) {
+    r = e + 1;
+}
+return r;
