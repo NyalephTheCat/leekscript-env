@@ -472,3 +472,41 @@ fn stdlib_natives_from_sig_core() {
         assert_eq!(got, want, "src={src:?}");
     }
 }
+
+#[test]
+fn foreach_over_set_sums_java_normalizer_shape() {
+    let src = "var s = <1, 2, 3, 4, 5>; var x = 0; for (var y in s) { x = x + y; } return x;";
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::num_int(15));
+}
+
+#[test]
+fn compound_assign_stmt_updates_local() {
+    let src = "var x = 0; var y = 3; x += y; return x;";
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::num_int(3));
+}
+
+#[test]
+fn no_semicolon_between_stmts_after_set_literal_parses() {
+    let s = "var i = <1, 2> setPut(i, 3) return i";
+    let r = compile_chunk_v4(s);
+    assert!(r.is_ok(), "{r:?}");
+}
+
+#[test]
+fn set_put_on_local_after_set_literal_compiles() {
+    let just_var = "var i = <1, 2>; return i;";
+    let r0 = compile_chunk_v4(just_var);
+    assert!(r0.is_ok(), "var with set literal: {r0:?}");
+    // Two-part call `setPut(i, x)` is lowered in `try_emit_ident_call_two_part`, not `compile_call_expr`.
+    let src_semi = "var i = <1, 2>; setPut(i, 3); return i;";
+    let chunk = compile_chunk_v4(src_semi).unwrap_or_else(|e| {
+        panic!("setPut on plain local after set literal should compile: {e:?}")
+    });
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    let got = vm.run().unwrap();
+    assert_eq!(got, Value::Set(vec![Value::num_int(1), Value::num_int(2), Value::num_int(3)]));
+}

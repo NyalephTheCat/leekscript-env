@@ -77,6 +77,11 @@ impl BytecodeBuilder {
         self.emit_opcode(Opcode::MapEntryAt);
     }
 
+    pub fn emit_set_build(&mut self, element_count: u16) {
+        self.emit_opcode(Opcode::SetBuild);
+        self.emit_u16_operand(element_count);
+    }
+
     pub fn emit_call_function(&mut self, func_id: u16, argc: u8) {
         self.emit_opcode(Opcode::CallFunction);
         self.emit_u16_operand(func_id);

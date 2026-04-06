@@ -68,6 +68,10 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::LogicalXor as usize] = op_logical_xor;
     table[Opcode::PushPreludeClass as usize] = op_push_prelude_class;
     table[Opcode::SetElemLocal as usize] = op_set_elem_local;
+    table[Opcode::SetBuild as usize] = op_set_build;
+    table[Opcode::SetPutLocal as usize] = op_set_put_local;
+    table[Opcode::SetRemoveLocal as usize] = op_set_remove_local;
+    table[Opcode::SetClearLocal as usize] = op_set_clear_local;
     table
 };
 
@@ -617,6 +621,67 @@ fn op_logical_xor(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+fn op_set_build(vm: &mut Vm) -> Result<(), VmError> {
+    let n = vm.read_u16()? as usize;
+    let mut elems = Vec::with_capacity(n);
+    for _ in 0..n {
+        elems.push(vm.pop_stack()?);
+    }
+    elems.reverse();
+    vm.push_stack(super::value::set_value_from_elements(elems))?;
+    Ok(())
+}
+
+fn op_set_put_local(vm: &mut Vm) -> Result<(), VmError> {
+    let slot = vm.read_u16()?;
+    let idx = usize::from(slot);
+    let elem = vm.pop_stack()?;
+    let set_v = vm.locals.get(idx).cloned().ok_or(VmError::BadLocal(slot))?;
+    let Value::Set(mut s) = set_v else {
+        vm.push_stack(Value::Bool(false))?;
+        return Ok(());
+    };
+    vm.charge_ops(3)?;
+    let added = !s.iter().any(|x| x.equals_equals_v4(&elem));
+    if added {
+        // Java: set literals are canonicalized for export; `setPut` appends without re-sorting
+        // (see `TestSet.java` `setPut(i, 'okay')` then `setPut(i, 1)` → `<"okay", 1>`).
+        s.push(elem);
+        store_local(vm, slot, Value::Set(s))?;
+    }
+    vm.push_stack(Value::Bool(added))?;
+    Ok(())
+}
+
+fn op_set_remove_local(vm: &mut Vm) -> Result<(), VmError> {
+    let slot = vm.read_u16()?;
+    let idx = usize::from(slot);
+    let elem = vm.pop_stack()?;
+    let set_v = vm.locals.get(idx).cloned().ok_or(VmError::BadLocal(slot))?;
+    let Value::Set(mut s) = set_v else {
+        vm.push_stack(Value::Bool(false))?;
+        return Ok(());
+    };
+    vm.charge_ops(3)?;
+    let removed = if let Some(pos) = s.iter().position(|x| x.equals_equals_v4(&elem)) {
+        s.remove(pos);
+        true
+    } else {
+        false
+    };
+    store_local(vm, slot, Value::Set(s))?;
+    vm.push_stack(Value::Bool(removed))?;
+    Ok(())
+}
+
+fn op_set_clear_local(vm: &mut Vm) -> Result<(), VmError> {
+    let slot = vm.read_u16()?;
+    vm.charge_ops(2)?;
+    store_local(vm, slot, Value::Set(Vec::new()))?;
+    vm.push_stack(Value::Null)?;
+    Ok(())
+}
+
 fn op_array_build(vm: &mut Vm) -> Result<(), VmError> {
     let n = vm.read_u16()? as usize;
     let mut elems = Vec::with_capacity(n);
@@ -674,6 +739,18 @@ fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
     let container = vm.pop_stack()?;
     let out = match &container {
         Value::Array(arr) => array_get(arr, &key),
+        Value::Set(s) => {
+            if let Some(n) = key.as_number() {
+                if n.is_finite() && n >= 0.0 {
+                    let i = n as usize;
+                    s.get(i).cloned().unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                }
+            } else {
+                Value::Null
+            }
+        }
         Value::Map(pairs) | Value::Object(pairs) => pairs
             .iter()
             .find(|(k, _)| k == &key)
@@ -738,6 +815,7 @@ fn op_array_len(vm: &mut Vm) -> Result<(), VmError> {
     let v = vm.pop_stack()?;
     let n = match &v {
         Value::Array(a) => a.len() as i64,
+        Value::Set(s) => s.len() as i64,
         _ => 0,
     };
     vm.push_stack(Value::num_int(n))?;

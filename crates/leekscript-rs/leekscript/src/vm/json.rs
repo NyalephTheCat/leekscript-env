@@ -15,6 +15,17 @@ pub fn encode(v: &Value) -> String {
         },
         Value::Class(_) => "null".into(),
         Value::String(s) => encode_string(s),
+        Value::Set(s) => {
+            let mut out = String::from('[');
+            for (i, v) in s.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&encode(v));
+            }
+            out.push(']');
+            out
+        }
         Value::Array(a) => {
             let mut out = String::from("[");
             for (i, x) in a.iter().enumerate() {

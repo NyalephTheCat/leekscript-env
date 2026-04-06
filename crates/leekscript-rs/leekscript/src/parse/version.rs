@@ -27,6 +27,8 @@ pub const FLAG_EXP_LOOP_LEVELS: FlagId = 14;
 pub const FLAG_EXP_FN_OPTIONAL_PARAMS: FlagId = 15;
 /// Template parameters on classes, top-level functions, and anonymous functions: `function id<T>(…)`, `class C<T>`, `function<T>(…) {}` (not arrow lambdas — `<T>` would clash with `<…>` set literals).
 pub const FLAG_EXP_TEMPLATES: FlagId = 16;
+/// While set, bare `>` is not parsed as relational greater-than (it closes `<…>` set literals).
+pub const FLAG_IN_SET_LITERAL: FlagId = 17;
 
 /// Optional parse features layered on top of a base [`Version`] (typically [`Version::V4`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

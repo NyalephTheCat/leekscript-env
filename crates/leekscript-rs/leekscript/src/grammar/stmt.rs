@@ -488,10 +488,11 @@ pub fn define(g: &mut GrammarBuilder) {
             |g| {
                 g.call_rule(GRule::Block);
             },
+            // Do not wrap in an extra `Node::Stmt`: `StmtExprStatement` already builds `Node::Stmt`
+            // with an `Expr` child. A second wrapper yields `Stmt(Stmt(expr))` and breaks
+            // `ExprStmt::expr()` (`child::<Expr>()` finds the inner `Stmt`, not the `Expr`).
             |g| {
-                g.node(Node::Stmt, |g| {
-                    g.call_rule(GRule::Stmt);
-                });
+                g.call_rule(GRule::Stmt);
             },
         );
     });

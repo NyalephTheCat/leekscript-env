@@ -1,6 +1,7 @@
 //! Expressions: precedence levels, primaries, lambdas, and literals.
 use super::cfg_flags;
 use super::GRule;
+use crate::parse::version::FLAG_IN_SET_LITERAL;
 use crate::syntax::kinds::Node;
 use sipha::parse::expr as sipha_expr;
 use sipha::prelude::parse::GrammarChoiceFn;
@@ -33,7 +34,9 @@ pub fn define(g: &mut GrammarBuilder) {
         g.call_rule(GRule::Ternary);
         g.optional(|g| {
             g.call_rule(GRule::AssignOp);
-            g.call_rule(GRule::Expr);
+            g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                g.call_rule(GRule::Expr);
+            });
         });
     });
 
@@ -43,9 +46,13 @@ pub fn define(g: &mut GrammarBuilder) {
         g.optional(|g| {
             g.node(Node::TernaryExpr, |g| {
                 g.call_rule(GRule::OpQuestion);
-                g.call_rule(GRule::Expr);
+                g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                    g.call_rule(GRule::Expr);
+                });
                 g.call_rule(GRule::Colon);
-                g.call_rule(GRule::Expr);
+                g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                    g.call_rule(GRule::Expr);
+                });
             });
         });
     });
@@ -255,18 +262,48 @@ pub fn define(g: &mut GrammarBuilder) {
 
     // relational = shift ( (<|>|<=|>=|instanceof|in|not in) shift )*
     // `as` is handled as `postfix_with_as` (type cast) like leekscript-java.
-    sipha_expr::left_assoc_infix_level(
-        g,
-        &sipha_expr::LeftAssocInfixLevel {
-            level_name: GRule::Relational.as_str(),
-            lower_level_name: GRule::Shift.as_str(),
-            ops: &[GRule::OpLte.as_str(), GRule::OpGte.as_str(), GRule::OpLt.as_str(), GRule::OpGt.as_str(), GRule::KwInstanceof.as_str(), GRule::KwIn.as_str(), GRule::NotIn.as_str()],
-            node_kind: &Node::BinaryExpr,
-            wrapper_kind: None,
-            rhs_field: None,
-            rhs_wrapper_kind: None,
-        },
-    );
+    //
+    // Inside set literals (`< … >`), [`FLAG_IN_SET_LITERAL`] is set so a bare `>` ends the literal
+    // instead of parsing as greater-than (e.g. `var i = <1, 2> setPut(i, 3)`).
+    g.parser_rule(GRule::Relational.as_str(), |g| {
+        g.call_rule(GRule::Shift);
+        g.zero_or_more(|g| {
+            g.node(Node::BinaryExpr, |g| {
+                sipha::choices!(
+                    g,
+                    |g| {
+                        g.call_rule(GRule::OpLte);
+                        g.call_rule(GRule::Shift);
+                    },
+                    |g| {
+                        g.call_rule(GRule::OpGte);
+                        g.call_rule(GRule::Shift);
+                    },
+                    |g| {
+                        g.call_rule(GRule::OpLt);
+                        g.call_rule(GRule::Shift);
+                    },
+                    |g| {
+                        g.if_not_flag(FLAG_IN_SET_LITERAL);
+                        g.call_rule(GRule::OpGt);
+                        g.call_rule(GRule::Shift);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwInstanceof);
+                        g.call_rule(GRule::Shift);
+                    },
+                    |g| {
+                        g.call_rule(GRule::KwIn);
+                        g.call_rule(GRule::Shift);
+                    },
+                    |g| {
+                        g.call_rule(GRule::NotIn);
+                        g.call_rule(GRule::Shift);
+                    },
+                );
+            });
+        });
+    });
 
     // `is` / `is not` — between relational and `==` (Java word-operators).
     g.parser_rule(GRule::IsCompare.as_str(), |g| {
@@ -510,21 +547,23 @@ pub fn define(g: &mut GrammarBuilder) {
         g.node(Node::IndexExpr, |g| {
             g.call_rule(GRule::Lbracket);
             g.optional(|g| {
-                // Either: expr
-                // Or: expr? ':' expr? (':' expr?)?   (slice)
-                g.optional(|g| {
-                    g.call_rule(GRule::Expr);
-                });
-                g.optional(|g| {
-                    g.call_rule(GRule::Colon);
+                g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                    // Either: expr
+                    // Or: expr? ':' expr? (':' expr?)?   (slice)
                     g.optional(|g| {
                         g.call_rule(GRule::Expr);
                     });
                     g.optional(|g| {
-                        cfg_flags::v4(g);
                         g.call_rule(GRule::Colon);
                         g.optional(|g| {
                             g.call_rule(GRule::Expr);
+                        });
+                        g.optional(|g| {
+                            cfg_flags::v4(g);
+                            g.call_rule(GRule::Colon);
+                            g.optional(|g| {
+                                g.call_rule(GRule::Expr);
+                            });
                         });
                     });
                 });
@@ -572,20 +611,24 @@ pub fn define(g: &mut GrammarBuilder) {
 
     // arg_list := expr ("," expr)* ","?
     g.parser_rule(GRule::ArgList.as_str(), |g| {
-        g.call_rule(GRule::Expr);
-        g.zero_or_more(|g| {
-            g.call_rule(GRule::Comma);
+        g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
             g.call_rule(GRule::Expr);
-        });
-        g.optional(|g| {
-            g.call_rule(GRule::Comma);
+            g.zero_or_more(|g| {
+                g.call_rule(GRule::Comma);
+                g.call_rule(GRule::Expr);
+            });
+            g.optional(|g| {
+                g.call_rule(GRule::Comma);
+            });
         });
     });
 
     g.parser_rule(GRule::ParenExpr.as_str(), |g| {
         g.node(Node::ParenExpr, |g| {
             g.call_rule(GRule::Lparen);
-            g.call_rule(GRule::Expr);
+            g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                g.call_rule(GRule::Expr);
+            });
             g.call_rule(GRule::Rparen);
         });
     });
@@ -641,7 +684,9 @@ pub fn define(g: &mut GrammarBuilder) {
                     g.call_rule(GRule::LambdaReturnType);
                     g.choice(
                         |g| {
-                            g.call_rule(GRule::Expr);
+                            g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                                g.call_rule(GRule::Expr);
+                            });
                         },
                         |g| {
                             g.call_rule(GRule::Block);
@@ -651,7 +696,9 @@ pub fn define(g: &mut GrammarBuilder) {
                 |g| {
                     g.choice(
                         |g| {
-                            g.call_rule(GRule::Expr);
+                            g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                                g.call_rule(GRule::Expr);
+                            });
                         },
                         |g| {
                             g.call_rule(GRule::Block);
@@ -676,59 +723,63 @@ pub fn define(g: &mut GrammarBuilder) {
 
     // Array / map contents only (no `..` intervals — those use `bracket_interval_body`).
     g.parser_rule(GRule::BracketListOrMapInner.as_str(), |g| {
-        g.call_rule(GRule::Expr);
-        g.optional(|g| {
-            g.choice(
-                |g| {
-                    cfg_flags::v4(g);
-                    g.call_rule(GRule::Colon);
-                    g.node(Node::BracketMapExpr, |g| {
+        g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+            g.call_rule(GRule::Expr);
+            g.optional(|g| {
+                g.choice(
+                    |g| {
+                        cfg_flags::v4(g);
+                        g.call_rule(GRule::Colon);
+                        g.node(Node::BracketMapExpr, |g| {
+                            g.call_rule(GRule::Expr);
+                            g.zero_or_more(|g| {
+                                g.call_rule(GRule::Comma);
+                                g.call_rule(GRule::Expr);
+                                g.call_rule(GRule::Colon);
+                                g.call_rule(GRule::Expr);
+                            });
+                            g.optional(|g| {
+                                g.call_rule(GRule::Comma);
+                            });
+                        });
+                    },
+                    |g| {
+                        g.call_rule(GRule::Comma);
                         g.call_rule(GRule::Expr);
                         g.zero_or_more(|g| {
                             g.call_rule(GRule::Comma);
-                            g.call_rule(GRule::Expr);
-                            g.call_rule(GRule::Colon);
                             g.call_rule(GRule::Expr);
                         });
                         g.optional(|g| {
                             g.call_rule(GRule::Comma);
                         });
-                    });
-                },
-                |g| {
-                    g.call_rule(GRule::Comma);
-                    g.call_rule(GRule::Expr);
-                    g.zero_or_more(|g| {
-                        g.call_rule(GRule::Comma);
-                        g.call_rule(GRule::Expr);
-                    });
-                    g.optional(|g| {
-                        g.call_rule(GRule::Comma);
-                    });
-                },
-            );
+                    },
+                );
+            });
         });
     });
 
     // After `[`: `[..]`, `[..2]`, `[1..2]`, `[1..2[`, … (aligned with `readArrayOrMapOrInterval` /
     // `readInterval` in leekscript-java).
     g.parser_rule(GRule::BracketIntervalBody.as_str(), |g| {
-        sipha::choices!(
-            g,
-            |g| {
-                g.call_rule(GRule::Dotdot);
-                g.optional(|g| {
+        g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+            sipha::choices!(
+                g,
+                |g| {
+                    g.call_rule(GRule::Dotdot);
+                    g.optional(|g| {
+                        g.call_rule(GRule::Expr);
+                    });
+                },
+                |g| {
                     g.call_rule(GRule::Expr);
-                });
-            },
-            |g| {
-                g.call_rule(GRule::Expr);
-                g.call_rule(GRule::Dotdot);
-                g.optional(|g| {
-                    g.call_rule(GRule::Expr);
-                });
-            },
-        );
+                    g.call_rule(GRule::Dotdot);
+                    g.optional(|g| {
+                        g.call_rule(GRule::Expr);
+                    });
+                },
+            );
+        });
     });
 
     g.parser_rule(GRule::ArrayExpr.as_str(), |g| {
@@ -813,17 +864,19 @@ pub fn define(g: &mut GrammarBuilder) {
         g.node(Node::ObjectExpr, |g| {
             g.call_rule(GRule::Lbrace);
             g.optional(|g| {
-                g.call_rule(GRule::Ident);
-                g.call_rule(GRule::Colon);
-                g.call_rule(GRule::Expr);
-                g.zero_or_more(|g| {
-                    g.call_rule(GRule::Comma);
+                g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
                     g.call_rule(GRule::Ident);
                     g.call_rule(GRule::Colon);
                     g.call_rule(GRule::Expr);
-                });
-                g.optional(|g| {
-                    g.call_rule(GRule::Comma);
+                    g.zero_or_more(|g| {
+                        g.call_rule(GRule::Comma);
+                        g.call_rule(GRule::Ident);
+                        g.call_rule(GRule::Colon);
+                        g.call_rule(GRule::Expr);
+                    });
+                    g.optional(|g| {
+                        g.call_rule(GRule::Comma);
+                    });
                 });
             });
             g.call_rule(GRule::Rbrace);
@@ -835,13 +888,15 @@ pub fn define(g: &mut GrammarBuilder) {
         g.node(Node::SetExpr, |g| {
             g.call_rule(GRule::OpLt);
             g.optional(|g| {
-                g.call_rule(GRule::Expr);
-                g.zero_or_more(|g| {
-                    g.call_rule(GRule::Comma);
+                g.with_flags(&[FLAG_IN_SET_LITERAL], &[], |g| {
                     g.call_rule(GRule::Expr);
-                });
-                g.optional(|g| {
-                    g.call_rule(GRule::Comma);
+                    g.zero_or_more(|g| {
+                        g.call_rule(GRule::Comma);
+                        g.call_rule(GRule::Expr);
+                    });
+                    g.optional(|g| {
+                        g.call_rule(GRule::Comma);
+                    });
                 });
             });
             g.call_rule(GRule::OpGt);
@@ -899,7 +954,9 @@ pub fn define(g: &mut GrammarBuilder) {
                 g.node(Node::CallExpr, |g| {
                     g.call_rule(GRule::KwEval);
                     g.call_rule(GRule::Lparen);
-                    g.call_rule(GRule::Expr);
+                    g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                        g.call_rule(GRule::Expr);
+                    });
                     g.call_rule(GRule::Rparen);
                 });
             },
@@ -1041,11 +1098,15 @@ pub fn define(g: &mut GrammarBuilder) {
             g.choice(
                 |g| {
                     g.call_rule(GRule::Lparen);
-                    g.call_rule(GRule::Expr);
+                    g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                        g.call_rule(GRule::Expr);
+                    });
                     g.call_rule(GRule::Rparen);
                 },
                 |g| {
-                    g.call_rule(GRule::Expr);
+                    g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
+                        g.call_rule(GRule::Expr);
+                    });
                 },
             );
             // Inline the block shape here so we don't accidentally fall into

@@ -1,5 +1,6 @@
 //! Values carried on the VM stack (minimal set for the first execution tier).
 
+use std::cmp::Ordering;
 use std::string::String;
 use std::vec::Vec;
 
@@ -217,6 +218,74 @@ pub enum Value {
     Map(Vec<(Value, Value)>),
     /// Object literal `{a: 1, …}` — Java export uses `{a: 1}` (not bracket-map syntax).
     Object(Vec<(Value, Value)>),
+    /// Set literal `<1, 2, …>` — elements stored sorted (Java display / iteration order).
+    Set(Vec<Value>),
+}
+
+/// Total order for **set literals** (`<…>`) — canonical export matches `TestSet.java`
+/// (e.g. `return <"abc", 1>` → `<1, "abc">`). Mutations via `setPut` keep insertion order.
+#[must_use]
+pub fn value_cmp_for_java_set_display(a: &Value, b: &Value) -> Ordering {
+    fn disc(v: &Value) -> u8 {
+        match v {
+            Value::Null => 0,
+            Value::Bool(_) => 1,
+            Value::Number(_) => 2,
+            Value::String(_) => 3,
+            Value::Class(_) => 4,
+            Value::Array(_) => 5,
+            Value::Map(_) => 6,
+            Value::Object(_) => 7,
+            Value::Set(_) => 8,
+        }
+    }
+    disc(a).cmp(&disc(b)).then_with(|| match (a, b) {
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        (Value::Number(x), Value::Number(y)) => x
+            .as_f64()
+            .partial_cmp(&y.as_f64())
+            .unwrap_or(Ordering::Equal),
+        (Value::String(x), Value::String(y)) => x.cmp(y),
+        (Value::Class(x), Value::Class(y)) => x.java_class_string().cmp(&y.java_class_string()),
+        (Value::Set(ax), Value::Set(bx)) => {
+            let c = ax.len().cmp(&bx.len());
+            if c != Ordering::Equal {
+                return c;
+            }
+            ax.iter()
+                .zip(bx.iter())
+                .map(|(p, q)| value_cmp_for_java_set_display(p, q))
+                .find(|o| *o != Ordering::Equal)
+                .unwrap_or(Ordering::Equal)
+        }
+        (Value::Array(ax), Value::Array(bx)) => {
+            let c = ax.len().cmp(&bx.len());
+            if c != Ordering::Equal {
+                return c;
+            }
+            ax.iter()
+                .zip(bx.iter())
+                .map(|(p, q)| value_cmp_for_java_set_display(p, q))
+                .find(|o| *o != Ordering::Equal)
+                .unwrap_or(Ordering::Equal)
+        }
+        (Value::Map(ax), Value::Map(bx)) | (Value::Object(ax), Value::Object(bx)) => {
+            let c = ax.len().cmp(&bx.len());
+            if c != Ordering::Equal {
+                return c;
+            }
+            a.to_leek_export_string().cmp(&b.to_leek_export_string())
+        }
+        _ => a.to_leek_export_string().cmp(&b.to_leek_export_string()),
+    })
+}
+
+/// Build a [`Value::Set`] from evaluated elements (sort, dedupe by `equals_equals_v4`).
+#[must_use]
+pub fn set_value_from_elements(mut xs: Vec<Value>) -> Value {
+    xs.sort_by(|a, b| value_cmp_for_java_set_display(a, b));
+    xs.dedup_by(|a, b| a.equals_equals_v4(b));
+    Value::Set(xs)
 }
 
 impl Value {
@@ -270,6 +339,12 @@ impl Value {
                         .is_some_and(|(_, bv)| v.equals_equals_v4(bv))
                 })
             }
+            (Self::Set(a), Self::Set(b)) => {
+                if a.len() != b.len() {
+                    return false;
+                }
+                a.iter().all(|x| b.iter().any(|y| x.equals_equals_v4(y)))
+            }
             _ => false,
         }
     }
@@ -283,6 +358,7 @@ impl Value {
             Self::Number(n) => n.as_f64(),
             Self::Array(a) => a.len() as f64,
             Self::Map(m) | Self::Object(m) => m.len() as f64,
+            Self::Set(s) => s.len() as f64,
             Self::Class(c) => {
                 let s = c.java_class_string();
                 if s == "true" {
@@ -344,6 +420,17 @@ impl Value {
                 out
             }
             Self::Object(o) => format_object_brace_export(o, |v| v.to_leek_export_string()),
+            Self::Set(s) => {
+                let mut out = String::from("<");
+                for (i, v) in s.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&v.to_leek_export_string());
+                }
+                out.push('>');
+                out
+            }
             Self::Class(c) => c.java_class_string(),
             Self::String(s) => {
                 // Java `AI.string`: values that are exactly one JSON string token use a doubled-`"`
@@ -413,6 +500,7 @@ impl Value {
                     .map(|(k, v)| k.ram_quads().saturating_add(v.ram_quads()))
                     .sum(),
             ),
+            Self::Set(s) => 1u64.saturating_add(s.iter().map(Self::ram_quads).sum()),
         }
     }
 
@@ -440,6 +528,7 @@ impl Value {
                 NumberBits::Int(i) => *i != 0,
                 NumberBits::Real(x) => *x != 0.0,
             },
+            Self::Set(s) => !s.is_empty(),
             _ => true,
         }
     }
@@ -485,6 +574,17 @@ impl Value {
                 out
             }
             Self::Object(o) => format_object_brace_export(o, |v| v.to_leek_coerce_string()),
+            Self::Set(s) => {
+                let mut out = String::from("<");
+                for (i, v) in s.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&v.to_leek_coerce_string());
+                }
+                out.push('>');
+                out
+            }
         }
     }
 
@@ -530,6 +630,17 @@ impl Value {
                 out
             }
             Self::Object(o) => format_object_brace_export(o, |v| v.to_java_string_builtin_v4()),
+            Self::Set(s) => {
+                let mut out = String::from("<");
+                for (i, v) in s.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    out.push_str(&v.to_java_string_builtin_v4());
+                }
+                out.push('>');
+                out
+            }
         }
     }
 }

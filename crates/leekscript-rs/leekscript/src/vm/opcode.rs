@@ -76,4 +76,12 @@ pub enum Opcode {
     /// Pop **rhs**, then **key**; assign into local `slot`’s array/map (`null` base → push `null`, slot unchanged).
     /// Pushes the assignment expression value (`null` or `rhs`).
     SetElemLocal = 40,
+    /// Pop `n` values (last pushed = last source element); push [`Value::Set`](super::value::Value::Set) (sorted, deduped). Followed by `u16` `n`.
+    SetBuild = 41,
+    /// Pop element; read set from local `u16`; update local; push bool (added).
+    SetPutLocal = 42,
+    /// Pop element; read set from local `u16`; update local; push bool (removed).
+    SetRemoveLocal = 43,
+    /// Clear set at local `u16`; push empty set (discarded by stmt) — leaves `null` on stack for value.
+    SetClearLocal = 44,
 }

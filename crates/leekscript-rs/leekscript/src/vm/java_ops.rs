@@ -47,6 +47,9 @@ pub(crate) fn first_binary_op_token(bin: &SyntaxNode) -> Option<Lex> {
         }
         if let SyntaxElement::Token(t) = &el {
             if let Some(k) = t.kind_as::<Lex>() {
+                if k == Lex::InKw {
+                    return Some(Lex::InKw);
+                }
                 if binary_op_kind(k) {
                     return Some(k);
                 }
@@ -58,6 +61,15 @@ pub(crate) fn first_binary_op_token(bin: &SyntaxNode) -> Option<Lex> {
 
 /// Non-trivia [`SyntaxElement`](SyntaxElement)s after the first binary operator token under `bin`.
 pub(crate) fn suffix_after_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxElement> {
+    let parts: Vec<_> = bin.children().filter(|e| !syntax_el_is_trivia(e)).collect();
+    if let Some(in_pos) = parts.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::InKw)
+        )
+    }) {
+        return parts[in_pos.saturating_add(1)..].to_vec();
+    }
     let mut after_op = false;
     let mut out = Vec::new();
     for el in bin.children() {
@@ -81,6 +93,24 @@ pub(crate) fn suffix_after_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxElemen
 
 /// Elements before the first binary operator token (lhs of one `BinaryExpr` node).
 pub(crate) fn prefix_before_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxElement> {
+    let parts: Vec<_> = bin.children().filter(|e| !syntax_el_is_trivia(e)).collect();
+    if let Some(in_pos) = parts.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::InKw)
+        )
+    }) {
+        let mut lhs_end = in_pos;
+        if in_pos > 0
+            && matches!(
+                &parts[in_pos - 1],
+                SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::NotKw)
+            )
+        {
+            lhs_end = in_pos - 1;
+        }
+        return parts[..lhs_end].to_vec();
+    }
     let mut out = Vec::new();
     for el in bin.children() {
         if syntax_el_is_trivia(&el) {
@@ -104,6 +134,7 @@ fn bin_fragment_extra_cost(op: Lex) -> u32 {
         Lex::Slash | Lex::Backslash => DIV_COST,
         Lex::Percent => MOD_COST,
         Lex::AndAnd | Lex::OrOr => 0,
+        Lex::InKw => 1,
         _ => 1,
     }
 }
@@ -314,6 +345,15 @@ fn java_ops_syntax(n: &SyntaxNode) -> u32 {
         }
         return sum.saturating_add(n_items.saturating_mul(2));
     }
+    if crate::ast::SetExpr::can_cast(n.kind()) {
+        let items: Vec<Expr> = AstNodeExt::children::<Expr>(n).collect();
+        let n_items = u32::try_from(items.len()).unwrap_or(0);
+        let mut sum = 0u32;
+        for e in items {
+            sum = sum.saturating_add(java_analyzed_ops(&e));
+        }
+        return sum.saturating_add(n_items.saturating_mul(2));
+    }
     // Literals, `null`, parenthesized, identifier-only leaves: 0 in Java for locals.
     0
 }
@@ -348,4 +388,22 @@ fn java_ops_unary(n: &SyntaxNode) -> u32 {
         _ => 0,
     };
     inner + u32::from(has_not)
+}
+
+/// `not in` under one relational [`Node::BinaryExpr`] (`[lhs, NOT, IN, rhs]`).
+pub(crate) fn relational_in_has_not(bin: &SyntaxNode) -> bool {
+    let parts: Vec<_> = bin.children().filter(|e| !syntax_el_is_trivia(e)).collect();
+    let Some(in_pos) = parts.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::InKw)
+        )
+    }) else {
+        return false;
+    };
+    in_pos > 0
+        && matches!(
+            &parts[in_pos - 1],
+            SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::NotKw)
+        )
 }

@@ -13,7 +13,7 @@ use std::cell::Cell;
 
 use super::error::VmError;
 use super::interpreter::{NativeFn, Vm};
-use super::value::{NumberBits, Value};
+use super::value::{set_value_from_elements, NumberBits, Value};
 
 #[inline]
 fn num_unary_preserve(v: f64, src: &Value) -> Value {
@@ -850,8 +850,178 @@ fn nf_type_tag(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::Class(_) => 6,
         Value::Object(_) => 7,
         Value::Map(_) => 8,
+        Value::Set(_) => 9,
     };
     Ok(Value::num_int(t))
+}
+
+fn deep_clone_value(v: &Value) -> Value {
+    match v {
+        Value::Array(a) => Value::Array(a.iter().map(deep_clone_value).collect()),
+        Value::Map(m) => Value::Map(
+            m.iter()
+                .map(|(k, vv)| (deep_clone_value(k), deep_clone_value(vv)))
+                .collect(),
+        ),
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .map(|(k, vv)| (deep_clone_value(k), deep_clone_value(vv)))
+                .collect(),
+        ),
+        Value::Set(s) => Value::Set(s.iter().map(deep_clone_value).collect()),
+        _ => v.clone(),
+    }
+}
+
+fn nf_clone(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 1)?;
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    Ok(deep_clone_value(&args[0]))
+}
+
+fn nf_set_contains(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 3)?;
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    // Call sites disagree on stack order: `setContains(s, x)` → `[s, x]`; `x in s` compiles lhs then
+    // rhs → `[x, s]` before `CallNative` (see `compile_binary_fragment` / `op_call_native`).
+    match (&args[0], &args[1]) {
+        (Value::Set(s), elem) => Ok(Value::Bool(s.iter().any(|x| x.equals_equals_v4(elem)))),
+        (elem, Value::Set(s)) => Ok(Value::Bool(s.iter().any(|x| x.equals_equals_v4(elem)))),
+        _ => Ok(Value::Bool(false)),
+    }
+}
+
+fn nf_set_size(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 2)?;
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Set(s) = &args[0] else {
+        return Ok(Value::num_int(0));
+    };
+    Ok(Value::num_int(s.len() as i64))
+}
+
+fn nf_set_is_empty(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 1)?;
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Set(s) = &args[0] else {
+        return Ok(Value::Bool(true));
+    };
+    Ok(Value::Bool(s.is_empty()))
+}
+
+fn nf_set_is_subset_of(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 2)?;
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let Value::Set(a) = &args[0] else {
+        return Ok(Value::Bool(false));
+    };
+    let Value::Set(b) = &args[1] else {
+        return Ok(Value::Bool(false));
+    };
+    Ok(Value::Bool(
+        a.iter().all(|x| b.iter().any(|y| y.equals_equals_v4(x))),
+    ))
+}
+
+fn nf_set_union(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let Value::Set(a) = &args[0] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let Value::Set(b) = &args[1] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let mut xs = Vec::with_capacity(a.len() + b.len());
+    xs.extend_from_slice(a);
+    xs.extend_from_slice(b);
+    ch(vm, 2 + 2 * xs.len() as u64)?;
+    Ok(set_value_from_elements(xs))
+}
+
+fn nf_set_intersection(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let Value::Set(a) = &args[0] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let Value::Set(b) = &args[1] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let out: Vec<Value> = a
+        .iter()
+        .filter(|x| b.iter().any(|y| y.equals_equals_v4(x)))
+        .cloned()
+        .collect();
+    ch(vm, 2 + 2 * (a.len() + b.len()) as u64)?;
+    Ok(set_value_from_elements(out))
+}
+
+fn nf_set_difference(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let Value::Set(a) = &args[0] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let Value::Set(b) = &args[1] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let out: Vec<Value> = a
+        .iter()
+        .filter(|x| !b.iter().any(|y| y.equals_equals_v4(x)))
+        .cloned()
+        .collect();
+    ch(vm, 2 + 2 * (a.len() + b.len()) as u64)?;
+    Ok(set_value_from_elements(out))
+}
+
+fn nf_set_disjunction(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let Value::Set(a) = &args[0] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let Value::Set(b) = &args[1] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    let mut out: Vec<Value> = Vec::new();
+    for x in a {
+        if !b.iter().any(|y| y.equals_equals_v4(x)) {
+            out.push(x.clone());
+        }
+    }
+    for x in b {
+        if !a.iter().any(|y| y.equals_equals_v4(x)) {
+            out.push(x.clone());
+        }
+    }
+    ch(vm, 2 + 2 * (a.len() + b.len()) as u64)?;
+    Ok(set_value_from_elements(out))
+}
+
+fn nf_set_to_array(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 2)?;
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Set(s) = &args[0] else {
+        return Err(VmError::BadNativeArgs);
+    };
+    Ok(Value::Array(s.clone()))
 }
 
 fn nf_get_blue(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -1055,6 +1225,16 @@ static STDLIB_NATIVES: &[(&str, NativeFn)] = &[
     ("debug", nf_debug),
     ("jsonDecode", nf_json_decode),
     ("jsonEncode", nf_json_encode),
+    ("clone", nf_clone),
+    ("setContains", nf_set_contains),
+    ("setDifference", nf_set_difference),
+    ("setDisjunction", nf_set_disjunction),
+    ("setIntersection", nf_set_intersection),
+    ("setIsEmpty", nf_set_is_empty),
+    ("setIsSubsetOf", nf_set_is_subset_of),
+    ("setSize", nf_set_size),
+    ("setToArray", nf_set_to_array),
+    ("setUnion", nf_set_union),
 ];
 
 /// Native id for a standard-library global, if implemented.

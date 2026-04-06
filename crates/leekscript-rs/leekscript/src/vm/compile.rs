@@ -30,8 +30,8 @@ use crate::ast::types::TypeExpr;
 use crate::ast::{
     ArrayExpr, BinaryExpr, BracketMapExpr, CallExpr, CatchClause, ClassDecl, ClassMember,
     ConstDecl, DoWhileStmt, Expr, ForStmt, ForeachStmt, FunctionDecl, GlobalDecl, IfStmt,
-    IndexExpr, IntervalExpr, LitStr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, Root, Stmt,
-    StmtBlock, SwitchStmt, TernaryExpr, ThrowStmt, TryStmt, UnaryExpr, VarDecl, WhileStmt,
+    IndexExpr, IntervalExpr, LitStr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, Root, SetExpr,
+    Stmt, StmtBlock, SwitchStmt, TernaryExpr, ThrowStmt, TryStmt, UnaryExpr, VarDecl, WhileStmt,
 };
 use crate::include;
 use crate::parse::{
@@ -1602,6 +1602,44 @@ impl CompileCtx {
         }
         let argc = u8::try_from(args.len())
             .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
+        // Sipha: `setPut(i, x)` is `[Ident(setPut), CallExpr]` — args are only `i` and `x`, not callee.
+        if name == "setPut" && argc == 2 {
+            if let Some(set_name) = expr_plain_ident_from_expr(&args[0]) {
+                if let Some(&slot) = self.locals.get(&set_name) {
+                    self.compile_expr(args[1].clone())?;
+                    let arg_o = java_ops::java_analyzed_ops(&args[1]);
+                    if arg_o > 0 {
+                        self.builder.emit_charge_ops(arg_o);
+                    }
+                    self.builder.emit_opcode(Opcode::SetPutLocal);
+                    self.builder.emit_u16_operand(slot);
+                    return Ok(true);
+                }
+            }
+        }
+        if name == "setRemove" && argc == 2 {
+            if let Some(set_name) = expr_plain_ident_from_expr(&args[0]) {
+                if let Some(&slot) = self.locals.get(&set_name) {
+                    self.compile_expr(args[1].clone())?;
+                    let arg_o = java_ops::java_analyzed_ops(&args[1]);
+                    if arg_o > 0 {
+                        self.builder.emit_charge_ops(arg_o);
+                    }
+                    self.builder.emit_opcode(Opcode::SetRemoveLocal);
+                    self.builder.emit_u16_operand(slot);
+                    return Ok(true);
+                }
+            }
+        }
+        if name == "setClear" && argc == 1 {
+            if let Some(set_name) = expr_plain_ident_from_expr(&args[0]) {
+                if let Some(&slot) = self.locals.get(&set_name) {
+                    self.builder.emit_opcode(Opcode::SetClearLocal);
+                    self.builder.emit_u16_operand(slot);
+                    return Ok(true);
+                }
+            }
+        }
         for a in &args {
             self.compile_expr(a.clone())?;
         }
@@ -1662,6 +1700,10 @@ impl CompileCtx {
         }
         if name == "Array" && arg_count == 0 {
             self.builder.emit_array_build(0);
+            return Ok(());
+        }
+        if name == "Set" && arg_count == 0 {
+            self.builder.emit_set_build(0);
             return Ok(());
         }
         Err(CompileError::Unsupported("new expression not supported"))
@@ -2007,6 +2049,43 @@ impl CompileCtx {
             self.builder.emit_array_build(0);
             return Ok(());
         }
+        if name == "setPut" && argc == 2 {
+            if let Some(set_name) = expr_plain_ident_from_expr(&args[0]) {
+                if let Some(&slot) = self.locals.get(&set_name) {
+                    self.compile_expr(args[1].clone())?;
+                    let arg_o = java_ops::java_analyzed_ops(&args[1]);
+                    if arg_o > 0 {
+                        self.builder.emit_charge_ops(arg_o);
+                    }
+                    self.builder.emit_opcode(Opcode::SetPutLocal);
+                    self.builder.emit_u16_operand(slot);
+                    return Ok(());
+                }
+            }
+        }
+        if name == "setRemove" && argc == 2 {
+            if let Some(set_name) = expr_plain_ident_from_expr(&args[0]) {
+                if let Some(&slot) = self.locals.get(&set_name) {
+                    self.compile_expr(args[1].clone())?;
+                    let arg_o = java_ops::java_analyzed_ops(&args[1]);
+                    if arg_o > 0 {
+                        self.builder.emit_charge_ops(arg_o);
+                    }
+                    self.builder.emit_opcode(Opcode::SetRemoveLocal);
+                    self.builder.emit_u16_operand(slot);
+                    return Ok(());
+                }
+            }
+        }
+        if name == "setClear" && argc == 1 {
+            if let Some(set_name) = expr_plain_ident_from_expr(&args[0]) {
+                if let Some(&slot) = self.locals.get(&set_name) {
+                    self.builder.emit_opcode(Opcode::SetClearLocal);
+                    self.builder.emit_u16_operand(slot);
+                    return Ok(());
+                }
+            }
+        }
         for a in args {
             self.compile_expr(a.clone())?;
         }
@@ -2117,6 +2196,17 @@ impl CompileCtx {
         Ok(())
     }
 
+    fn compile_set_literal(&mut self, se: &SetExpr) -> Result<(), CompileError> {
+        let items: Vec<Expr> = AstNodeExt::children::<Expr>(se.syntax()).collect();
+        let cnt = u16::try_from(items.len())
+            .map_err(|_| CompileError::Unsupported("set literal too large"))?;
+        for e in items {
+            self.compile_expr(e)?;
+        }
+        self.builder.emit_set_build(cnt);
+        Ok(())
+    }
+
     fn compile_array_literal(&mut self, arr: &ArrayExpr) -> Result<(), CompileError> {
         let syn = arr.syntax();
         let semantic: Vec<_> = syn.children().filter(|e| !syntax_el_is_trivia(e)).collect();
@@ -2191,6 +2281,9 @@ impl CompileCtx {
         }
         if let Some(oe) = ObjectExpr::cast(n.clone()) {
             return self.compile_object_literal(&oe);
+        }
+        if let Some(se) = SetExpr::cast(n.clone()) {
+            return self.compile_set_literal(&se);
         }
         if let Some(ne) = NewExpr::cast(n.clone()) {
             return self.compile_new_expr(&ne);
@@ -2405,6 +2498,21 @@ impl CompileCtx {
         match op {
             Lex::AndAnd => self.compile_short_circuit_and(&suff, lhs_ops),
             Lex::OrOr => self.compile_short_circuit_or(&suff, lhs_ops),
+            Lex::InKw => {
+                let negated = java_ops::relational_in_has_not(bin);
+                self.compile_infix_suffix(&suff)?;
+                let ro = java_ops::java_ops_infix_suffix(&suff);
+                self.builder
+                    .emit_charge_ops(lhs_ops.saturating_add(1).saturating_add(ro));
+                let Some(nid) = super::stdlib::native_id("setContains") else {
+                    return Err(CompileError::Unsupported("setContains native"));
+                };
+                self.builder.emit_call_native(nid, 2);
+                if negated {
+                    self.builder.emit_opcode(Opcode::Not);
+                }
+                Ok(())
+            }
             _ => {
                 self.compile_infix_suffix(&suff)?;
                 self.emit_binop(op)
@@ -2694,3 +2802,5 @@ impl CompileCtx {
         Ok(())
     }
 }
+
+ 
