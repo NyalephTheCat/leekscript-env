@@ -15,6 +15,7 @@ pub fn encode(v: &Value) -> String {
         },
         Value::Class(_) => "null".into(),
         Value::String(s) => encode_string(s),
+        Value::Interval(_) => "null".into(),
         Value::Set(s) => {
             let mut out = String::from('[');
             for (i, v) in s.iter().enumerate() {

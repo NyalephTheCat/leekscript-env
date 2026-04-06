@@ -36,6 +36,7 @@ pub(crate) fn binary_op_kind(k: Lex) -> bool {
             | Lex::Gte
             | Lex::AndAnd
             | Lex::OrOr
+            | Lex::InstanceofKw
             | Lex::XorKw
     )
 }

@@ -167,6 +167,13 @@ impl PartialEq for NumberBits {
 pub enum PreludeClass {
     Array,
     Null,
+    Interval,
+    Set,
+    Map,
+    Object,
+    String,
+    Boolean,
+    Number,
 }
 
 impl PreludeClass {
@@ -176,6 +183,13 @@ impl PreludeClass {
         match self {
             Self::Array => "Array",
             Self::Null => "Null",
+            Self::Interval => "Interval",
+            Self::Set => "Set",
+            Self::Map => "Map",
+            Self::Object => "Object",
+            Self::String => "String",
+            Self::Boolean => "Boolean",
+            Self::Number => "Number",
         }
     }
 
@@ -199,6 +213,26 @@ impl PreludeClass {
         match self {
             Self::Array => 0,
             Self::Null => 1,
+            // Not used by `PushPreludeClass` (only Array/Null are encoded).
+            _ => 255,
+        }
+    }
+}
+
+impl PreludeClass {
+    #[must_use]
+    pub fn of_value(v: &Value) -> Self {
+        match v {
+            Value::Null => Self::Null,
+            Value::Bool(_) => Self::Boolean,
+            Value::Number(_) => Self::Number,
+            Value::String(_) => Self::String,
+            Value::Array(_) => Self::Array,
+            Value::Map(_) => Self::Map,
+            Value::Object(_) => Self::Object,
+            Value::Set(_) => Self::Set,
+            Value::Interval(_) => Self::Interval,
+            Value::Class(c) => *c,
         }
     }
 }
@@ -220,6 +254,19 @@ pub enum Value {
     Object(Vec<(Value, Value)>),
     /// Set literal `<1, 2, …>` — elements stored sorted (Java display / iteration order).
     Set(Vec<Value>),
+    /// Interval literal (`[..]`, `[1..2[`, `]..1]`, …).
+    Interval(IntervalValue),
+}
+
+/// Interval endpoints: `None` means unbounded (±∞ depending on side).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IntervalValue {
+    pub left: Option<NumberBits>,
+    pub right: Option<NumberBits>,
+    pub left_closed: bool,
+    pub right_closed: bool,
+    /// Some interval literals (notably `]..[`) are real-typed in Java even without numeric endpoints.
+    pub prefer_real: bool,
 }
 
 /// Total order for **set literals** (`<…>`) — canonical export matches `TestSet.java`
@@ -237,6 +284,7 @@ pub fn value_cmp_for_java_set_display(a: &Value, b: &Value) -> Ordering {
             Value::Map(_) => 6,
             Value::Object(_) => 7,
             Value::Set(_) => 8,
+            Value::Interval(_) => 9,
         }
     }
     disc(a).cmp(&disc(b)).then_with(|| match (a, b) {
@@ -359,6 +407,7 @@ impl Value {
             Self::Array(a) => a.len() as f64,
             Self::Map(m) | Self::Object(m) => m.len() as f64,
             Self::Set(s) => s.len() as f64,
+            Self::Interval(_i) => 1.0,
             Self::Class(c) => {
                 let s = c.java_class_string();
                 if s == "true" {
@@ -431,6 +480,29 @@ impl Value {
                 out.push('>');
                 out
             }
+            Self::Interval(iv) => {
+                let lch = if iv.left_closed { '[' } else { ']' };
+                let rch = if iv.right_closed { ']' } else { '[' };
+                let mut out = String::new();
+                out.push(lch);
+                // Java export: `[ .. ]` with both ends omitted prints `[ .. ]` without infinities,
+                // but `]..[` prints explicit `-∞..∞`.
+                let show_infinite_when_both_missing =
+                    !(iv.left.is_none() && iv.right.is_none() && iv.left_closed && iv.right_closed);
+                if let Some(l) = iv.left {
+                    out.push_str(&Value::Number(l).to_leek_export_string());
+                } else if show_infinite_when_both_missing || iv.right.is_some() {
+                    out.push_str("-\u{221e}");
+                }
+                out.push_str("..");
+                if let Some(r) = iv.right {
+                    out.push_str(&Value::Number(r).to_leek_export_string());
+                } else if show_infinite_when_both_missing || iv.left.is_some() {
+                    out.push_str("\u{221e}");
+                }
+                out.push(rch);
+                out
+            }
             Self::Class(c) => c.java_class_string(),
             Self::String(s) => {
                 // Java `AI.string`: values that are exactly one JSON string token use a doubled-`"`
@@ -501,6 +573,7 @@ impl Value {
                     .sum(),
             ),
             Self::Set(s) => 1u64.saturating_add(s.iter().map(Self::ram_quads).sum()),
+            Self::Interval(_i) => 1,
         }
     }
 
@@ -529,6 +602,17 @@ impl Value {
                 NumberBits::Real(x) => *x != 0.0,
             },
             Self::Set(s) => !s.is_empty(),
+            // Minimal parity: treat `[a..b]` as truthy unless it's structurally empty (`[x..y]` where x>y),
+            // or the special empty literal `[..]`.
+            Self::Interval(iv) => {
+                if iv.left.is_none() && iv.right.is_none() && iv.left_closed && iv.right_closed {
+                    return false;
+                }
+                match (iv.left, iv.right) {
+                    (Some(a), Some(b)) => a.as_f64() <= b.as_f64(),
+                    _ => true,
+                }
+            }
             _ => true,
         }
     }
@@ -545,6 +629,7 @@ impl Value {
                 NumberBits::Real(x) => format_java_double_export(*x),
             },
             Self::String(s) => s.clone(),
+            Self::Interval(_iv) => self.to_leek_export_string(),
             Self::Array(a) => {
                 let mut out = String::new();
                 out.push('[');
@@ -601,6 +686,7 @@ impl Value {
                 NumberBits::Real(x) => format_java_double_export(*x),
             },
             Self::String(s) => java_string_builtin_v4_json_string(s),
+            Self::Interval(_iv) => self.to_leek_export_string(),
             Self::Array(a) => {
                 let mut out = String::new();
                 out.push('[');
@@ -770,7 +856,7 @@ fn entire_json_string_body(s: &str) -> Option<String> {
 
 fn format_java_double_export(n: f64) -> String {
     if n.is_nan() {
-        return "nan".into();
+        return "NaN".into();
     }
     if n.is_infinite() {
         return if n.is_sign_positive() {

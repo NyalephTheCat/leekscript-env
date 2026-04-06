@@ -587,6 +587,15 @@ impl CompileCtx {
             self.builder.emit_push_const(Value::Number(nb));
             return Ok(true);
         }
+        if kind == Lex::Infinity.into_syntax_kind() {
+            self.builder
+                .emit_push_const(Value::num_real(f64::INFINITY));
+            return Ok(true);
+        }
+        if kind == Lex::Pi.into_syntax_kind() {
+            self.builder.emit_push_const(Value::num_real(std::f64::consts::PI));
+            return Ok(true);
+        }
         if kind == Lex::TrueKw.into_syntax_kind() {
             self.builder.emit_push_const(Value::Bool(true));
             return Ok(true);
@@ -1494,6 +1503,9 @@ impl CompileCtx {
                 if t.kind() == Lex::Ident.into_syntax_kind() {
                     return Ok(t.text().to_string());
                 }
+                if t.kind() == Lex::ClassKw.into_syntax_kind() {
+                    return Ok("class".into());
+                }
             }
         }
         Err(CompileError::Unsupported(
@@ -1502,9 +1514,72 @@ impl CompileCtx {
     }
 
     fn compile_index_suffix(&mut self, ix: &IndexExpr) -> Result<(), CompileError> {
-        let sub = Self::index_expr_single_subscript(ix)?;
-        self.compile_expr(sub)?;
-        self.builder.emit_opcode(Opcode::GetElem);
+        // `x[i]` or `x[start:end:step]`
+        let syn = ix.syntax();
+        let has_colon = syn.children().any(|el| {
+            !syntax_el_is_trivia(&el)
+                && matches!(el, SyntaxElement::Token(t) if t.kind() == Lex::Colon.into_syntax_kind())
+        });
+        if !has_colon {
+            let sub = Self::index_expr_single_subscript(ix)?;
+            self.compile_expr(sub)?;
+            self.builder.emit_opcode(Opcode::GetElem);
+            return Ok(());
+        }
+
+        // Slice: split by `:` into (start?, end?, step?).
+        let mut seg: Vec<SyntaxElement> = Vec::new();
+        let mut segs: Vec<Vec<SyntaxElement>> = Vec::new();
+        for el in syn.children().filter(|e| !syntax_el_is_trivia(e)) {
+            if matches!(&el, SyntaxElement::Token(t) if t.kind() == Lex::Colon.into_syntax_kind()) {
+                segs.push(std::mem::take(&mut seg));
+            } else if matches!(&el, SyntaxElement::Token(t) if t.kind() == Lex::LBracket.into_syntax_kind() || t.kind() == Lex::RBracket.into_syntax_kind()) {
+                continue;
+            } else {
+                seg.push(el);
+            }
+        }
+        segs.push(seg);
+        if segs.len() != 3 {
+            return Err(CompileError::Unsupported("slice index"));
+        }
+        let to_expr_opt = |v: &[SyntaxElement]| -> Result<Option<Expr>, CompileError> {
+            let nodes: Vec<_> = v.iter().filter_map(|el| match el {
+                SyntaxElement::Node(n) => Some(n.clone()),
+                _ => None,
+            }).collect();
+            if nodes.is_empty() {
+                return Ok(None);
+            }
+            if nodes.len() != 1 {
+                return Err(CompileError::Unsupported("slice index"));
+            }
+            Ok(Some(Expr::cast(nodes[0].clone()).ok_or(CompileError::Unsupported("slice index"))?))
+        };
+        let start = to_expr_opt(&segs[0])?;
+        let end = to_expr_opt(&segs[1])?;
+        let step = to_expr_opt(&segs[2])?;
+
+        // Stack already has the container. Push slice args, then call native.
+        if let Some(e) = start {
+            self.compile_expr(e)?;
+        } else {
+            self.builder.emit_opcode(Opcode::PushNull);
+        }
+        if let Some(e) = end {
+            self.compile_expr(e)?;
+        } else {
+            self.builder.emit_opcode(Opcode::PushNull);
+        }
+        if let Some(e) = step {
+            self.compile_expr(e)?;
+        } else {
+            self.builder.emit_opcode(Opcode::PushNull);
+        }
+        let Some(nid) = super::stdlib::native_id("intervalRange") else {
+            return Err(CompileError::Unsupported("intervalRange native"));
+        };
+        self.builder.emit_call_native(nid, 4);
         Ok(())
     }
 
@@ -1706,6 +1781,10 @@ impl CompileCtx {
             self.builder.emit_set_build(0);
             return Ok(());
         }
+        if name == "Interval" && arg_count == 0 {
+            self.builder.emit_interval_build(0b0011);
+            return Ok(());
+        }
         Err(CompileError::Unsupported("new expression not supported"))
     }
 
@@ -1811,6 +1890,11 @@ impl CompileCtx {
                 Lex::from_syntax_kind(t.kind()),
                 Some(Lex::VarKw) | Some(Lex::LetKw)
             ) {
+                i += 1;
+            }
+        }
+        if let Some(SyntaxElement::Node(n)) = elts.get(i) {
+            if TypeExpr::can_cast(n.kind()) {
                 i += 1;
             }
         }
@@ -2210,14 +2294,14 @@ impl CompileCtx {
     fn compile_array_literal(&mut self, arr: &ArrayExpr) -> Result<(), CompileError> {
         let syn = arr.syntax();
         let semantic: Vec<_> = syn.children().filter(|e| !syntax_el_is_trivia(e)).collect();
-        for el in &semantic {
-            if let SyntaxElement::Node(n) = el {
-                if IntervalExpr::can_cast(n.kind()) {
-                    return Err(CompileError::Unsupported(
-                        "interval literals are not supported by the VM compiler",
-                    ));
-                }
-            }
+        // `[ ... ]` is ambiguous: array literal, map literal, or interval literal.
+        // The parser encodes interval literals as `ArrayExpr` containing one `IntervalExpr` child.
+        if let Some(interval_n) = semantic.iter().find_map(|el| match el {
+            SyntaxElement::Node(n) if IntervalExpr::can_cast(n.kind()) => Some(n.clone()),
+            _ => None,
+        }) {
+            let ie = IntervalExpr::cast(interval_n).expect("can_cast implies cast");
+            return self.compile_interval_literal(&ie, true);
         }
 
         if let Some(pairs) = try_extract_map_literal_pairs(&semantic)? {
@@ -2238,6 +2322,154 @@ impl CompileCtx {
             self.compile_expr(e)?;
         }
         self.builder.emit_array_build(cnt);
+        Ok(())
+    }
+
+    fn compile_interval_literal(
+        &mut self,
+        ie: &IntervalExpr,
+        left_closed_from_array: bool,
+    ) -> Result<(), CompileError> {
+        let parts: Vec<_> = ie
+            .syntax()
+            .children()
+            .filter(|e| !syntax_el_is_trivia(e))
+            .collect();
+
+        // Shape (bracket form inside `ArrayExpr`):
+        //   `[..]` / `[1..2]` / `[1..2[` → IntervalExpr children: (Expr?) DotDot (Expr?) (']' or '[')
+        // Shape (rbracket form):
+        //   `]..[` / `]1..2]` → IntervalExpr children: ']' (Expr?) DotDot (Expr?) (']' or '[')
+        let mut i = 0usize;
+        let mut left_closed = left_closed_from_array;
+        if let Some(SyntaxElement::Token(t0)) = parts.get(0) {
+            if t0.kind() == Lex::RBracket.into_syntax_kind() {
+                left_closed = false;
+                i += 1;
+            }
+        }
+
+        let mut left_expr: Option<Expr>;
+        let dotdot_ok = |el: &SyntaxElement| matches!(el, SyntaxElement::Token(t) if t.kind() == Lex::DotDot.into_syntax_kind());
+
+        match parts.get(i) {
+            Some(el) if dotdot_ok(el) => {
+                left_expr = None;
+                i += 1;
+            }
+            Some(SyntaxElement::Node(n)) => {
+                let ex = Expr::cast(n.clone())
+                    .ok_or(CompileError::Unsupported("interval literal: expected expression"))?;
+                left_expr = Some(ex);
+                i += 1;
+                let dd = parts.get(i).ok_or(CompileError::Unsupported(
+                    "interval literal: expected '..' after left endpoint",
+                ))?;
+                if !dotdot_ok(dd) {
+                    return Err(CompileError::Unsupported(
+                        "interval literal: expected '..' after left endpoint",
+                    ));
+                }
+                i += 1;
+            }
+            _ => {
+                return Err(CompileError::Unsupported(
+                    "interval literal: expected '..' or expression",
+                ));
+            }
+        }
+
+        let right_expr: Option<Expr> = match parts.get(i) {
+            Some(SyntaxElement::Node(n)) => {
+                let ex = Expr::cast(n.clone())
+                    .ok_or(CompileError::Unsupported("interval literal: expected expression"))?;
+                i += 1;
+                Some(ex)
+            }
+            _ => None,
+        };
+        let mut right_expr = right_expr;
+
+        // In Java, the Unicode infinity token `∞` behaves like an *unbounded endpoint* in interval
+        // literals (it does not force the interval into a real-typed interval). Normalize:
+        // - `∞`          → unbounded right
+        // - `-∞`         → unbounded left
+        // while keeping `Infinity` (identifier / global const) as a numeric value.
+        let is_unicode_infinity_bound = |ex: &Expr| -> Option<bool> {
+            fn rec(el: &SyntaxElement, out: &mut Vec<Lex>) {
+                match el {
+                    SyntaxElement::Token(t) => {
+                        if let Some(lx) = Lex::from_syntax_kind(t.kind()) {
+                            out.push(lx);
+                        }
+                    }
+                    SyntaxElement::Node(n) => {
+                        for ch in n.children().filter(|e| !syntax_el_is_trivia(e)) {
+                            rec(&ch, out);
+                        }
+                    }
+                }
+            }
+            let mut toks: Vec<Lex> = Vec::new();
+            for ch in ex.syntax().children().filter(|e| !syntax_el_is_trivia(e)) {
+                rec(&ch, &mut toks);
+            }
+            // `∞`
+            if toks.as_slice() == [Lex::Infinity] {
+                return Some(false);
+            }
+            // `-∞` (possibly nested under `UnaryExpr`)
+            if toks.as_slice() == [Lex::Minus, Lex::Infinity] {
+                return Some(true);
+            }
+            None
+        };
+
+        if let Some(ex) = &left_expr {
+            if is_unicode_infinity_bound(ex).is_some() {
+                left_expr = None;
+            }
+        }
+        if let Some(ex) = &right_expr {
+            if is_unicode_infinity_bound(ex).is_some() {
+                right_expr = None;
+            }
+        }
+
+        let close_tok = parts.get(i).ok_or(CompileError::Unsupported(
+            "interval literal: expected closing bracket",
+        ))?;
+        let right_closed = match close_tok {
+            SyntaxElement::Token(t) if t.kind() == Lex::RBracket.into_syntax_kind() => true,
+            SyntaxElement::Token(t) if t.kind() == Lex::LBracket.into_syntax_kind() => false,
+            _ => {
+                return Err(CompileError::Unsupported(
+                    "interval literal: expected closing ']' or '['",
+                ));
+            }
+        };
+
+        // Compile bounds (left then right) so runtime pop order is right then left.
+        let mut flags: u8 = 0;
+        if left_closed {
+            flags |= 0b0001;
+        }
+        if right_closed {
+            flags |= 0b0010;
+        }
+        // Java: the fully-unbounded open interval `]..[` is a *real* interval.
+        if left_expr.is_none() && right_expr.is_none() && !left_closed && !right_closed {
+            flags |= 0b1_0000;
+        }
+        if let Some(le) = left_expr {
+            self.compile_expr(le)?;
+            flags |= 0b0100;
+        }
+        if let Some(re) = right_expr {
+            self.compile_expr(re)?;
+            flags |= 0b1000;
+        }
+        self.builder.emit_interval_build(flags);
         Ok(())
     }
 
@@ -2275,6 +2507,10 @@ impl CompileCtx {
             let lhs = java_ops::prefix_before_first_binary_op(&n);
             let lhs_o = java_ops::java_ops_expr_flat(&lhs);
             return self.compile_binary_fragment(&n, lhs_o);
+        }
+        if let Some(ie) = IntervalExpr::cast(n.clone()) {
+            // `]..[` style interval.
+            return self.compile_interval_literal(&ie, false);
         }
         if let Some(arr) = ArrayExpr::cast(n.clone()) {
             return self.compile_array_literal(&arr);
@@ -2498,12 +2734,51 @@ impl CompileCtx {
         match op {
             Lex::AndAnd => self.compile_short_circuit_and(&suff, lhs_ops),
             Lex::OrOr => self.compile_short_circuit_or(&suff, lhs_ops),
+            Lex::InstanceofKw => {
+                // `lhs instanceof Interval` etc. (builtin type keywords).
+                // Do NOT compile the rhs as an expression (it’s a type name, often not a value).
+                let rhs_tag: u8 = match suff.as_slice() {
+                    // `instanceof Interval` parses `Interval` as an identifier (not a builtin-type node).
+                    [SyntaxElement::Token(t)] if t.kind() == Lex::Ident.into_syntax_kind() => {
+                        match t.text() {
+                            "Interval" => 10,
+                            "Array" => 4,
+                            "Object" => 7,
+                            "Map" => 8,
+                            "Set" => 9,
+                            "String" => 3,
+                            "Boolean" => 2,
+                            "Null" => 0,
+                            "Class" => 6,
+                            "Number" | "integer" | "real" | "any" | "Integer" | "Real" | "Any" => 1,
+                            _ => return Err(CompileError::Unsupported("instanceof ident type")),
+                        }
+                    }
+                    // Some builtin keywords parse as `BuiltinTypeNameExpr` (Node).
+                    [SyntaxElement::Node(n)] => {
+                        let kw = n.child_tokens().find_map(|t| Lex::from_syntax_kind(t.kind()));
+                        match kw {
+                            Some(Lex::ArrayKw) => 4,
+                            Some(Lex::BooleanKw) => 2,
+                            Some(Lex::ClassTypeKw) => 6,
+                            Some(Lex::IntegerKw) | Some(Lex::RealKw) | Some(Lex::AnyKw) => 1,
+                            Some(Lex::StringTypeKw) => 3,
+                            Some(Lex::NullKw) => 0,
+                            Some(Lex::IntervalKw) => 10,
+                            Some(Lex::SetTypeKw) => 9,
+                            Some(Lex::MapKw) => 8,
+                            Some(Lex::ObjectKw) => 7,
+                            _ => return Err(CompileError::Unsupported("instanceof type")),
+                        }
+                    }
+                    _ => return Err(CompileError::Unsupported("instanceof type")),
+                };
+                self.builder.emit_instanceof_tag(rhs_tag);
+                Ok(())
+            }
             Lex::InKw => {
                 let negated = java_ops::relational_in_has_not(bin);
                 self.compile_infix_suffix(&suff)?;
-                let ro = java_ops::java_ops_infix_suffix(&suff);
-                self.builder
-                    .emit_charge_ops(lhs_ops.saturating_add(1).saturating_add(ro));
                 let Some(nid) = super::stdlib::native_id("setContains") else {
                     return Err(CompileError::Unsupported("setContains native"));
                 };
@@ -2786,7 +3061,13 @@ impl CompileCtx {
                     return Err(CompileError::Unsupported("unary operand"));
                 }
             }
-            _ => return Err(CompileError::Unsupported("unary without operand")),
+            _ => {
+                // Sipha may represent `-f(x)` as `[-, Ident(f), CallExpr(...)]` (a postfix chain)
+                // instead of a single rhs node. Reuse the postfix-chain lowering.
+                if !self.try_compile_postfix_chain_on_parts(operand)? {
+                    return Err(CompileError::Unsupported("unary without operand"));
+                }
+            }
         }
         if has_not {
             self.builder.emit_opcode(Opcode::Not);

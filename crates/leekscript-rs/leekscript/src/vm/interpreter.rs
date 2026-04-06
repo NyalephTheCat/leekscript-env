@@ -72,6 +72,8 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::SetPutLocal as usize] = op_set_put_local;
     table[Opcode::SetRemoveLocal as usize] = op_set_remove_local;
     table[Opcode::SetClearLocal as usize] = op_set_clear_local;
+    table[Opcode::IntervalBuild as usize] = op_interval_build;
+    table[Opcode::InstanceofTag as usize] = op_instanceof_tag;
     table
 };
 
@@ -682,6 +684,71 @@ fn op_set_clear_local(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+fn op_interval_build(vm: &mut Vm) -> Result<(), VmError> {
+    let flags = vm.read_u8()?;
+    let left_closed = (flags & 0b0001) != 0;
+    let right_closed = (flags & 0b0010) != 0;
+    let has_left = (flags & 0b0100) != 0;
+    let has_right = (flags & 0b1000) != 0;
+    let prefer_real = (flags & 0b1_0000) != 0;
+
+    let right = if has_right {
+        let v = vm.pop_stack()?;
+        match v {
+            Value::Number(n) => Some(n),
+            _ => return Err(VmError::ExpectedNumber),
+        }
+    } else {
+        None
+    };
+
+    let left = if has_left {
+        let v = vm.pop_stack()?;
+        match v {
+            Value::Number(n) => Some(n),
+            _ => return Err(VmError::ExpectedNumber),
+        }
+    } else {
+        None
+    };
+
+    let force_real = prefer_real
+        || matches!(left, Some(NumberBits::Real(_)))
+        || matches!(right, Some(NumberBits::Real(_)));
+    let coerce = |n: Option<NumberBits>| -> Option<NumberBits> {
+        if !force_real {
+            return n;
+        }
+        match n {
+            Some(NumberBits::Int(i)) => Some(NumberBits::Real(i as f64)),
+            x => x,
+        }
+    };
+
+    vm.push_stack(Value::Interval(super::value::IntervalValue {
+        left: coerce(left),
+        right: coerce(right),
+        left_closed,
+        right_closed,
+        prefer_real,
+    }))?;
+    Ok(())
+}
+
+fn op_instanceof_tag(vm: &mut Vm) -> Result<(), VmError> {
+    let tag = vm.read_u8()? as i64;
+    let v = vm.pop_stack()?;
+    let got = super::stdlib::nf_type_tag(vm, &[v.clone()])?;
+    let Value::Number(nb) = got else {
+        vm.push_stack(Value::Bool(false))?;
+        return Ok(());
+    };
+    let n = nb.as_f64();
+    let ok = n.is_finite() && (n.round() - (tag as f64)).abs() < 1e-9;
+    vm.push_stack(Value::Bool(ok))?;
+    Ok(())
+}
+
 fn op_array_build(vm: &mut Vm) -> Result<(), VmError> {
     let n = vm.read_u16()? as usize;
     let mut elems = Vec::with_capacity(n);
@@ -737,6 +804,11 @@ fn array_get(arr: &[Value], key: &Value) -> Value {
 fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
     let key = vm.pop_stack()?;
     let container = vm.pop_stack()?;
+    // `.class` on any value yields a class object (`<class Interval>`, …).
+    if matches!(&key, Value::String(s) if s == "class") {
+        vm.push_stack(Value::Class(PreludeClass::of_value(&container)))?;
+        return Ok(());
+    }
     let out = match &container {
         Value::Array(arr) => array_get(arr, &key),
         Value::Set(s) => {
@@ -756,10 +828,60 @@ fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
             .find(|(k, _)| k == &key)
             .map(|(_, v)| v.clone())
             .unwrap_or(Value::Null),
+        Value::Interval(iv) => {
+            let Some(idx) = key.as_number() else {
+                return vm.push_stack(Value::Null);
+            };
+            if !idx.is_finite() || idx < 0.0 {
+                Value::Null
+            } else {
+                let i = idx as i64;
+                if i < 0 {
+                    Value::Null
+                } else {
+                    interval_get_at(iv, i as u64).unwrap_or(Value::Null)
+                }
+            }
+        }
         _ => Value::Null,
     };
     vm.push_stack(out)?;
     Ok(())
+}
+
+fn interval_get_at(iv: &super::value::IntervalValue, idx: u64) -> Option<Value> {
+    let (start, len, is_real) = interval_iter_start_len(iv)?;
+    if idx >= len {
+        return None;
+    }
+    let x = start + (idx as f64);
+    Some(if is_real {
+        Value::num_real(x)
+    } else {
+        Value::num_int(x as i64)
+    })
+}
+
+fn interval_iter_start_len(iv: &super::value::IntervalValue) -> Option<(f64, u64, bool)> {
+    let l = iv.left?;
+    let r = iv.right?;
+    let is_real = matches!(l, NumberBits::Real(_)) || matches!(r, NumberBits::Real(_));
+    let lf = l.as_f64();
+    let rf = r.as_f64();
+    let step = 1.0f64;
+    let start = if iv.left_closed { lf } else { lf + step };
+    let end = if iv.right_closed { rf } else { rf - step };
+    if !start.is_finite() || !end.is_finite() {
+        return None;
+    }
+    if start > end {
+        return Some((start, 0, is_real));
+    }
+    let len = (end - start).floor() as i64 + 1;
+    if len <= 0 {
+        return Some((start, 0, is_real));
+    }
+    Some((start, len as u64, is_real))
 }
 
 fn op_set_elem_local(vm: &mut Vm) -> Result<(), VmError> {
@@ -816,6 +938,7 @@ fn op_array_len(vm: &mut Vm) -> Result<(), VmError> {
     let n = match &v {
         Value::Array(a) => a.len() as i64,
         Value::Set(s) => s.len() as i64,
+        Value::Interval(iv) => interval_iter_start_len(iv).map(|(_, l, _)| l as i64).unwrap_or(0),
         _ => 0,
     };
     vm.push_stack(Value::num_int(n))?;

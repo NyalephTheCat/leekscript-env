@@ -25,6 +25,8 @@ pub enum VmError {
     ExpectedString,
     /// Operand was not an array where an array was required.
     ExpectedArray,
+    /// Operand was not an interval where an interval was required.
+    ExpectedInterval,
     /// Native overload / argument types not supported at runtime.
     BadNativeArgs,
     /// Local slot index out of range for the current frame.
@@ -58,6 +60,7 @@ impl fmt::Display for VmError {
             Self::ExpectedNumber => write!(f, "expected number"),
             Self::ExpectedString => write!(f, "expected string"),
             Self::ExpectedArray => write!(f, "expected array"),
+            Self::ExpectedInterval => write!(f, "expected interval"),
             Self::BadNativeArgs => write!(f, "native call argument types not supported"),
             Self::BadLocal(i) => write!(f, "local index {i} out of range"),
             Self::TooManyOperations {

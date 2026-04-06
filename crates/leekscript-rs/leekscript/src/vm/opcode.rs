@@ -84,4 +84,19 @@ pub enum Opcode {
     SetRemoveLocal = 43,
     /// Clear set at local `u16`; push empty set (discarded by stmt) — leaves `null` on stack for value.
     SetClearLocal = 44,
+    /// Build an interval value (LeekScript `[..]`, `[1..2[`, `]..1]`, …).
+    ///
+    /// Followed by `u8` flags:
+    /// - bit 0: left closed (`[`). If unset, left is open (`]`).
+    /// - bit 1: right closed (`]`). If unset, right is open (`[`).
+    /// - bit 2: has left bound value on stack.
+    /// - bit 3: has right bound value on stack.
+    ///
+    /// Stack: optionally pops right, then left (when present); pushes one interval.
+    IntervalBuild = 45,
+    /// `lhs instanceof Type` where `Type` is a builtin type keyword.
+    ///
+    /// Followed by `u8` type tag (same numbering as `TYPE_*`): pushes bool.
+    /// Pops one value (lhs).
+    InstanceofTag = 46,
 }

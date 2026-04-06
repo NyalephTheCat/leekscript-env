@@ -82,6 +82,16 @@ impl BytecodeBuilder {
         self.emit_u16_operand(element_count);
     }
 
+    pub fn emit_interval_build(&mut self, flags: u8) {
+        self.emit_opcode(Opcode::IntervalBuild);
+        self.emit_u8(flags);
+    }
+
+    pub fn emit_instanceof_tag(&mut self, tag: u8) {
+        self.emit_opcode(Opcode::InstanceofTag);
+        self.emit_u8(tag);
+    }
+
     pub fn emit_call_function(&mut self, func_id: u16, argc: u8) {
         self.emit_opcode(Opcode::CallFunction);
         self.emit_u16_operand(func_id);

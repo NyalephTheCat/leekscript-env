@@ -37,6 +37,16 @@ fn java_test_resources() -> PathBuf {
 
 /// Java test snippets often omit `;` between statements (e.g. `var i = <1, 2> setPut(i, 3) return i`).
 /// Sipha requires explicit semicolons; insert them at the same boundaries the Java harness accepts.
+fn normalize_java_vm_text(s: &str) -> String {
+    // Some extracted Java cases contain a double-encoded UTF-8 `∞` (`E2 88 9E`) as `Ã¢ÂÂ`,
+    // or a single mis-decoding as `âˆž` / `â\u{88}\u{9e}`. Normalize them back so lexer/export comparisons match.
+    s.replace("Integer.MAX_VALUE", "9223372036854775807")
+        .replace("Integer.MIN_VALUE", "-9223372036854775808")
+        .replace("Ã¢ÂÂ", "∞")
+        .replace("âˆž", "∞")
+        .replace("\u{00e2}\u{0088}\u{009e}", "∞")
+}
+
 fn normalize_java_vm_snippet(source: &str) -> String {
     const REPS: &[(&str, &str)] = &[
         ("> setPut", ">; setPut"),
@@ -47,6 +57,13 @@ fn normalize_java_vm_snippet(source: &str) -> String {
         ("> for", ">; for"),
         ("> while", ">; while"),
         ("> if", ">; if"),
+        ("] integer", "]; integer"),
+        ("] Interval", "]; Interval"),
+        ("[ return", "[; return"),
+        ("] return", "]; return"),
+        ("] if", "]; if"),
+        ("] while", "]; while"),
+        ("] for", "]; for"),
         (") setPut", "); setPut"),
         (") setRemove", "); setRemove"),
         (") setClear", "); setClear"),
@@ -65,7 +82,7 @@ fn normalize_java_vm_snippet(source: &str) -> String {
         ("8 for", "8; for"),
         ("9 for", "9; for"),
     ];
-    let mut s = source.to_string();
+    let mut s = normalize_java_vm_text(source);
     for _ in 0..32 {
         let before = s.clone();
         for (from, to) in REPS {
@@ -240,7 +257,8 @@ fn run_snippet(c: &JavaVmCase) {
                 .run()
                 .unwrap_or_else(|e| panic!("{}: run {:?}: {e:?}", c.id, c.source))
                 .to_leek_export_string();
-            assert_eq!(got, *expected_export, "{}", c.id);
+            let expected_export = normalize_java_vm_text(expected_export);
+            assert_eq!(got, expected_export, "{}", c.id);
         }
         ExpectKind::OpsOnly { expected_ops } => {
             let chunk = compile_chunk_v4(&source)

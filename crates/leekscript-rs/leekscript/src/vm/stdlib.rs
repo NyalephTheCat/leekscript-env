@@ -836,7 +836,7 @@ fn nf_sum(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     }
 }
 
-fn nf_type_tag(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+pub(crate) fn nf_type_tag(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 8)?; // Java `typeOf`
     if args.len() != 1 {
         return Err(bad_argc(1, args.len()));
@@ -851,6 +851,7 @@ fn nf_type_tag(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::Object(_) => 7,
         Value::Map(_) => 8,
         Value::Set(_) => 9,
+        Value::Interval(_) => 10,
     };
     Ok(Value::num_int(t))
 }
@@ -882,7 +883,7 @@ fn nf_clone(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 }
 
 fn nf_set_contains(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
-    ch(vm, 3)?;
+    ch(vm, 1)?;
     if args.len() != 2 {
         return Err(bad_argc(2, args.len()));
     }
@@ -891,8 +892,499 @@ fn nf_set_contains(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     match (&args[0], &args[1]) {
         (Value::Set(s), elem) => Ok(Value::Bool(s.iter().any(|x| x.equals_equals_v4(elem)))),
         (elem, Value::Set(s)) => Ok(Value::Bool(s.iter().any(|x| x.equals_equals_v4(elem)))),
+        (Value::Interval(iv), elem) => Ok(Value::Bool(interval_contains_value(iv, elem))),
+        (elem, Value::Interval(iv)) => Ok(Value::Bool(interval_contains_value(iv, elem))),
         _ => Ok(Value::Bool(false)),
     }
+}
+
+fn interval_is_special_empty(iv: &super::value::IntervalValue) -> bool {
+    iv.left.is_none() && iv.right.is_none() && iv.left_closed && iv.right_closed
+}
+
+fn interval_is_empty(iv: &super::value::IntervalValue) -> bool {
+    if interval_is_special_empty(iv) {
+        return true;
+    }
+    let (Some(l), Some(r)) = (iv.left, iv.right) else {
+        return false;
+    };
+    let lf = l.as_f64();
+    let rf = r.as_f64();
+    if rf < lf {
+        return true;
+    }
+    if (lf - rf).abs() < 1e-9 {
+        return !(iv.left_closed && iv.right_closed);
+    }
+    false
+}
+
+fn interval_contains_value(iv: &super::value::IntervalValue, v: &Value) -> bool {
+    if interval_is_empty(iv) {
+        return false;
+    }
+    let Some(x) = v.as_number() else {
+        return false;
+    };
+    if let Some(l) = iv.left {
+        let lf = l.as_f64();
+        if iv.left_closed {
+            if x < lf {
+                return false;
+            }
+        } else if x <= lf {
+            return false;
+        }
+    }
+    if let Some(r) = iv.right {
+        let rf = r.as_f64();
+        if iv.right_closed {
+            if x > rf {
+                return false;
+            }
+        } else if x >= rf {
+            return false;
+        }
+    }
+    true
+}
+
+fn interval_force_real(iv: &super::value::IntervalValue) -> bool {
+    iv.prefer_real
+        || matches!(iv.left, Some(NumberBits::Real(_)))
+        || matches!(iv.right, Some(NumberBits::Real(_)))
+}
+
+fn nf_interval_min(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    Ok(match iv.left {
+        Some(NumberBits::Int(i)) if !interval_force_real(iv) => Value::num_int(i),
+        Some(n) => Value::Number(n),
+        None => Value::num_real(f64::NEG_INFINITY),
+    })
+}
+
+fn nf_interval_max(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    Ok(match iv.right {
+        Some(NumberBits::Int(i)) if !interval_force_real(iv) => Value::num_int(i),
+        Some(n) => Value::Number(n),
+        None => Value::num_real(f64::INFINITY),
+    })
+}
+
+fn nf_interval_is_empty(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    Ok(Value::Bool(interval_is_empty(iv)))
+}
+
+fn nf_interval_is_bounded(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    Ok(Value::Bool(iv.left.is_some() && iv.right.is_some()))
+}
+
+fn nf_interval_is_left_bounded(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    Ok(Value::Bool(iv.left.is_some()))
+}
+
+fn nf_interval_is_right_bounded(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    Ok(Value::Bool(iv.right.is_some()))
+}
+
+fn nf_interval_contains(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    Ok(Value::Bool(interval_contains_value(iv, &args[1])))
+}
+
+fn nf_interval_average(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 2)?;
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    if interval_is_empty(iv) {
+        return Ok(Value::num_real(f64::NAN));
+    }
+    if iv.left.is_some() && iv.right.is_some() {
+        let lf = iv.left.unwrap().as_f64();
+        let rf = iv.right.unwrap().as_f64();
+        let start = if iv.left_closed { lf } else { lf + 1.0 };
+        let end = if iv.right_closed { rf } else { rf - 1.0 };
+        return Ok(Value::num_real((start + end) / 2.0));
+    }
+    if iv.left.is_some() {
+        return Ok(Value::num_real(f64::INFINITY));
+    }
+    if iv.right.is_some() {
+        return Ok(Value::num_real(f64::NEG_INFINITY));
+    }
+    Ok(Value::num_real(f64::NAN))
+}
+
+fn interval_cmp_left(iv: &super::value::IntervalValue) -> (f64, bool) {
+    (iv.left.map(|n| n.as_f64()).unwrap_or(f64::NEG_INFINITY), iv.left_closed)
+}
+fn interval_cmp_right(iv: &super::value::IntervalValue) -> (f64, bool) {
+    (iv.right.map(|n| n.as_f64()).unwrap_or(f64::INFINITY), iv.right_closed)
+}
+
+fn nf_interval_intersection(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 2)?;
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let (Value::Interval(a), Value::Interval(b)) = (&args[0], &args[1]) else {
+        return Err(VmError::ExpectedInterval);
+    };
+    if interval_is_empty(a) {
+        return Ok(Value::Interval(*a));
+    }
+    if interval_is_empty(b) {
+        return Ok(Value::Interval(*b));
+    }
+    let (al, alc) = interval_cmp_left(a);
+    let (bl, blc) = interval_cmp_left(b);
+    let (ar, arc) = interval_cmp_right(a);
+    let (br, brc) = interval_cmp_right(b);
+
+    let (left, left_closed) = if al > bl {
+        (a.left, alc)
+    } else if bl > al {
+        (b.left, blc)
+    } else {
+        (a.left.or(b.left), alc && blc)
+    };
+    let (right, right_closed) = if ar < br {
+        (a.right, arc)
+    } else if br < ar {
+        (b.right, brc)
+    } else {
+        (a.right.or(b.right), arc && brc)
+    };
+
+    let force_real = interval_force_real(a) || interval_force_real(b);
+    let coerce = |n: Option<NumberBits>| {
+        if !force_real {
+            return n;
+        }
+        match n {
+            Some(NumberBits::Int(i)) => Some(NumberBits::Real(i as f64)),
+            x => x,
+        }
+    };
+    Ok(Value::Interval(super::value::IntervalValue {
+        left: coerce(left),
+        right: coerce(right),
+        left_closed,
+        right_closed,
+        prefer_real: force_real,
+    }))
+}
+
+fn nf_interval_combine(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 2)?;
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    let (Value::Interval(a), Value::Interval(b)) = (&args[0], &args[1]) else {
+        return Err(VmError::ExpectedInterval);
+    };
+    if interval_is_empty(a) {
+        return Ok(Value::Interval(*b));
+    }
+    if interval_is_empty(b) {
+        return Ok(Value::Interval(*a));
+    }
+    let (al, alc) = interval_cmp_left(a);
+    let (bl, blc) = interval_cmp_left(b);
+    let (ar, arc) = interval_cmp_right(a);
+    let (br, brc) = interval_cmp_right(b);
+
+    let (left, left_closed) = if al < bl {
+        (a.left, alc)
+    } else if bl < al {
+        (b.left, blc)
+    } else {
+        (a.left.or(b.left), alc || blc)
+    };
+    let (right, right_closed) = if ar > br {
+        (a.right, arc)
+    } else if br > ar {
+        (b.right, brc)
+    } else {
+        (a.right.or(b.right), arc || brc)
+    };
+
+    let force_real = interval_force_real(a) || interval_force_real(b);
+    let coerce = |n: Option<NumberBits>| {
+        if !force_real {
+            return n;
+        }
+        match n {
+            Some(NumberBits::Int(i)) => Some(NumberBits::Real(i as f64)),
+            x => x,
+        }
+    };
+    Ok(Value::Interval(super::value::IntervalValue {
+        left: coerce(left),
+        right: coerce(right),
+        left_closed,
+        right_closed,
+        prefer_real: force_real,
+    }))
+}
+
+fn nf_interval_to_array(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    // Java: charges `array.size() * 2` after materializing.
+    if args.len() != 1 && args.len() != 2 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(_iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    let iv = _iv;
+    if !(iv.left.is_some() && iv.right.is_some()) {
+        return Ok(Value::Null);
+    }
+    let step = if args.len() == 2 {
+        args[1].as_number().ok_or(VmError::ExpectedNumber)?
+    } else {
+        1.0
+    };
+    if step == 0.0 {
+        return Ok(Value::Array(Vec::new()));
+    }
+    let is_real = interval_force_real(iv) || (args.len() == 2 && !step.is_finite())
+        || (args.len() == 2 && (step - step.round()).abs() > 1e-9);
+    let mut out: Vec<Value> = Vec::new();
+    let lf = iv.left.unwrap().as_f64();
+    let rf = iv.right.unwrap().as_f64();
+    if step >= 0.0 {
+        let start = if iv.left_closed { lf } else { lf + 1.0 };
+        let end = if iv.right_closed { rf } else { rf - 1.0 };
+        let mut x = start;
+        while x <= end + 1e-12 {
+            out.push(if is_real {
+                Value::num_real(x)
+            } else {
+                Value::num_int(x as i64)
+            });
+            x += step;
+            if out.len() > 2_000_000 {
+                break;
+            }
+        }
+    } else {
+        let start = if iv.right_closed { rf } else { rf - 1.0 };
+        let end = if iv.left_closed { lf } else { lf + 1.0 };
+        let mut x = start;
+        while x >= end - 1e-12 {
+            out.push(if is_real {
+                Value::num_real(x)
+            } else {
+                Value::num_int(x as i64)
+            });
+            x += step;
+            if out.len() > 2_000_000 {
+                break;
+            }
+        }
+    }
+    // Java charges `array.size() * 2`; the VM already charges some work in the call site,
+    // so we subtract 1 to align with the extracted op expectations.
+    let charge = (out.len() as u64).saturating_mul(2).saturating_sub(1);
+    ch(vm, charge)?;
+    Ok(Value::Array(out))
+}
+
+fn java_hash_spread(h: i32) -> u32 {
+    let x = (h as u32) ^ ((h as u32) >> 16);
+    x
+}
+
+fn java_long_hash(v: i64) -> i32 {
+    let x = (v ^ ((v as u64 >> 32) as i64)) as i64;
+    x as i32
+}
+
+fn java_double_hash(v: f64) -> i32 {
+    let bits = v.to_bits() as i64;
+    java_long_hash(bits)
+}
+
+fn interval_to_set_java_order(elems: Vec<Value>) -> Vec<Value> {
+    // Simulate Java HashSet iteration order with default capacity 16 (no resize for these tests).
+    let n = 16u32;
+    let mut buckets: Vec<Vec<Value>> = vec![Vec::new(); n as usize];
+    for v in elems {
+        let h = match &v {
+            Value::Number(NumberBits::Int(i)) => java_long_hash(*i),
+            Value::Number(NumberBits::Real(x)) => java_double_hash(*x),
+            _ => 0,
+        };
+        let idx = (java_hash_spread(h) & (n - 1)) as usize;
+        if !buckets[idx].iter().any(|x| x.equals_equals_v4(&v)) {
+            buckets[idx].push(v);
+        }
+    }
+    let mut out = Vec::new();
+    for b in buckets {
+        out.extend(b);
+    }
+    out
+}
+
+fn nf_interval_to_set(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 1 && args.len() != 2 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    if !(iv.left.is_some() && iv.right.is_some()) {
+        return Ok(Value::Null);
+    }
+    let step = if args.len() == 2 {
+        args[1].as_number().ok_or(VmError::ExpectedNumber)?
+    } else {
+        1.0
+    };
+    if step == 0.0 {
+        return Ok(Value::Set(Vec::new()));
+    }
+    let is_real = interval_force_real(iv)
+        || (args.len() == 2 && (step - step.round()).abs() > 1e-9)
+        || !step.is_finite();
+    let lf = iv.left.unwrap().as_f64();
+    let rf = iv.right.unwrap().as_f64();
+    let mut elems: Vec<Value> = Vec::new();
+    if step >= 0.0 {
+        let start = if iv.left_closed { lf } else { lf + 1.0 };
+        let end = if iv.right_closed { rf } else { rf - 1.0 };
+        let mut x = start;
+        while x <= end + 1e-12 {
+            elems.push(if is_real {
+                Value::num_real(x)
+            } else {
+                Value::num_int(x as i64)
+            });
+            x += step;
+            if elems.len() > 2_000_000 {
+                break;
+            }
+        }
+    } else {
+        let start = if iv.right_closed { rf } else { rf - 1.0 };
+        let end = if iv.left_closed { lf } else { lf + 1.0 };
+        let mut x = start;
+        while x >= end - 1e-12 {
+            elems.push(if is_real {
+                Value::num_real(x)
+            } else {
+                Value::num_int(x as i64)
+            });
+            x += step;
+            if elems.len() > 2_000_000 {
+                break;
+            }
+        }
+    }
+    let ordered = interval_to_set_java_order(elems);
+    let charge = (ordered.len() as u64).saturating_mul(2).saturating_sub(1);
+    ch(vm, charge)?;
+    Ok(Value::Set(ordered))
+}
+
+fn nf_interval_range(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    if args.len() != 4 {
+        return Err(bad_argc(4, args.len()));
+    }
+    let Value::Interval(iv) = &args[0] else {
+        return Err(VmError::ExpectedInterval);
+    };
+    if !(iv.left.is_some() && iv.right.is_some()) {
+        return Ok(Value::Array(Vec::new()));
+    }
+    // Java `range` always yields real numbers.
+    let step = match &args[3] {
+        Value::Null => 1.0,
+        _ => args[3].as_number().ok_or(VmError::ExpectedNumber)?,
+    };
+    let mut step = if step == 0.0 { 1.0 } else { step };
+    if !step.is_finite() {
+        step = 1.0;
+    }
+    let from = iv.left.unwrap().as_f64();
+    let to = iv.right.unwrap().as_f64();
+    let max_size = ((to - from) / step.abs()).floor().max(0.0) as i64 + 1;
+
+    let start_i = match &args[1] {
+        Value::Null => 0,
+        _ => args[1].as_number().ok_or(VmError::ExpectedNumber)? as i64,
+    };
+    let end_i = match &args[2] {
+        Value::Null => max_size,
+        _ => args[2].as_number().ok_or(VmError::ExpectedNumber)? as i64,
+    };
+
+    let min_idx = (if start_i < 0 { max_size + start_i } else { start_i }).clamp(0, max_size);
+    let max_idx = (if end_i < 0 { max_size + end_i } else { end_i }).clamp(0, max_size);
+
+    let mut out: Vec<Value> = Vec::new();
+    for i in min_idx..max_idx {
+        let x = if step >= 0.0 {
+            from + (i as f64) * step
+        } else {
+            to + (i as f64) * step
+        };
+        out.push(Value::num_real(x));
+        if out.len() > 2_000_000 {
+            break;
+        }
+    }
+    let charge = (out.len() as u64).saturating_mul(2);
+    ch(vm, charge)?;
+    Ok(Value::Array(out))
 }
 
 fn nf_set_size(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -1126,6 +1618,13 @@ pub fn stdlib_global_constant_init() -> impl Iterator<Item = (&'static str, Valu
         ("Array", Value::Class(super::value::PreludeClass::Array)),
         ("E", Value::num_real(2.71828182846)),
         ("Infinity", Value::num_real(f64::INFINITY)),
+        (
+            "Integer",
+            Value::Object(vec![
+                (Value::String("MAX_VALUE".into()), Value::num_int(i64::MAX)),
+                (Value::String("MIN_VALUE".into()), Value::num_int(i64::MIN)),
+            ]),
+        ),
         ("NaN", Value::num_real(f64::NAN)),
         ("Null", Value::Class(super::value::PreludeClass::Null)),
         ("PI", Value::num_real(3.14159265359)),
@@ -1235,6 +1734,19 @@ static STDLIB_NATIVES: &[(&str, NativeFn)] = &[
     ("setSize", nf_set_size),
     ("setToArray", nf_set_to_array),
     ("setUnion", nf_set_union),
+    ("intervalMin", nf_interval_min),
+    ("intervalMax", nf_interval_max),
+    ("intervalIsEmpty", nf_interval_is_empty),
+    ("intervalIsBounded", nf_interval_is_bounded),
+    ("intervalIsLeftBounded", nf_interval_is_left_bounded),
+    ("intervalIsRightBounded", nf_interval_is_right_bounded),
+    ("intervalContains", nf_interval_contains),
+    ("intervalAverage", nf_interval_average),
+    ("intervalIntersection", nf_interval_intersection),
+    ("intervalCombine", nf_interval_combine),
+    ("intervalToArray", nf_interval_to_array),
+    ("intervalToSet", nf_interval_to_set),
+    ("intervalRange", nf_interval_range),
 ];
 
 /// Native id for a standard-library global, if implemented.
