@@ -868,6 +868,8 @@ pub(crate) fn nf_type_tag(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError>
         Value::Bool(_) => 2,
         Value::String(_) => 3,
         Value::Array(_) => 4,
+        Value::Function { .. } => 5,
+        Value::NativeFunction { .. } => 5,
         Value::Class(_) => 6,
         Value::Object(_) => 7,
         Value::Map(_) => 8,

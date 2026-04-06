@@ -98,6 +98,11 @@ impl BytecodeBuilder {
         self.emit_u8(argc);
     }
 
+    pub fn emit_call_value(&mut self, argc: u8) {
+        self.emit_opcode(Opcode::CallValue);
+        self.emit_u8(argc);
+    }
+
     /// [`Opcode::TryBegin`](Opcode::TryBegin) with placeholder `u32` catch PC; patch via [`Self::patch_u32_at`].
     pub fn emit_try_begin_placeholder(&mut self) -> usize {
         self.emit_opcode(Opcode::TryBegin);

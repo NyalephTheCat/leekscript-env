@@ -75,6 +75,7 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::IntervalBuild as usize] = op_interval_build;
     table[Opcode::InstanceofTag as usize] = op_instanceof_tag;
     table[Opcode::CoerceIntIfExact as usize] = op_coerce_int_if_exact;
+    table[Opcode::CallValue as usize] = op_call_value;
     table
 };
 
@@ -175,7 +176,8 @@ impl Vm {
             let op = self.read_u8()?;
             self.current_opcode = op;
             DISPATCH[op as usize](self)?;
-            if op == Opcode::Return as u8 {
+            // Only stop on a top-level return; function returns jump back into the caller.
+            if op == Opcode::Return as u8 && self.pc >= self.code.len() {
                 return Ok(self.take_return_value());
             }
         }
@@ -912,14 +914,16 @@ fn op_set_elem_local(vm: &mut Vm) -> Result<(), VmError> {
             if let Some(n) = key.as_number() {
                 if n.is_finite() && n >= 0.0 {
                     let i = n as usize;
-                    while arr.len() <= i {
-                        arr.push(Value::Null);
+                    if i < arr.len() {
+                        arr[i] = rhs.clone();
+                        store_local(vm, slot, Value::Array(arr))?;
+                        vm.push_stack(rhs)?;
+                        return Ok(());
                     }
-                    arr[i] = rhs.clone();
                 }
             }
             store_local(vm, slot, Value::Array(arr))?;
-            vm.push_stack(rhs)?;
+            vm.push_stack(Value::Null)?;
         }
         Value::Map(mut pairs) => {
             if let Some(pos) = pairs.iter().position(|(k, _)| k == &key) {
@@ -1023,6 +1027,62 @@ fn op_call_function(vm: &mut Vm) -> Result<(), VmError> {
     }
     vm.pc = meta.entry_pc;
     Ok(())
+}
+
+fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
+    let argc = vm.read_u8()?;
+    let mut args = vec![Value::Null; argc as usize];
+    for slot in (0..argc as usize).rev() {
+        args[slot] = vm.pop_stack()?;
+    }
+    let callee = vm.pop_stack()?;
+    match callee {
+        Value::Function { fid } => {
+            // Reuse the same calling convention as `CallFunction`.
+            let meta = vm
+                .functions
+                .get(fid as usize)
+                .cloned()
+                .ok_or(VmError::BadFunctionIndex(fid))?;
+            if argc != meta.argc {
+                return Err(VmError::BadFunctionArity {
+                    expected: meta.argc,
+                    got: argc,
+                });
+            }
+            let base = usize::from(meta.slot_base);
+            let total = usize::from(meta.slot_count);
+            if base.saturating_add(total) > vm.locals.len() {
+                return Err(VmError::BadLocal(
+                    meta.slot_base
+                        .saturating_add(meta.slot_count)
+                        .saturating_sub(1),
+                ));
+            }
+            vm.return_pcs.push(vm.pc);
+            for (i, v) in args.into_iter().enumerate() {
+                let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                store_local(vm, li, v)?;
+            }
+            for i in (argc as usize)..total {
+                let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                store_local(vm, li, Value::Null)?;
+            }
+            vm.pc = meta.entry_pc;
+            Ok(())
+        }
+        Value::NativeFunction { nid } => {
+            let f = vm
+                .natives
+                .get(nid as usize)
+                .copied()
+                .ok_or(VmError::BadNativeIndex(nid))?;
+            let r = f(vm, &args)?;
+            vm.push_stack(r)?;
+            Ok(())
+        }
+        other => Err(VmError::BadValueCall(other)),
+    }
 }
 
 fn op_try_begin(vm: &mut Vm) -> Result<(), VmError> {

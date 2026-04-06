@@ -39,6 +39,8 @@ pub enum VmError {
     BadFunctionIndex(u16),
     /// Call arity does not match the compiled function.
     BadFunctionArity { expected: u8, got: u8 },
+    /// Attempted to call a non-callable value.
+    BadValueCall(super::value::Value),
     /// [`Opcode::Throw`](super::opcode::Opcode::Throw) with no enclosing [`Opcode::TryBegin`](super::opcode::Opcode::TryBegin).
     UncaughtThrow(super::value::Value),
     /// [`Opcode::TryEnd`](super::opcode::Opcode::TryEnd) without a matching [`Opcode::TryBegin`](super::opcode::Opcode::TryBegin).
@@ -81,6 +83,7 @@ impl fmt::Display for VmError {
             Self::BadFunctionArity { expected, got } => {
                 write!(f, "function call expected {expected} args, got {got}")
             }
+            Self::BadValueCall(v) => write!(f, "attempted to call non-function value {v:?}"),
             Self::UncaughtThrow(_) => write!(f, "uncaught throw"),
             Self::TryStackUnderflow => write!(f, "`TryEnd` without matching `TryBegin`"),
         }

@@ -520,10 +520,22 @@ pub fn define(g: &mut GrammarBuilder) {
     g.parser_rule(GRule::GlobalDecl.as_str(), |g| {
         g.node(Node::GlobalDecl, |g| {
             g.call_rule(GRule::KwGlobal);
-            g.optional(|g| {
-                g.call_rule(GRule::LsType);
-            });
-            g.call_rule(GRule::Ident);
+            // Disambiguate `global x;` (untyped) from `global integer x;` / `global Map<K,V> m;`.
+            // `LsType` can start with a plain identifier (user-defined type), so we only take the
+            // typed branch when a second identifier follows.
+            g.choice(
+                |g| {
+                    g.lookahead(|g| {
+                        g.call_rule(GRule::LsType);
+                        g.call_rule(GRule::Ident);
+                    });
+                    g.call_rule(GRule::LsType);
+                    g.call_rule(GRule::Ident);
+                },
+                |g| {
+                    g.call_rule(GRule::Ident);
+                },
+            );
             g.optional(|g| {
                 g.call_rule(GRule::Eq);
                 g.call_rule(GRule::Expr);

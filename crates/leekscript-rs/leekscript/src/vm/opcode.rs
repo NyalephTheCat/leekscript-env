@@ -101,4 +101,8 @@ pub enum Opcode {
     InstanceofTag = 46,
     /// Pop one value; if it is a real that is integer-like, coerce to an integer.
     CoerceIntIfExact = 47,
+    /// Call a function value on the stack: `u8` argument count.
+    ///
+    /// Stack: pops args (last pushed = last param), then pops callee.
+    CallValue = 48,
 }

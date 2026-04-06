@@ -28,8 +28,8 @@ use sipha::types::{FromSyntaxKind, IntoSyntaxKind};
 
 use crate::ast::types::TypeExpr;
 use crate::ast::{
-    ArrayExpr, BinaryExpr, BracketMapExpr, CallExpr, CatchClause, ClassDecl, ClassMember,
-    ConstDecl, DoWhileStmt, Expr, ForStmt, ForeachStmt, FunctionDecl, GlobalDecl, IfStmt,
+    AnonFunctionExpr, ArrayExpr, BinaryExpr, BracketMapExpr, CallExpr, CatchClause, ClassDecl, ClassMember,
+    ConstDecl, DoWhileStmt, Expr, ForStmt, ForeachStmt, FunctionDecl, GlobalDecl, IfStmt, LambdaExpr,
     IndexExpr, IntervalExpr, LitStr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, Root, SetExpr,
     Stmt, StmtBlock, SwitchStmt, TernaryExpr, ThrowStmt, TryStmt, UnaryExpr, VarDecl, WhileStmt,
 };
@@ -100,6 +100,7 @@ impl std::error::Error for CompileChunkError {
 pub enum CompileError {
     Parse(ParseError),
     Unsupported(&'static str),
+    UndefinedVariable(String),
 }
 
 impl fmt::Display for CompileError {
@@ -107,6 +108,7 @@ impl fmt::Display for CompileError {
         match self {
             Self::Parse(e) => write!(f, "{e:?}"),
             Self::Unsupported(msg) => write!(f, "{msg}"),
+            Self::UndefinedVariable(name) => write!(f, "undefined variable {name}"),
         }
     }
 }
@@ -165,6 +167,19 @@ fn compile_root(root: Root) -> Result<CompiledChunk, CompileError> {
     let mut cx = CompileCtx::default();
     cx.emit_stdlib_global_constants();
     let stmts: Vec<Stmt> = AstNodeExt::children::<Stmt>(root.syntax()).collect();
+    // Java globals behave like predeclared bindings (visible even before the `global` statement).
+    // Pre-allocate slots for all globals so `var r = x; global x;` compiles.
+    for s in &stmts {
+        if let Stmt::Global(g) = s {
+            for el in g.syntax().children().filter(|e| !syntax_el_is_trivia(e)) {
+                if let SyntaxElement::Token(t) = el {
+                    if t.kind() == Lex::Ident.into_syntax_kind() {
+                        cx.alloc_local(t.text());
+                    }
+                }
+            }
+        }
+    }
     let n = stmts.len();
     for (i, stmt) in stmts.into_iter().enumerate() {
         let is_last = i + 1 == n;
@@ -220,12 +235,23 @@ fn foreach_binding_idents(fe: &ForeachStmt) -> Vec<String> {
 struct CompileCtx {
     builder: BytecodeBuilder,
     locals: HashMap<String, u16>,
+    /// Outer lexical scopes (for closure capture).
+    outer_locals: Vec<HashMap<String, u16>>,
     next_local: u16,
     break_scopes: Vec<BreakScope>,
     foreach_counter: u32,
     switch_tmp_id: u32,
     functions: Vec<FunctionEntry>,
     function_by_name: HashMap<String, u16>,
+}
+
+impl CompileCtx {
+    fn lookup_local(&self, name: &str) -> Option<u16> {
+        self.locals
+            .get(name)
+            .copied()
+            .or_else(|| self.outer_locals.iter().rev().find_map(|m| m.get(name).copied()))
+    }
 }
 
 enum BreakScope {
@@ -373,6 +399,10 @@ fn token_as_plain_local_name(t: &SyntaxToken) -> Option<String> {
         Some(t.text().to_string())
     } else if t.kind() == Lex::ArrayKw.into_syntax_kind() {
         Some("Array".to_string())
+    } else if t.kind() == Lex::ObjectKw.into_syntax_kind() {
+        Some("Object".to_string())
+    } else if t.kind() == Lex::MapKw.into_syntax_kind() {
+        Some("Map".to_string())
     } else if t.kind() == Lex::StringTypeKw.into_syntax_kind() {
         Some("string".to_string())
     } else {
@@ -865,6 +895,7 @@ impl CompileCtx {
 
         let slot_base = self.next_local;
         let saved_locals = core::mem::take(&mut self.locals);
+        self.outer_locals.push(saved_locals.clone());
         let saved_water = self.next_local;
         self.next_local = slot_base;
         self.locals = HashMap::new();
@@ -899,14 +930,20 @@ impl CompileCtx {
             slot_base,
             slot_count,
         });
-        self.function_by_name.insert(name, id);
+        self.function_by_name.insert(name.clone(), id);
 
         self.locals = saved_locals;
+        self.outer_locals.pop();
         self.next_local = saved_water.max(slot_base.saturating_add(slot_count));
 
+        // Bind the function name to the function value in the current scope.
         let after_fn = self.builder.len();
         self.builder
             .patch_i32_operand_at(j_skip, after_fn as i32 - (j_skip + 4) as i32);
+        let slot = self.alloc_local(&name);
+        self.builder.emit_push_const(Value::Function { fid: id });
+        self.builder.emit_opcode(Opcode::SetLocal);
+        self.builder.emit_u16_operand(slot);
         Ok(())
     }
 
@@ -1446,13 +1483,16 @@ impl CompileCtx {
                     return Ok(Some(()));
                 }
                 if let Some(name) = token_as_plain_local_name(t) {
-                    let slot = *self
-                        .locals
-                        .get(&name)
-                        .ok_or(CompileError::Unsupported("undefined variable"))?;
-                    self.builder.emit_opcode(Opcode::GetLocal);
-                    self.builder.emit_u16_operand(slot);
-                    return Ok(Some(()));
+                    if let Some(slot) = self.lookup_local(&name) {
+                        self.builder.emit_opcode(Opcode::GetLocal);
+                        self.builder.emit_u16_operand(slot);
+                        return Ok(Some(()));
+                    }
+                    if let Some(nid) = super::stdlib::native_id(&name) {
+                        self.builder.emit_push_const(Value::NativeFunction { nid });
+                        return Ok(Some(()));
+                    }
+                    return Err(CompileError::UndefinedVariable(name));
                 }
                 Ok(None)
             }
@@ -1736,10 +1776,24 @@ impl CompileCtx {
             self.builder.emit_array_build(0);
             return Ok(true);
         }
-        if self.locals.contains_key(&name) {
-            return Err(CompileError::Unsupported(
-                "indirect calls (calling through a local variable) are not supported by the VM compiler",
-            ));
+        if name == "Object" && args.is_empty() {
+            self.builder.emit_object_build(0);
+            return Ok(true);
+        }
+        if name == "Map" && args.is_empty() {
+            self.builder.emit_map_build(0);
+            return Ok(true);
+        }
+        if let Some(slot) = self.lookup_local(&name) {
+            self.builder.emit_opcode(Opcode::GetLocal);
+            self.builder.emit_u16_operand(slot);
+            for a in &args {
+                self.compile_expr(a.clone())?;
+            }
+            let argc = u8::try_from(args.len())
+                .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
+            self.builder.emit_call_value(argc);
+            return Ok(true);
         }
         let argc = u8::try_from(args.len())
             .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
@@ -1841,6 +1895,14 @@ impl CompileCtx {
         }
         if name == "Array" && arg_count == 0 {
             self.builder.emit_array_build(0);
+            return Ok(());
+        }
+        if name == "Object" && arg_count == 0 {
+            self.builder.emit_object_build(0);
+            return Ok(());
+        }
+        if name == "Map" && arg_count == 0 {
+            self.builder.emit_map_build(0);
             return Ok(());
         }
         if name == "Set" && arg_count == 0 {
@@ -2202,6 +2264,42 @@ impl CompileCtx {
             return Err(CompileError::Unsupported("empty call"));
         };
         let args = &subs[1..];
+        // Support calls to builtin type names like `Object()` / `Map()` (keywords, not identifiers).
+        if args.is_empty() {
+            let syn = callee.syntax();
+            if syn.kind() == Node::BuiltinTypeNameExpr.into_syntax_kind() {
+                let kw = syn
+                    .child_tokens()
+                    .find_map(|t| Lex::from_syntax_kind(t.kind()));
+                match kw {
+                    Some(Lex::ObjectKw) => {
+                        self.builder.emit_object_build(0);
+                        return Ok(());
+                    }
+                    Some(Lex::MapKw) => {
+                        self.builder.emit_map_build(0);
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // If callee is a local variable (first-class function value), emit a value-call.
+        if let Some(local_name) = expr_plain_ident_from_expr(callee) {
+            if let Some(slot) = self.lookup_local(&local_name) {
+                self.builder.emit_opcode(Opcode::GetLocal);
+                self.builder.emit_u16_operand(slot);
+                for a in args {
+                    self.compile_expr(a.clone())?;
+                }
+                let argc = u8::try_from(args.len())
+                    .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
+                self.builder.emit_call_value(argc);
+                return Ok(());
+            }
+        }
+
         let name = expr_plain_ident_from_expr(callee).ok_or(CompileError::Unsupported(
             "call callee must be a simple identifier",
         ))?;
@@ -2358,8 +2456,218 @@ impl CompileCtx {
         Ok(())
     }
 
+    fn compile_anon_function_expr(&mut self, f: &AnonFunctionExpr) -> Result<(), CompileError> {
+        if f.template_params().is_some() {
+            return Err(CompileError::Unsupported("generic function"));
+        }
+        let params: Vec<_> = crate::ast::fn_param_children(f.syntax()).collect();
+        for p in &params {
+            if p.default_expr().is_some() {
+                return Err(CompileError::Unsupported("default function parameter"));
+            }
+        }
+        let argc = u8::try_from(params.len())
+            .map_err(|_| CompileError::Unsupported("too many parameters"))?;
+
+        let j_skip = self.builder.emit_jump_placeholder();
+        let entry_pc = self.builder.len();
+
+        let slot_base = self.next_local;
+        let saved_locals = core::mem::take(&mut self.locals);
+        self.outer_locals.push(saved_locals.clone());
+        let saved_water = self.next_local;
+        self.next_local = slot_base;
+        self.locals = HashMap::new();
+
+        for p in &params {
+            let pn = p
+                .name()
+                .ok_or(CompileError::Unsupported("function parameter without name"))?;
+            self.alloc_local(&pn);
+        }
+        let body = f
+            .syntax()
+            .child::<crate::ast::Block>()
+            .ok_or(CompileError::Unsupported("function without body"))?;
+        for s in body.stmts() {
+            self.compile_stmt(s)?;
+        }
+        self.builder.emit_opcode(Opcode::PushNull);
+        self.builder.emit_return();
+
+        let slot_count = self
+            .next_local
+            .checked_sub(slot_base)
+            .ok_or(CompileError::Unsupported("function locals"))?;
+        let slot_count = u16::try_from(slot_count)
+            .map_err(|_| CompileError::Unsupported("function frame too large"))?;
+
+        let fid = u16::try_from(self.functions.len())
+            .map_err(|_| CompileError::Unsupported("too many functions"))?;
+        self.functions.push(FunctionEntry {
+            name: format!("__anon{fid}"),
+            entry_pc,
+            argc,
+            slot_base,
+            slot_count,
+        });
+
+        self.locals = saved_locals;
+        self.outer_locals.pop();
+        self.next_local = saved_water.max(slot_base.saturating_add(slot_count));
+
+        let after_fn = self.builder.len();
+        self.builder
+            .patch_i32_operand_at(j_skip, after_fn as i32 - (j_skip + 4) as i32);
+
+        self.builder.emit_push_const(Value::Function { fid });
+        Ok(())
+    }
+
+    fn compile_lambda_expr(&mut self, l: &LambdaExpr) -> Result<(), CompileError> {
+        fn walk_tokens(node: &SyntaxNode, out: &mut Vec<SyntaxToken>) {
+            for el in node.children() {
+                match el {
+                    SyntaxElement::Token(t) => {
+                        if !syntax_el_is_trivia(&SyntaxElement::Token(t.clone())) {
+                            out.push(t);
+                        }
+                    }
+                    SyntaxElement::Node(n) => walk_tokens(&n, out),
+                }
+            }
+        }
+
+        // Extract parameter identifiers up to the first `->` token.
+        let mut params: Vec<String> = Vec::new();
+        let mut toks: Vec<SyntaxToken> = Vec::new();
+        walk_tokens(l.syntax(), &mut toks);
+        for t in &toks {
+            if t.text() == "->" || t.text() == "=>" || Lex::from_syntax_kind(t.kind()) == Some(Lex::Arrow) {
+                break;
+            }
+            if t.kind() == Lex::Ident.into_syntax_kind() {
+                params.push(t.text().to_string());
+            }
+        }
+        if params.is_empty() {
+            let txt = l.syntax().collect_text();
+            let arrow_at = txt.find("->").or_else(|| txt.find("=>"));
+            if let Some(ix) = arrow_at {
+                let head = &txt[..ix];
+                let mut cur = String::new();
+                for ch in head.chars() {
+                    if ch.is_ascii_alphanumeric() || ch == '_' {
+                        cur.push(ch);
+                    } else {
+                        if !cur.is_empty() {
+                            params.push(core::mem::take(&mut cur));
+                        }
+                    }
+                }
+                if !cur.is_empty() {
+                    params.push(cur);
+                }
+                params.retain(|s| !s.is_empty());
+            }
+        }
+        let argc = u8::try_from(params.len())
+            .map_err(|_| CompileError::Unsupported("too many parameters"))?;
+
+        let j_skip = self.builder.emit_jump_placeholder();
+        let entry_pc = self.builder.len();
+
+        let slot_base = self.next_local;
+        let saved_locals = core::mem::take(&mut self.locals);
+        self.outer_locals.push(saved_locals.clone());
+        let saved_water = self.next_local;
+        self.next_local = slot_base;
+        self.locals = HashMap::new();
+        for pn in &params {
+            self.alloc_local(pn);
+        }
+
+        // Body is either a `Block` or an expression after the arrow.
+        fn find_body_after_arrow(node: &SyntaxNode, after_arrow: &mut bool) -> Option<SyntaxNode> {
+            for el in node.children() {
+                match el {
+                    SyntaxElement::Token(t) => {
+                        if Lex::from_syntax_kind(t.kind()) == Some(Lex::Arrow) {
+                            *after_arrow = true;
+                        }
+                    }
+                    SyntaxElement::Node(n) => {
+                        if *after_arrow {
+                            if crate::ast::Block::can_cast(n.kind()) || Expr::can_cast(n.kind()) {
+                                return Some(n);
+                            }
+                        }
+                        if let Some(found) = find_body_after_arrow(&n, after_arrow) {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        let mut after_arrow = false;
+        let body_n =
+            find_body_after_arrow(l.syntax(), &mut after_arrow).ok_or(CompileError::Unsupported(
+                "lambda without body",
+            ))?;
+        if let Some(b) = crate::ast::Block::cast(body_n.clone()) {
+            for s in b.stmts() {
+                self.compile_stmt(s)?;
+            }
+            self.builder.emit_opcode(Opcode::PushNull);
+            self.builder.emit_return();
+        } else if let Some(e) = Expr::cast(body_n) {
+            self.compile_expr(e)?;
+            self.builder.emit_return();
+        } else {
+            return Err(CompileError::Unsupported("lambda without body"));
+        }
+
+        let slot_count = self
+            .next_local
+            .checked_sub(slot_base)
+            .ok_or(CompileError::Unsupported("function locals"))?;
+        let slot_count = u16::try_from(slot_count)
+            .map_err(|_| CompileError::Unsupported("function frame too large"))?;
+
+        let fid = u16::try_from(self.functions.len())
+            .map_err(|_| CompileError::Unsupported("too many functions"))?;
+        self.functions.push(FunctionEntry {
+            name: format!("__lambda{fid}"),
+            entry_pc,
+            argc,
+            slot_base,
+            slot_count,
+        });
+
+        self.locals = saved_locals;
+        self.outer_locals.pop();
+        self.next_local = saved_water.max(slot_base.saturating_add(slot_count));
+
+        let after_fn = self.builder.len();
+        self.builder
+            .patch_i32_operand_at(j_skip, after_fn as i32 - (j_skip + 4) as i32);
+
+        self.builder.emit_push_const(Value::Function { fid });
+        Ok(())
+    }
+
     fn compile_set_literal(&mut self, se: &SetExpr) -> Result<(), CompileError> {
-        let items: Vec<Expr> = AstNodeExt::children::<Expr>(se.syntax()).collect();
+        // Only take direct element expressions, not nested ones.
+        let items: Vec<Expr> = se
+            .syntax()
+            .children()
+            .filter_map(|el| match el {
+                SyntaxElement::Node(n) => Expr::cast(n.clone()),
+                _ => None,
+            })
+            .collect();
         let cnt = u16::try_from(items.len())
             .map_err(|_| CompileError::Unsupported("set literal too large"))?;
         for e in items {
@@ -2393,7 +2701,14 @@ impl CompileCtx {
             return Ok(());
         }
 
-        let items: Vec<Expr> = AstNodeExt::children::<Expr>(syn).collect();
+        // Only take direct element expressions, not nested ones (object fields, call args, etc.).
+        let items: Vec<Expr> = syn
+            .children()
+            .filter_map(|el| match el {
+                SyntaxElement::Node(n) => Expr::cast(n.clone()),
+                _ => None,
+            })
+            .collect();
         let cnt = u16::try_from(items.len())
             .map_err(|_| CompileError::Unsupported("array literal too large"))?;
         for e in items {
@@ -2563,6 +2878,12 @@ impl CompileCtx {
     /// - **Inside each [`BinaryExpr`](BinaryExpr):** `op` token then a **suffix** (`NUMBER`, nested
     ///   `BinaryExpr`, …) — not always a single rhs subtree (e.g. `+` then `3` then `* 4`).
     fn compile_expr_from_syntax(&mut self, n: SyntaxNode) -> Result<(), CompileError> {
+        if let Some(lam) = LambdaExpr::cast(n.clone()) {
+            return self.compile_lambda_expr(&lam);
+        }
+        if let Some(af) = AnonFunctionExpr::cast(n.clone()) {
+            return self.compile_anon_function_expr(&af);
+        }
         if n.kind() == Node::Expr.into_syntax_kind() {
             let parts: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
             if self.try_compile_expr_parts_dispatch(&parts)? {
@@ -2592,6 +2913,12 @@ impl CompileCtx {
         }
         if let Some(arr) = ArrayExpr::cast(n.clone()) {
             return self.compile_array_literal(&arr);
+        }
+        if let Some(lam) = LambdaExpr::cast(n.clone()) {
+            return self.compile_lambda_expr(&lam);
+        }
+        if let Some(af) = AnonFunctionExpr::cast(n.clone()) {
+            return self.compile_anon_function_expr(&af);
         }
         if let Some(oe) = ObjectExpr::cast(n.clone()) {
             return self.compile_object_literal(&oe);
@@ -2866,6 +3193,26 @@ impl CompileCtx {
                 }
                 Ok(())
             }
+            Lex::IsKw => {
+                // `lhs is rhs` / `lhs is not rhs` — model as `==` / `!=` for now (Java suite parity).
+                // The parser emits `BinaryExpr` children: `[lhs, IS, (NOT)?, rhs]`.
+                let parts: Vec<_> = bin.children().filter(|e| !syntax_el_is_trivia(e)).collect();
+                let Some(is_pos) = parts.iter().position(|el| {
+                    matches!(el, SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::IsKw))
+                }) else {
+                    return Err(CompileError::Unsupported("is operator missing token"));
+                };
+                let mut rhs = parts[is_pos.saturating_add(1)..].to_vec();
+                let mut negated = false;
+                if let Some(SyntaxElement::Token(t)) = rhs.first() {
+                    if t.kind_as::<Lex>() == Some(Lex::NotKw) {
+                        negated = true;
+                        rhs.remove(0);
+                    }
+                }
+                self.compile_infix_suffix(&rhs)?;
+                self.emit_binop(if negated { Lex::NotEq } else { Lex::EqEq })
+            }
             _ => {
                 self.compile_infix_suffix(&suff)?;
                 self.emit_binop(op)
@@ -2991,13 +3338,16 @@ impl CompileCtx {
                     return Ok(());
                 }
                 if let Some(name) = token_as_plain_local_name(t) {
-                    let slot = *self
-                        .locals
-                        .get(&name)
-                        .ok_or(CompileError::Unsupported("undefined variable"))?;
-                    self.builder.emit_opcode(Opcode::GetLocal);
-                    self.builder.emit_u16_operand(slot);
-                    return Ok(());
+                    if let Some(slot) = self.lookup_local(&name) {
+                        self.builder.emit_opcode(Opcode::GetLocal);
+                        self.builder.emit_u16_operand(slot);
+                        return Ok(());
+                    }
+                    if let Some(nid) = super::stdlib::native_id(&name) {
+                        self.builder.emit_push_const(Value::NativeFunction { nid });
+                        return Ok(());
+                    }
+                    return Err(CompileError::UndefinedVariable(name));
                 }
                 Err(CompileError::Unsupported("unsupported atomic suffix"))
             }

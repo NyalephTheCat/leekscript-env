@@ -37,6 +37,7 @@ pub(crate) fn binary_op_kind(k: Lex) -> bool {
             | Lex::AndAnd
             | Lex::OrOr
             | Lex::InstanceofKw
+            | Lex::IsKw
             | Lex::XorKw
     )
 }
@@ -55,6 +56,9 @@ pub(crate) fn first_binary_op_token(bin: &SyntaxNode) -> Option<Lex> {
         };
         if k == Lex::InKw {
             return Some(Lex::InKw);
+        }
+        if k == Lex::IsKw {
+            return Some(Lex::IsKw);
         }
         if binary_op_kind(k) {
             return Some(k);

@@ -172,6 +172,7 @@ pub enum PreludeClass {
     Number,
     Integer,
     Real,
+    Function,
 }
 
 impl PreludeClass {
@@ -190,6 +191,7 @@ impl PreludeClass {
             Self::Number => "Number",
             Self::Integer => "Integer",
             Self::Real => "Real",
+            Self::Function => "Function",
         }
     }
 
@@ -233,6 +235,8 @@ impl PreludeClass {
             Value::Object(_) => Self::Object,
             Value::Set(_) => Self::Set,
             Value::Interval(_) => Self::Interval,
+            Value::Function { .. } => Self::Function,
+            Value::NativeFunction { .. } => Self::Function,
             Value::Class(c) => *c,
         }
     }
@@ -257,6 +261,10 @@ pub enum Value {
     Set(Vec<Value>),
     /// Interval literal (`[..]`, `[1..2[`, `]..1]`, …).
     Interval(IntervalValue),
+    /// User function handle (first-class function value).
+    Function { fid: u16 },
+    /// Native function handle (first-class builtin function value).
+    NativeFunction { nid: u16 },
 }
 
 /// Interval endpoints: `None` means unbounded (±∞ depending on side).
@@ -286,6 +294,8 @@ pub fn value_cmp_for_java_set_display(a: &Value, b: &Value) -> Ordering {
             Value::Object(_) => 7,
             Value::Set(_) => 8,
             Value::Interval(_) => 9,
+            Value::Function { .. } => 10,
+            Value::NativeFunction { .. } => 11,
         }
     }
     disc(a).cmp(&disc(b)).then_with(|| match (a, b) {
@@ -394,6 +404,8 @@ impl Value {
                 }
                 a.iter().all(|x| b.iter().any(|y| x.equals_equals_v4(y)))
             }
+            (Self::Function { fid: a }, Self::Function { fid: b }) => a == b,
+            (Self::NativeFunction { nid: a }, Self::NativeFunction { nid: b }) => a == b,
             _ => false,
         }
     }
@@ -409,6 +421,8 @@ impl Value {
             Self::Map(m) | Self::Object(m) => m.len() as f64,
             Self::Set(s) => s.len() as f64,
             Self::Interval(_i) => 1.0,
+            Self::Function { .. } => 1.0,
+            Self::NativeFunction { .. } => 1.0,
             Self::Class(c) => {
                 let s = c.java_class_string();
                 if s == "true" {
@@ -508,6 +522,8 @@ impl Value {
                 out.push(rch);
                 out
             }
+            Self::Function { .. } => "#Anonymous Function".into(),
+            Self::NativeFunction { .. } => "#Native Function".into(),
             Self::Class(c) => c.java_class_string(),
             Self::String(s) => {
                 // Java `AI.string`: values that are exactly one JSON string token use a doubled-`"`
@@ -579,6 +595,8 @@ impl Value {
             ),
             Self::Set(s) => 1u64.saturating_add(s.iter().map(Self::ram_quads).sum()),
             Self::Interval(_i) => 1,
+            Self::Function { .. } => 1,
+            Self::NativeFunction { .. } => 1,
         }
     }
 
@@ -606,6 +624,7 @@ impl Value {
                 NumberBits::Int(i) => *i != 0,
                 NumberBits::Real(x) => *x != 0.0,
             },
+            Self::String(s) => !s.is_empty(),
             Self::Set(s) => !s.is_empty(),
             // Minimal parity: treat `[a..b]` as truthy unless it's structurally empty (`[x..y]` where x>y),
             // or the special empty literal `[..]`.
@@ -634,6 +653,8 @@ impl Value {
                 NumberBits::Real(x) => format_java_double_export(*x),
             },
             Self::String(s) => s.clone(),
+            Self::Function { .. } => "#Anonymous Function".into(),
+            Self::NativeFunction { .. } => "#Native Function".into(),
             Self::Interval(_iv) => self.to_leek_export_string(),
             Self::Array(a) => {
                 let mut out = String::new();
@@ -691,6 +712,8 @@ impl Value {
                 NumberBits::Real(x) => format_java_double_export(*x),
             },
             Self::String(s) => java_string_builtin_v4_json_string(s),
+            Self::Function { .. } => "#Anonymous Function".into(),
+            Self::NativeFunction { .. } => "#Native Function".into(),
             Self::Interval(_iv) => self.to_leek_export_string(),
             Self::Array(a) => {
                 let mut out = String::new();

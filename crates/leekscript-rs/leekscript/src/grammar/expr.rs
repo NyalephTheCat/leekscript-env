@@ -654,7 +654,23 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     g.parser_rule(GRule::LambdaHead.as_str(), |g| {
-        g.choice(
+        sipha::choices!(
+            g,
+            |g| {
+                // Java suite allows `x, y -> ...` without parentheses.
+                g.lookahead(|g| {
+                    g.call_rule(GRule::LambdaParam);
+                    g.call_rule(GRule::Comma);
+                });
+                g.call_rule(GRule::LambdaParam);
+                g.zero_or_more(|g| {
+                    g.call_rule(GRule::Comma);
+                    g.call_rule(GRule::LambdaParam);
+                });
+                g.optional(|g| {
+                    g.call_rule(GRule::Comma);
+                });
+            },
             |g| {
                 g.call_rule(GRule::LambdaParam);
             },
@@ -671,13 +687,15 @@ pub fn define(g: &mut GrammarBuilder) {
                     });
                 });
                 g.call_rule(GRule::Rparen);
-            },
+            }
         );
     });
 
     g.parser_rule(GRule::LambdaExpr.as_str(), |g| {
         g.node(Node::LambdaExpr, |g| {
-            g.call_rule(GRule::LambdaHead);
+            g.optional(|g| {
+                g.call_rule(GRule::LambdaHead);
+            });
             g.call_rule(GRule::Arrow);
             g.choice(
                 |g| {
@@ -728,7 +746,8 @@ pub fn define(g: &mut GrammarBuilder) {
             g.optional(|g| {
                 g.choice(
                     |g| {
-                        cfg_flags::v4(g);
+                        // Bracket-map literals (`[k: v]`) exist before v4 in the Java suite.
+                        cfg_flags::v2(g);
                         g.call_rule(GRule::Colon);
                         g.node(Node::BracketMapExpr, |g| {
                             g.call_rule(GRule::Expr);
@@ -744,10 +763,15 @@ pub fn define(g: &mut GrammarBuilder) {
                         });
                     },
                     |g| {
-                        g.call_rule(GRule::Comma);
+                        // Java fixtures allow missing commas in arrays (`[1 2 3]`).
+                        g.optional(|g| {
+                            g.call_rule(GRule::Comma);
+                        });
                         g.call_rule(GRule::Expr);
                         g.zero_or_more(|g| {
-                            g.call_rule(GRule::Comma);
+                            g.optional(|g| {
+                                g.call_rule(GRule::Comma);
+                            });
                             g.call_rule(GRule::Expr);
                         });
                         g.optional(|g| {
@@ -787,7 +811,8 @@ pub fn define(g: &mut GrammarBuilder) {
         sipha::choices!(
             g,
             |g| {
-                cfg_flags::v4(g);
+                // Empty bracket-map literal (`[:]`) exists before v4 in the Java suite.
+                cfg_flags::v2(g);
                 g.node(Node::BracketMapExpr, |g| {
                     g.call_rule(GRule::Colon);
                 });
@@ -859,7 +884,7 @@ pub fn define(g: &mut GrammarBuilder) {
         });
     });
 
-    // object := "{" (ident ":" expr ("," ident ":" expr)* ","?)? "}"
+    // object := "{" (ident ":" expr ((","?) ident ":" expr)* ","?)? "}"
     g.parser_rule(GRule::ObjectExpr.as_str(), |g| {
         g.node(Node::ObjectExpr, |g| {
             g.call_rule(GRule::Lbrace);
@@ -869,7 +894,10 @@ pub fn define(g: &mut GrammarBuilder) {
                     g.call_rule(GRule::Colon);
                     g.call_rule(GRule::Expr);
                     g.zero_or_more(|g| {
-                        g.call_rule(GRule::Comma);
+                        // Java fixtures allow missing commas between fields.
+                        g.optional(|g| {
+                            g.call_rule(GRule::Comma);
+                        });
                         g.call_rule(GRule::Ident);
                         g.call_rule(GRule::Colon);
                         g.call_rule(GRule::Expr);
@@ -928,8 +956,17 @@ pub fn define(g: &mut GrammarBuilder) {
             g,
             |g| {
                 g.lookahead(|g| {
-                    g.call_rule(GRule::LambdaHead);
-                    g.call_rule(GRule::Arrow);
+                    sipha::choices!(
+                        g,
+                        |g| {
+                            g.call_rule(GRule::LambdaHead);
+                            g.call_rule(GRule::Arrow);
+                        },
+                        |g| {
+                            // Allow zero-arg lambdas: `-> expr`
+                            g.call_rule(GRule::Arrow);
+                        }
+                    );
                 });
                 g.call_rule(GRule::LambdaExpr);
             },
@@ -1007,9 +1044,34 @@ pub fn define(g: &mut GrammarBuilder) {
                 });
             },
             |g| {
+                cfg_flags::v2(g);
+                g.node(Node::BuiltinTypeNameExpr, |g| {
+                    g.call_rule(GRule::KwObject);
+                    g.optional(|g| {
+                        g.call_rule(GRule::GenericTypeArgs);
+                    });
+                });
+            },
+            |g| {
+                cfg_flags::v2(g);
+                g.node(Node::BuiltinTypeNameExpr, |g| {
+                    g.call_rule(GRule::KwMap);
+                    g.optional(|g| {
+                        g.call_rule(GRule::GenericTypeArgs);
+                    });
+                });
+            },
+            |g| {
                 cfg_flags::v3(g);
                 g.node(Node::BuiltinStringifyExpr, |g| {
                     g.call_rule(GRule::KwStringType);
+                });
+            },
+            |g| {
+                // Reference expression: `@ident` (used by Java suite for by-ref semantics).
+                g.node(Node::RefExpr, |g| {
+                    g.call_rule(GRule::OpAt);
+                    g.call_rule(GRule::Ident);
                 });
             },
             |g| {
@@ -1135,13 +1197,22 @@ pub fn define(g: &mut GrammarBuilder) {
         g.node(Node::NewExpr, |g| {
             g.call_rule(GRule::KwNew);
             // `new Array` / `new Array()` — `Array` is the `ArrayKw` token, not `ident`.
-            g.choice(
+            sipha::choices!(
+                g,
                 |g| {
                     g.call_rule(GRule::Ident);
                 },
                 |g| {
                     cfg_flags::v2(g);
                     g.call_rule(GRule::KwArray);
+                },
+                |g| {
+                    cfg_flags::v2(g);
+                    g.call_rule(GRule::KwObject);
+                },
+                |g| {
+                    cfg_flags::v2(g);
+                    g.call_rule(GRule::KwMap);
                 },
             );
             g.optional(|g| {
