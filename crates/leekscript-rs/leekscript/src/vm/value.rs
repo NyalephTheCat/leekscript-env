@@ -789,17 +789,25 @@ fn object_field_key_export(k: &Value) -> String {
 }
 
 fn map_key_cmp_for_java_export(a: &Value, b: &Value) -> Ordering {
-    // Prefer numeric comparison (including numeric strings), descending.
-    match (a.as_number(), b.as_number()) {
+    // Java `MapLeekValue.toString` ordering is deterministic. For numeric-ish keys (including
+    // numeric strings like `"20000"`), the Java suite expects **descending** numeric order
+    // (see `TestJSON.java:46-47`). JSON encoding is handled elsewhere and has its own ordering.
+    fn numericish(v: &Value) -> Option<f64> {
+        match v {
+            Value::Number(n) => Some(n.as_f64()),
+            Value::String(s) => s.trim().parse::<f64>().ok(),
+            _ => None,
+        }
+    }
+
+    match (numericish(a), numericish(b)) {
         (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
+            // Descending numeric order.
             y.partial_cmp(&x).unwrap_or(Ordering::Equal)
         }
         (Some(x), None) if x.is_finite() => Ordering::Less,
         (None, Some(y)) if y.is_finite() => Ordering::Greater,
-        _ => {
-            // Fallback: descending lexical order of export form.
-            b.to_leek_export_string().cmp(&a.to_leek_export_string())
-        }
+        _ => a.to_leek_export_string().cmp(&b.to_leek_export_string()),
     }
 }
 
