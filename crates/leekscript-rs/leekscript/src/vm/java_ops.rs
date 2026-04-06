@@ -42,22 +42,32 @@ pub(crate) fn binary_op_kind(k: Lex) -> bool {
 }
 
 pub(crate) fn first_binary_op_token(bin: &SyntaxNode) -> Option<Lex> {
+    let mut saw_starstar = false;
     for el in bin.children() {
         if syntax_el_is_trivia(&el) {
             continue;
         }
-        if let SyntaxElement::Token(t) = &el {
-            if let Some(k) = t.kind_as::<Lex>() {
-                if k == Lex::InKw {
-                    return Some(Lex::InKw);
-                }
-                if binary_op_kind(k) {
-                    return Some(k);
-                }
-            }
+        let SyntaxElement::Token(t) = &el else {
+            continue;
+        };
+        let Some(k) = t.kind_as::<Lex>() else {
+            continue;
+        };
+        if k == Lex::InKw {
+            return Some(Lex::InKw);
+        }
+        if binary_op_kind(k) {
+            return Some(k);
+        }
+        if k == Lex::StarStar {
+            saw_starstar = true;
         }
     }
-    None
+    if saw_starstar {
+        Some(Lex::StarStar)
+    } else {
+        None
+    }
 }
 
 /// Non-trivia [`SyntaxElement`](SyntaxElement)s after the first binary operator token under `bin`.
@@ -71,25 +81,24 @@ pub(crate) fn suffix_after_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxElemen
     }) {
         return parts[in_pos.saturating_add(1)..].to_vec();
     }
-    let mut after_op = false;
-    let mut out = Vec::new();
-    for el in bin.children() {
-        if syntax_el_is_trivia(&el) {
-            continue;
-        }
-        if !after_op {
-            if let SyntaxElement::Token(t) = &el {
-                if let Some(k) = t.kind_as::<Lex>() {
-                    if binary_op_kind(k) {
-                        after_op = true;
-                    }
-                }
-            }
-            continue;
-        }
-        out.push(el.clone());
+    // Prefer non-`**` operators when mixed (`a ** b == c`).
+    if let Some(pos) = parts.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>().is_some_and(binary_op_kind)
+        )
+    }) {
+        return parts[pos.saturating_add(1)..].to_vec();
     }
-    out
+    if let Some(pos) = parts.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::StarStar)
+        )
+    }) {
+        return parts[pos.saturating_add(1)..].to_vec();
+    }
+    Vec::new()
 }
 
 /// Elements before the first binary operator token (lhs of one `BinaryExpr` node).
@@ -112,21 +121,24 @@ pub(crate) fn prefix_before_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxEleme
         }
         return parts[..lhs_end].to_vec();
     }
-    let mut out = Vec::new();
-    for el in bin.children() {
-        if syntax_el_is_trivia(&el) {
-            continue;
-        }
-        if let SyntaxElement::Token(t) = &el {
-            if let Some(k) = t.kind_as::<Lex>() {
-                if binary_op_kind(k) {
-                    break;
-                }
-            }
-        }
-        out.push(el.clone());
+    // Prefer non-`**` operators when mixed.
+    if let Some(pos) = parts.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>().is_some_and(binary_op_kind)
+        )
+    }) {
+        return parts[..pos].to_vec();
     }
-    out
+    if let Some(pos) = parts.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::StarStar)
+        )
+    }) {
+        return parts[..pos].to_vec();
+    }
+    parts
 }
 
 fn bin_fragment_extra_cost(op: Lex) -> u32 {

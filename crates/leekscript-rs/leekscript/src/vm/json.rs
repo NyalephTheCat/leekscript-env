@@ -40,7 +40,14 @@ pub fn encode(v: &Value) -> String {
         }
         Value::Map(m) | Value::Object(m) => {
             let mut out = String::from("{");
-            for (i, (k, v)) in m.iter().enumerate() {
+            // Java jsonEncode deterministically orders object keys (lexicographic by key string).
+            // This matters for parity tests and avoids hash/insertion-order differences.
+            let mut entries: Vec<(&Value, &Value, String)> = m
+                .iter()
+                .map(|(k, v)| (k, v, sort_key_string(k)))
+                .collect();
+            entries.sort_by(|a, b| a.2.cmp(&b.2));
+            for (i, (k, v, _)) in entries.into_iter().enumerate() {
                 if i > 0 {
                     out.push(',');
                 }
@@ -51,6 +58,13 @@ pub fn encode(v: &Value) -> String {
             out.push('}');
             out
         }
+    }
+}
+
+fn sort_key_string(k: &Value) -> String {
+    match k {
+        Value::String(s) => s.to_string(),
+        _ => encode(k),
     }
 }
 
@@ -231,7 +245,7 @@ impl<'a> Parser<'a> {
         let mut pairs: Vec<(Value, Value)> = Vec::new();
         if self.peek() == Some(b'}') {
             self.i += 1;
-            return Ok(Value::Map(pairs));
+            return Ok(Value::Object(pairs));
         }
         loop {
             self.skip_ws();
@@ -249,7 +263,7 @@ impl<'a> Parser<'a> {
                 _ => return Err(()),
             }
         }
-        Ok(Value::Map(pairs))
+        Ok(Value::Object(pairs))
     }
 
     fn parse_number(&mut self) -> Result<Value, ()> {

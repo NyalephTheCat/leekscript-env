@@ -97,11 +97,7 @@ impl NumberBits {
     /// `/` — always a real (Java floating division).
     #[must_use]
     pub fn div(self, rhs: Self) -> Result<Self, ()> {
-        let d = rhs.as_f64();
-        if d == 0.0 {
-            return Err(());
-        }
-        Ok(Self::Real(self.as_f64() / d))
+        Ok(Self::Real(self.as_f64() / rhs.as_f64()))
     }
 
     /// `//` — truncating division; both ints → [`Int`] when possible.
@@ -174,6 +170,8 @@ pub enum PreludeClass {
     String,
     Boolean,
     Number,
+    Integer,
+    Real,
 }
 
 impl PreludeClass {
@@ -190,6 +188,8 @@ impl PreludeClass {
             Self::String => "String",
             Self::Boolean => "Boolean",
             Self::Number => "Number",
+            Self::Integer => "Integer",
+            Self::Real => "Real",
         }
     }
 
@@ -225,7 +225,8 @@ impl PreludeClass {
         match v {
             Value::Null => Self::Null,
             Value::Bool(_) => Self::Boolean,
-            Value::Number(_) => Self::Number,
+            Value::Number(NumberBits::Int(_)) => Self::Integer,
+            Value::Number(NumberBits::Real(_)) => Self::Real,
             Value::String(_) => Self::String,
             Value::Array(_) => Self::Array,
             Value::Map(_) => Self::Map,
@@ -457,7 +458,11 @@ impl Value {
                     return "[:]".into();
                 }
                 let mut out = String::from("[");
-                for (i, (k, v)) in m.iter().enumerate() {
+                // Java map display is deterministic and (for numeric-ish keys) sorted.
+                // This avoids insertion-order differences and matches the reference test suite.
+                let mut entries: Vec<(&Value, &Value)> = m.iter().map(|(k, v)| (k, v)).collect();
+                entries.sort_by(|(ka, _), (kb, _)| map_key_cmp_for_java_export(ka, kb));
+                for (i, (k, v)) in entries.into_iter().enumerate() {
                     if i > 0 {
                         out.push_str(", ");
                     }
@@ -783,6 +788,21 @@ fn object_field_key_export(k: &Value) -> String {
     }
 }
 
+fn map_key_cmp_for_java_export(a: &Value, b: &Value) -> Ordering {
+    // Prefer numeric comparison (including numeric strings), descending.
+    match (a.as_number(), b.as_number()) {
+        (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
+            y.partial_cmp(&x).unwrap_or(Ordering::Equal)
+        }
+        (Some(x), None) if x.is_finite() => Ordering::Less,
+        (None, Some(y)) if y.is_finite() => Ordering::Greater,
+        _ => {
+            // Fallback: descending lexical order of export form.
+            b.to_leek_export_string().cmp(&a.to_leek_export_string())
+        }
+    }
+}
+
 fn format_object_brace_export(o: &[(Value, Value)], fmt_val: impl Fn(&Value) -> String) -> String {
     if o.is_empty() {
         return "{}".into();
@@ -865,9 +885,26 @@ fn format_java_double_export(n: f64) -> String {
             "-\u{221e}".into()
         };
     }
+    // Java `Double.toString(Double.MIN_VALUE)` prints `4.9E-324` (shortest-roundtrip),
+    // while Rust's shortest formatter typically picks `5E-324`. Special-case for parity.
+    if n.to_bits() == 1 {
+        return "4.9E-324".into();
+    }
+    if n.to_bits() == (1u64 | (1u64 << 63)) {
+        return "-4.9E-324".into();
+    }
     let r = n.round();
     if (n - r).abs() < 1e-9 && r.is_finite() && r >= (i64::MIN as f64) && r <= (i64::MAX as f64) {
-        return format!("{}.0", r as i64);
+        let abs = n.abs();
+        // Java `Double.toString`: scientific notation when exponent < -3 or >= 7.
+        if abs != 0.0 && (abs >= 1e7 || abs < 1e-3) {
+            return format!("{:E}", n);
+        }
+        return format!("{:.1}", n);
+    }
+    let abs = n.abs();
+    if abs != 0.0 && (abs >= 1e7 || abs < 1e-3) {
+        return format!("{:E}", n);
     }
     format!("{n}")
 }

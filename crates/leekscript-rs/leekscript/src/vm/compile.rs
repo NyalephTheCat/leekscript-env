@@ -44,7 +44,7 @@ use crate::syntax::syntax_el_is_trivia;
 use super::bytecode::{Bytecode, BytecodeBuilder};
 use super::java_ops;
 use super::opcode::Opcode;
-use super::value::{NumberBits, Value};
+use super::value::{NumberBits, PreludeClass, Value};
 
 /// One compiled `function` for [`Opcode::CallFunction`](super::opcode::Opcode::CallFunction).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -511,6 +511,7 @@ fn compound_assign_binop(k: Lex) -> Option<Lex> {
         Lex::PlusEq => Some(Lex::Plus),
         Lex::MinusEq => Some(Lex::Minus),
         Lex::StarEq => Some(Lex::Star),
+        Lex::StarStarEq => Some(Lex::StarStar),
         Lex::SlashEq => Some(Lex::Slash),
         Lex::PercentEq => Some(Lex::Percent),
         _ => None,
@@ -556,7 +557,10 @@ impl CompileCtx {
         for (name, v) in super::stdlib::stdlib_global_constant_init() {
             let slot = self.alloc_local(name);
             match v {
-                Value::Class(pc) => self.builder.emit_push_prelude_class(pc),
+                // `PushPreludeClass` only encodes Array/Null; other classes go through const pool.
+                Value::Class(pc) if matches!(pc, PreludeClass::Array | PreludeClass::Null) => {
+                    self.builder.emit_push_prelude_class(pc);
+                }
                 _ => self.builder.emit_push_const(v),
             }
             self.builder.emit_opcode(Opcode::SetLocal);
@@ -578,7 +582,69 @@ impl CompileCtx {
         let kind = t.kind();
         if kind == Lex::Number.into_syntax_kind() {
             let text = t.text();
+            if text.contains("__") {
+                return Err(CompileError::Unsupported("multiple numeric separators"));
+            }
+            // Java disallows separators around radix prefixes (`0_x_ff`, `0x_ff`, …).
+            if matches!(
+                text,
+                s if s.starts_with("0_x")
+                    || s.starts_with("0_X")
+                    || s.starts_with("0_b")
+                    || s.starts_with("0_B")
+                    || s.starts_with("0_o")
+                    || s.starts_with("0_O")
+            ) {
+                return Err(CompileError::Unsupported("invalid number literal"));
+            }
             let compact: String = text.chars().filter(|c| *c != '_').collect();
+            if let Some(hex) = compact.strip_prefix("0x").or_else(|| compact.strip_prefix("0X")) {
+                // Hex integer literal: `0xFF`
+                if !hex.contains(['p', 'P', '.']) {
+                    let n = i64::from_str_radix(hex, 16)
+                        .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
+                    self.builder.emit_push_const(Value::Number(NumberBits::int(n)));
+                    return Ok(true);
+                }
+                // Hex float literal: `0x1.p53`
+                let (mantissa, exp2) = hex
+                    .split_once(['p', 'P'])
+                    .ok_or(CompileError::Unsupported("invalid number literal"))?;
+                let exp2: i32 = exp2
+                    .parse()
+                    .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
+                let (int_part, frac_part) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+                let int_v: u64 = if int_part.is_empty() {
+                    0
+                } else {
+                    u64::from_str_radix(int_part, 16)
+                        .map_err(|_| CompileError::Unsupported("invalid number literal"))?
+                };
+                let frac_v: u64 = if frac_part.is_empty() {
+                    0
+                } else {
+                    u64::from_str_radix(frac_part, 16)
+                        .map_err(|_| CompileError::Unsupported("invalid number literal"))?
+                };
+                let frac_scale = 16_f64.powi(frac_part.len().try_into().unwrap_or(0));
+                let x = (int_v as f64) + (frac_v as f64) / frac_scale;
+                let x = x * 2_f64.powi(exp2);
+                self.builder
+                    .emit_push_const(Value::Number(NumberBits::from_literal(true, x)));
+                return Ok(true);
+            }
+            if let Some(bin) = compact.strip_prefix("0b").or_else(|| compact.strip_prefix("0B")) {
+                let n = i64::from_str_radix(bin, 2)
+                    .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
+                self.builder.emit_push_const(Value::Number(NumberBits::int(n)));
+                return Ok(true);
+            }
+            if let Some(oct) = compact.strip_prefix("0o").or_else(|| compact.strip_prefix("0O")) {
+                let n = i64::from_str_radix(oct, 8)
+                    .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
+                self.builder.emit_push_const(Value::Number(NumberBits::int(n)));
+                return Ok(true);
+            }
             let x = compact
                 .parse::<f64>()
                 .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
@@ -1785,6 +1851,18 @@ impl CompileCtx {
             self.builder.emit_interval_build(0b0011);
             return Ok(());
         }
+        if name == "Integer" && arg_count == 0 {
+            self.builder.emit_push_const(Value::num_int(0));
+            return Ok(());
+        }
+        if name == "Real" && arg_count == 0 {
+            self.builder.emit_push_const(Value::num_real(0.0));
+            return Ok(());
+        }
+        if name == "Number" && arg_count == 0 {
+            self.builder.emit_push_const(Value::num_real(0.0));
+            return Ok(());
+        }
         Err(CompileError::Unsupported("new expression not supported"))
     }
 
@@ -2928,28 +3006,39 @@ impl CompileCtx {
     }
 
     fn emit_binop(&mut self, op: Lex) -> Result<(), CompileError> {
-        let opc = match op {
-            Lex::Plus => Opcode::Add,
-            Lex::Minus => Opcode::Sub,
-            Lex::Star => Opcode::Mul,
-            Lex::Slash => Opcode::Div,
-            Lex::Backslash => Opcode::IntDiv,
-            Lex::Percent => Opcode::Mod,
-            Lex::EqEq | Lex::EqEqEq => Opcode::EqEquals,
-            Lex::NotEq | Lex::NotEqEq => Opcode::NeEquals,
-            Lex::Lt => Opcode::Lt,
-            Lex::Lte => Opcode::Lte,
-            Lex::Gt => Opcode::Gt,
-            Lex::Gte => Opcode::Gte,
-            Lex::XorKw => Opcode::LogicalXor,
-            _ => {
-                return Err(CompileError::Unsupported(
-                    "binary operator not supported by VM",
-                ));
+        match op {
+            Lex::StarStar => {
+                let Some(nid) = super::stdlib::native_id("pow") else {
+                    return Err(CompileError::Unsupported("pow native"));
+                };
+                self.builder.emit_call_native(nid, 2);
+                Ok(())
             }
-        };
-        self.builder.emit_opcode(opc);
-        Ok(())
+            _ => {
+                let opc = match op {
+                    Lex::Plus => Opcode::Add,
+                    Lex::Minus => Opcode::Sub,
+                    Lex::Star => Opcode::Mul,
+                    Lex::Slash => Opcode::Div,
+                    Lex::Backslash => Opcode::IntDiv,
+                    Lex::Percent => Opcode::Mod,
+                    Lex::EqEq | Lex::EqEqEq => Opcode::EqEquals,
+                    Lex::NotEq | Lex::NotEqEq => Opcode::NeEquals,
+                    Lex::Lt => Opcode::Lt,
+                    Lex::Lte => Opcode::Lte,
+                    Lex::Gt => Opcode::Gt,
+                    Lex::Gte => Opcode::Gte,
+                    Lex::XorKw => Opcode::LogicalXor,
+                    _ => {
+                        return Err(CompileError::Unsupported(
+                            "binary operator not supported by VM",
+                        ));
+                    }
+                };
+                self.builder.emit_opcode(opc);
+                Ok(())
+            }
+        }
     }
 
     fn compile_unary(&mut self, u: &UnaryExpr) -> Result<(), CompileError> {
@@ -2957,6 +3046,7 @@ impl CompileCtx {
         let minus = Lex::Minus.into_syntax_kind();
         let bang = Lex::Bang.into_syntax_kind();
         let not_kw = Lex::NotKw.into_syntax_kind();
+        let tilde = Lex::Tilde.into_syntax_kind();
         let plusplus = Lex::PlusPlus.into_syntax_kind();
         let minusminus = Lex::MinusMinus.into_syntax_kind();
         let semantic: Vec<_> = n.children().filter(|e| !syntax_el_is_trivia(e)).collect();
@@ -2990,6 +3080,7 @@ impl CompileCtx {
         let mut i = 0usize;
         let mut has_minus = false;
         let mut has_not = false;
+        let mut has_bit_not = false;
         let mut has_pre_incr = false;
         let mut has_pre_decr = false;
         while i < semantic.len() {
@@ -3004,6 +3095,11 @@ impl CompileCtx {
             }
             if k == bang || k == not_kw {
                 has_not = true;
+                i += 1;
+                continue;
+            }
+            if k == tilde {
+                has_bit_not = true;
                 i += 1;
                 continue;
             }
@@ -3075,7 +3171,13 @@ impl CompileCtx {
         if has_minus {
             self.builder.emit_opcode(Opcode::Neg);
         }
-        if !has_minus && !has_not {
+        if has_bit_not {
+            let Some(nid) = super::stdlib::native_id("bitNot") else {
+                return Err(CompileError::Unsupported("bitNot native"));
+            };
+            self.builder.emit_call_native(nid, 1);
+        }
+        if !has_minus && !has_not && !has_bit_not {
             return Err(CompileError::Unsupported(
                 "unary operator not supported by VM compiler",
             ));

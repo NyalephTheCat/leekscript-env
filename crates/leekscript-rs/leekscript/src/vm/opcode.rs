@@ -99,4 +99,6 @@ pub enum Opcode {
     /// Followed by `u8` type tag (same numbering as `TYPE_*`): pushes bool.
     /// Pops one value (lhs).
     InstanceofTag = 46,
+    /// Pop one value; if it is a real that is integer-like, coerce to an integer.
+    CoerceIntIfExact = 47,
 }

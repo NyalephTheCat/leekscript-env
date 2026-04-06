@@ -261,6 +261,21 @@ fn nf_log2(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 
 fn nf_pow(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 140)?;
+    if args.len() != 2 {
+        return Err(bad_argc(2, args.len()));
+    }
+    // Java keeps integer-ness for simple integer powers when representable.
+    if let (Value::Number(super::value::NumberBits::Int(bi)), Value::Number(super::value::NumberBits::Int(ei))) =
+        (&args[0], &args[1])
+    {
+        if *ei >= 0 {
+            if let Ok(exp) = u32::try_from(*ei) {
+                if let Some(r) = bi.checked_pow(exp) {
+                    return Ok(Value::num_int(r));
+                }
+            }
+        }
+    }
     let (b, e) = two_nums(args)?;
     Ok(Value::num_real(b.powf(e)))
 }
@@ -396,6 +411,12 @@ fn nf_bit_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
     let x = u64_bits(one_num(args)?);
     Ok(Value::num_int(x.reverse_bits() as i64))
+}
+
+fn nf_bit_not(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
+    ch(vm, 1)?;
+    let n = f64_as_i64_trunc(one_num(args)?);
+    Ok(Value::num_int(!n))
 }
 
 fn nf_bits_to_real(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -1587,7 +1608,7 @@ fn nf_json_encode(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 fn nf_json_decode(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 20)?;
     let s = one_string(args)?;
-    super::json::decode(s).map_err(|_| VmError::BadNativeArgs)
+    Ok(super::json::decode(s).unwrap_or(Value::Null))
 }
 
 fn nf_array_concat(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -1616,7 +1637,8 @@ fn nf_array_concat(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 pub fn stdlib_global_constant_init() -> impl Iterator<Item = (&'static str, Value)> {
     [
         ("Array", Value::Class(super::value::PreludeClass::Array)),
-        ("E", Value::num_real(2.71828182846)),
+        ("Boolean", Value::Class(super::value::PreludeClass::Boolean)),
+        ("E", Value::num_real(std::f64::consts::E)),
         ("Infinity", Value::num_real(f64::INFINITY)),
         (
             "Integer",
@@ -1625,11 +1647,30 @@ pub fn stdlib_global_constant_init() -> impl Iterator<Item = (&'static str, Valu
                 (Value::String("MIN_VALUE".into()), Value::num_int(i64::MIN)),
             ]),
         ),
+        (
+            "Real",
+            Value::Object(vec![
+                (
+                    Value::String("MAX_VALUE".into()),
+                    Value::num_real(f64::MAX),
+                ),
+                (
+                    Value::String("MIN_VALUE".into()),
+                    Value::num_real(f64::from_bits(1)),
+                ),
+            ]),
+        ),
+        ("Interval", Value::Class(super::value::PreludeClass::Interval)),
+        ("Map", Value::Class(super::value::PreludeClass::Map)),
         ("NaN", Value::num_real(f64::NAN)),
+        ("Number", Value::Class(super::value::PreludeClass::Number)),
         ("Null", Value::Class(super::value::PreludeClass::Null)),
-        ("PI", Value::num_real(3.14159265359)),
+        ("Object", Value::Class(super::value::PreludeClass::Object)),
+        ("PI", Value::num_real(std::f64::consts::PI)),
         ("SORT_ASC", Value::num_int(0)),
         ("SORT_DESC", Value::num_int(1)),
+        ("Set", Value::Class(super::value::PreludeClass::Set)),
+        ("String", Value::Class(super::value::PreludeClass::String)),
         ("TYPE_ARRAY", Value::num_int(4)),
         ("TYPE_BOOLEAN", Value::num_int(2)),
         ("TYPE_CLASS", Value::num_int(6)),
@@ -1684,6 +1725,7 @@ static STDLIB_NATIVES: &[(&str, NativeFn)] = &[
     ("randInt", nf_rand_int),
     ("bitCount", nf_bit_count),
     ("bitReverse", nf_bit_reverse),
+    ("bitNot", nf_bit_not),
     ("bitsToReal", nf_bits_to_real),
     ("byteReverse", nf_byte_reverse),
     ("leadingZeros", nf_leading_zeros),

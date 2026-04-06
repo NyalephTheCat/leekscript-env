@@ -391,15 +391,20 @@ fn define_lexer_numbers_and_strings(g: &mut GrammarBuilder) {
                         },
                     );
                     g.one_or_more(|g| {
-                        g.choice3(
+                        // Accept any digits here so invalid binary literals (`0b...7...`)
+                        // are tokenized as a single NUMBER and rejected later (Java parity).
+                        g.choice4(
                             |g| {
-                                g.byte(b'0');
-                            },
-                            |g| {
-                                g.byte(b'1');
+                                g.class(classes::DIGIT);
                             },
                             |g| {
                                 g.byte(b'_');
+                            },
+                            |g| {
+                                g.byte(b'.');
+                            },
+                            |g| {
+                                g.class(classes::IDENT_START);
                             },
                         );
                     });

@@ -74,6 +74,7 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::SetClearLocal as usize] = op_set_clear_local;
     table[Opcode::IntervalBuild as usize] = op_interval_build;
     table[Opcode::InstanceofTag as usize] = op_instanceof_tag;
+    table[Opcode::CoerceIntIfExact as usize] = op_coerce_int_if_exact;
     table
 };
 
@@ -783,6 +784,18 @@ fn op_object_build(vm: &mut Vm) -> Result<(), VmError> {
     }
     pairs.reverse();
     vm.push_stack(Value::Object(pairs))?;
+    Ok(())
+}
+
+fn op_coerce_int_if_exact(vm: &mut Vm) -> Result<(), VmError> {
+    let v = vm.pop_stack()?;
+    match v {
+        Value::Number(super::value::NumberBits::Real(x)) => {
+            let nb = super::value::NumberBits::coerce_integerish_f64(x);
+            vm.push_stack(Value::Number(nb))?;
+        }
+        _ => vm.push_stack(v)?,
+    }
     Ok(())
 }
 
