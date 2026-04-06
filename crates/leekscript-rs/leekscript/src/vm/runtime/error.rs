@@ -2,7 +2,7 @@
 
 use core::fmt;
 
-/// Failure while executing [`super::Vm`](super::Vm).
+/// Failure while executing [`Vm`](crate::vm::runtime::interpreter::Vm).
 #[derive(Debug, Clone, PartialEq)]
 pub enum VmError {
     /// Program counter moved past the end of the code buffer without `Return`.
@@ -31,19 +31,19 @@ pub enum VmError {
     BadNativeArgs,
     /// Local slot index out of range for the current frame.
     BadLocal(u16),
-    /// [`Vm::max_operations`](super::Vm::max_operations) exceeded (Leek Wars `Error.TOO_MUCH_OPERATIONS`).
+    /// [`Vm::max_operations`](crate::vm::runtime::interpreter::Vm::max_operations) exceeded (Leek Wars `Error.TOO_MUCH_OPERATIONS`).
     TooManyOperations { limit: u64, attempted_total: u64 },
-    /// [`Vm::max_ram_quads`](super::Vm::max_ram_quads) exceeded (Leek Wars `Error.OUT_OF_MEMORY`).
+    /// [`Vm::max_ram_quads`](crate::vm::runtime::interpreter::Vm::max_ram_quads) exceeded (Leek Wars `Error.OUT_OF_MEMORY`).
     OutOfMemory { limit: u64, attempted_total: u64 },
-    /// [`Opcode::CallFunction`](super::opcode::Opcode::CallFunction) id out of range.
+    /// [`Opcode::CallFunction`](crate::vm::ir::Opcode::CallFunction) id out of range.
     BadFunctionIndex(u16),
     /// Call arity does not match the compiled function.
     BadFunctionArity { expected: u8, got: u8 },
     /// Attempted to call a non-callable value.
-    BadValueCall(super::value::Value),
-    /// [`Opcode::Throw`](super::opcode::Opcode::Throw) with no enclosing [`Opcode::TryBegin`](super::opcode::Opcode::TryBegin).
-    UncaughtThrow(super::value::Value),
-    /// [`Opcode::TryEnd`](super::opcode::Opcode::TryEnd) without a matching [`Opcode::TryBegin`](super::opcode::Opcode::TryBegin).
+    BadValueCall(crate::vm::value::Value),
+    /// [`Opcode::Throw`](crate::vm::ir::Opcode::Throw) with no enclosing [`Opcode::TryBegin`](crate::vm::ir::Opcode::TryBegin).
+    UncaughtThrow(crate::vm::value::Value),
+    /// [`Opcode::TryEnd`](crate::vm::ir::Opcode::TryEnd) without a matching [`Opcode::TryBegin`](crate::vm::ir::Opcode::TryBegin).
     TryStackUnderflow,
 }
 

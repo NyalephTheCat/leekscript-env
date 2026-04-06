@@ -183,7 +183,6 @@ impl ClassDecl {
     /// Superclass name after `extends`, if any.
     pub fn extends(&self) -> Option<String> {
         let ext = Lex::ExtendsKw.into_syntax_kind();
-        let id = Lex::Ident.into_syntax_kind();
         let mut after_extends = false;
         for t in self.syntax().child_tokens() {
             let k = t.kind();
@@ -191,8 +190,28 @@ impl ClassDecl {
                 after_extends = true;
                 continue;
             }
-            if after_extends && k == id {
-                return Some(t.text().to_string());
+            if after_extends {
+                if let Some(lx) = t.kind_as::<Lex>() {
+                    if matches!(
+                        lx,
+                        Lex::Ident
+                            | Lex::ArrayKw
+                            | Lex::MapKw
+                            | Lex::ObjectKw
+                            | Lex::SetTypeKw
+                            | Lex::FunctionTypeKw
+                            | Lex::IntervalKw
+                            | Lex::ClassTypeKw
+                            | Lex::StringTypeKw
+                            | Lex::IntegerKw
+                            | Lex::RealKw
+                            | Lex::BooleanKw
+                            | Lex::AnyKw
+                            | Lex::VoidKw
+                    ) {
+                        return Some(t.text().to_string());
+                    }
+                }
             }
         }
         None

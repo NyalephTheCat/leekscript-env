@@ -96,3 +96,7 @@ pub struct BuiltinTypeNameExpr(SyntaxNode);
 #[derive(Debug, Clone, AstNode)]
 #[ast(kind = Node::BuiltinStringifyExpr)]
 pub struct BuiltinStringifyExpr(SyntaxNode);
+
+#[derive(Debug, Clone, AstNode)]
+#[ast(kind = Node::RefExpr)]
+pub struct RefExpr(SyntaxNode);

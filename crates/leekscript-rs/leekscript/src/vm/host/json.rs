@@ -1,10 +1,35 @@
 //! Minimal JSON encode/decode for VM values (Java `jsonEncode` / `jsonDecode` parity subset).
 
-use super::value::{NumberBits, Value};
+use crate::vm::value::{NumberBits, Value};
+use std::collections::{BTreeMap, HashSet};
 
 /// JSON text for a value (compact: no extra spaces).
 #[must_use]
 pub fn encode(v: &Value) -> String {
+    let mut visited: HashSet<usize> = HashSet::new();
+    encode_with_visited(v, &mut visited)
+}
+
+fn value_visit_id(v: &Value) -> Option<usize> {
+    match v {
+        Value::Array(a) => Some(std::rc::Rc::as_ptr(a) as usize),
+        Value::Map(m) => Some(std::rc::Rc::as_ptr(m) as usize),
+        Value::Object(o) => Some(std::rc::Rc::as_ptr(o) as usize),
+        Value::Instance { fields, .. } => Some(std::rc::Rc::as_ptr(fields) as usize),
+        _ => None,
+    }
+}
+
+fn encode_with_visited(v: &Value, visited: &mut HashSet<usize>) -> String {
+    // Java `toJSON` skips revisiting composite values (arrays/maps/objects).
+    if let Some(id) = value_visit_id(v) {
+        if visited.contains(&id) {
+            // For JSON, cycles/repeats become "null" / omitted (omission is handled by callers).
+            return "null".into();
+        }
+        visited.insert(id);
+    }
+
     match v {
         Value::Null => "null".into(),
         Value::Bool(true) => "true".into(),
@@ -17,6 +42,7 @@ pub fn encode(v: &Value) -> String {
         Value::String(s) => encode_string(s),
         Value::Interval(_) => "null".into(),
         Value::Function { .. } => "null".into(),
+        Value::Closure { .. } => "null".into(),
         Value::NativeFunction { .. } => "null".into(),
         Value::Set(s) => {
             let mut out = String::from('[');
@@ -24,56 +50,81 @@ pub fn encode(v: &Value) -> String {
                 if i > 0 {
                     out.push(',');
                 }
-                out.push_str(&encode(v));
+                let enc = encode_with_visited(v, visited);
+                out.push_str(&enc);
             }
             out.push(']');
             out
         }
         Value::Array(a) => {
+            let a = a.borrow();
             let mut out = String::from("[");
-            for (i, x) in a.iter().enumerate() {
-                if i > 0 {
+            let mut first = true;
+            for x in a.iter() {
+                // Skip already-visited composite values (Java behavior).
+                if let Some(id) = value_visit_id(x) {
+                    if visited.contains(&id) {
+                        continue;
+                    }
+                }
+                if !first {
                     out.push(',');
                 }
-                out.push_str(&encode(x));
+                first = false;
+                out.push_str(&encode_with_visited(x, visited));
             }
             out.push(']');
             out
         }
         Value::Map(m) | Value::Object(m) => {
+            let m = m.borrow();
             let mut out = String::from("{");
-            // Java jsonEncode deterministically orders object keys (lexicographic by key string).
-            // This matters for parity tests and avoids hash/insertion-order differences.
-            let mut entries: Vec<(&Value, &Value, String)> = m
-                .iter()
-                .map(|(k, v)| (k, v, sort_key_string(k)))
-                .collect();
-            entries.sort_by(|a, b| a.2.cmp(&b.2));
-            for (i, (k, v, _)) in entries.into_iter().enumerate() {
-                if i > 0 {
+            // Java builds a TreeMap<String, Object> of keys, so keys are sorted lexicographically
+            // and duplicate stringified keys overwrite earlier ones.
+            let mut sorted: BTreeMap<String, (&Value, &Value)> = BTreeMap::new();
+            for (k, v) in m.iter() {
+                sorted.insert(json_key_string(k), (k, v));
+            }
+            let mut first = true;
+            for (string_key, (_orig_key, v)) in sorted.into_iter() {
+                // Skip already-visited composite values (Java behavior: omit field).
+                if let Some(id) = value_visit_id(v) {
+                    if visited.contains(&id) {
+                        continue;
+                    }
+                }
+                if !first {
                     out.push(',');
                 }
-                out.push_str(&encode_key(k));
+                first = false;
+                out.push_str(&encode_string(&string_key));
                 out.push(':');
-                out.push_str(&encode(v));
+                out.push_str(&encode_with_visited(v, visited));
             }
             out.push('}');
             out
         }
+        Value::Instance { .. } => "null".into(),
     }
 }
 
-fn sort_key_string(k: &Value) -> String {
+fn json_key_string(k: &Value) -> String {
+    // Matches Java `ai.string(key)` used by `MapLeekValue.toJSON`:
+    // - strings are returned as-is (no quotes)
+    // - numbers/bools/null are stringified without quotes
+    // - composite values use their export string (cycle-safe)
     match k {
         Value::String(s) => s.to_string(),
-        _ => encode(k),
-    }
-}
-
-fn encode_key(k: &Value) -> String {
-    match k {
-        Value::String(s) => encode_string(s),
-        _ => encode_string(&encode(k)),
+        Value::Null
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::Class(_)
+        | Value::Function { .. }
+        | Value::Closure { .. }
+        | Value::NativeFunction { .. }
+        | Value::Interval(_)
+        | Value::Set(_) => k.to_leek_coerce_string(),
+        _ => k.to_leek_export_string(),
     }
 }
 
@@ -227,7 +278,7 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         if self.peek() == Some(b']') {
             self.i += 1;
-            return Ok(Value::Array(items));
+            return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(items))));
         }
         loop {
             items.push(self.parse_value()?);
@@ -238,7 +289,7 @@ impl<'a> Parser<'a> {
                 _ => return Err(()),
             }
         }
-        Ok(Value::Array(items))
+        Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(items))))
     }
 
     fn parse_object(&mut self) -> Result<Value, ()> {
@@ -247,7 +298,7 @@ impl<'a> Parser<'a> {
         let mut pairs: Vec<(Value, Value)> = Vec::new();
         if self.peek() == Some(b'}') {
             self.i += 1;
-            return Ok(Value::Object(pairs));
+            return Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(pairs))));
         }
         loop {
             self.skip_ws();
@@ -265,7 +316,7 @@ impl<'a> Parser<'a> {
                 _ => return Err(()),
             }
         }
-        Ok(Value::Object(pairs))
+        Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(pairs))))
     }
 
     fn parse_number(&mut self) -> Result<Value, ()> {

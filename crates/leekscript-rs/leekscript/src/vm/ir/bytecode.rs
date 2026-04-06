@@ -2,8 +2,9 @@
 
 use std::vec::Vec;
 
-use super::opcode::Opcode;
-use super::value::{PreludeClass, Value};
+use crate::vm::value::{PreludeClass, Value};
+
+use super::Opcode;
 
 /// Executable program: raw opcode stream plus constant pool.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -101,6 +102,29 @@ impl BytecodeBuilder {
     pub fn emit_call_value(&mut self, argc: u8) {
         self.emit_opcode(Opcode::CallValue);
         self.emit_u8(argc);
+    }
+
+    pub fn emit_make_closure(&mut self, fid: u16, capture_slots: &[u16]) {
+        self.emit_opcode(Opcode::MakeClosure);
+        self.emit_u16_operand(fid);
+        let n = u16::try_from(capture_slots.len()).unwrap_or(u16::MAX);
+        self.emit_u16_operand(n);
+        for &s in capture_slots {
+            self.emit_u16_operand(s);
+        }
+    }
+
+    pub fn emit_instance_build(&mut self, class_name: &str, pair_count: u16, final_fields: &[String]) {
+        self.emit_opcode(Opcode::InstanceBuild);
+        let idx = self.intern_const(Value::String(class_name.to_string()));
+        self.code.extend_from_slice(&idx.to_le_bytes());
+        self.emit_u16_operand(pair_count);
+        let n = u16::try_from(final_fields.len()).unwrap_or(u16::MAX);
+        self.emit_u16_operand(n);
+        for f in final_fields {
+            let fi = self.intern_const(Value::String(f.clone()));
+            self.code.extend_from_slice(&fi.to_le_bytes());
+        }
     }
 
     /// [`Opcode::TryBegin`](Opcode::TryBegin) with placeholder `u32` catch PC; patch via [`Self::patch_u32_at`].

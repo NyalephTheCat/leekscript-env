@@ -3,7 +3,9 @@
 use leekscript::vm::{
     BytecodeBuilder, CompileError, NativeFn, NumberBits, Opcode, Value, Vm, VmError,
     compile_chunk_v4, compile_chunk_v4_with_includes, op_illegal, stdlib_global_constant_init,
+    stdlib_global_function_init,
 };
+
 
 #[test]
 fn loop_bytecode_includes_charge_ops_for_java_style_budget() {
@@ -37,7 +39,8 @@ fn foreach_over_array_sums() {
 fn global_decl_binds_local_slot() {
     let chunk = compile_chunk_v4("global integer x; return x;").expect("compile");
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
-    assert_eq!(vm.run().unwrap(), Value::Null);
+    // Java-style typed integer globals default to 0 (not null).
+    assert_eq!(vm.run().unwrap(), Value::num_int(0));
 }
 
 #[test]
@@ -168,7 +171,7 @@ fn array_literal_with_more_than_255_elements_runs() {
     let Value::Array(a) = v else {
         panic!("expected array");
     };
-    assert_eq!(a.len(), 260);
+    assert_eq!(a.borrow().len(), 260);
 }
 
 #[test]
@@ -190,7 +193,7 @@ fn map_literal_compiles_to_map_build() {
     assert!(chunk.bytecode.code.contains(&(Opcode::MapBuild as u8)));
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     let v = vm.run().expect("run");
-    assert!(matches!(v, Value::Map(m) if m.is_empty()));
+    assert!(matches!(v, Value::Map(m) if m.borrow().is_empty()));
 }
 
 #[test]
@@ -201,9 +204,10 @@ fn map_merge_put_if_absent_matches_java() {
     let Value::Map(m) = v else {
         panic!("expected map");
     };
-    assert_eq!(m.len(), 1);
-    assert_eq!(m[0].0, Value::num_int(1));
-    assert_eq!(m[0].1, Value::num_int(2));
+    let mb = m.borrow();
+    assert_eq!(mb.len(), 1);
+    assert_eq!(mb[0].0, Value::num_int(1));
+    assert_eq!(mb[0].1, Value::num_int(2));
 }
 
 #[test]
@@ -225,8 +229,8 @@ fn compile_and_run_arithmetic_return() {
     let chunk = compile_chunk_v4("return 2 + 3 * 4;").expect("compile");
     assert_eq!(
         chunk.local_slots,
-        stdlib_global_constant_init().count(),
-        "prelude stdlib constants reserve locals"
+        stdlib_global_constant_init().count() + stdlib_global_function_init().count(),
+        "prelude stdlib bindings reserve locals"
     );
     let mut vm = Vm::from_compiled_chunk(chunk).expect("locals");
     let v = vm.run().expect("run");
@@ -330,9 +334,13 @@ fn operations_and_ram_counters_after_run() {
     let prelude_ram: u64 = stdlib_global_constant_init()
         .map(|(_, v)| v.ram_quads())
         .sum();
+    let prelude_fn_ram: u64 = stdlib_global_function_init()
+        .map(|(_, v)| v.ram_quads())
+        .sum();
     assert_eq!(
-        vm.ram_quads, prelude_ram,
-        "locals still hold stdlib constants"
+        vm.ram_quads,
+        prelude_ram + prelude_fn_ram,
+        "locals still hold stdlib bindings"
     );
 }
 
@@ -509,4 +517,19 @@ fn set_put_on_local_after_set_literal_compiles() {
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
     let got = vm.run().unwrap();
     assert_eq!(got, Value::Set(vec![Value::num_int(1), Value::num_int(2), Value::num_int(3)]));
+}
+
+#[test]
+fn testobject_style_class_fields_and_foreach() {
+    let fields_only = "class Test { a b c } return Test.fields";
+    let chunk_f = compile_chunk_v4(fields_only).expect("compile Test.fields");
+    let mut vm = Vm::from_compiled_chunk(chunk_f).unwrap();
+    let f = vm.run().unwrap();
+    assert_eq!(f.to_leek_export_string(), r#"["a", "b", "c"]"#);
+
+    let full = "class Test { a b c } var test2 = new Test() for (var field in Test.fields) { test2[field] = 8 } return test2";
+    let chunk = compile_chunk_v4(full).expect("compile full");
+    let mut vm2 = Vm::from_compiled_chunk(chunk).unwrap();
+    let got = vm2.run().unwrap();
+    assert_eq!(got.to_leek_export_string(), "Test {a: 8, b: 8, c: 8}");
 }

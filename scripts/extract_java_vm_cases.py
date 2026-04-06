@@ -133,14 +133,67 @@ def read_java_double_quoted_string(line: str, start: int) -> tuple[str, int] | N
             continue
         if c == '"':
             raw = "".join(buf)
-            try:
-                decoded = bytes(raw, "utf-8").decode("unicode_escape")
-            except UnicodeDecodeError:
-                decoded = raw
-            return decoded, i + 1
+            return decode_java_escapes(raw), i + 1
         buf.append(c)
         i += 1
     return None
+
+
+def decode_java_escapes(raw: str) -> str:
+    """
+    Decode Java-style escapes inside an already-decoded Python `str`.
+
+    Important: the input `raw` may contain non-ASCII characters directly
+    (e.g. "©", "é"). We must NOT run a bytes-based unicode_escape decode,
+    or we'd corrupt UTF-8 into mojibake ("Ã©", "Â©", ...).
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(raw):
+        c = raw[i]
+        if c != "\\":
+            out.append(c)
+            i += 1
+            continue
+
+        # Trailing backslash: keep as-is.
+        if i + 1 >= len(raw):
+            out.append("\\")
+            i += 1
+            continue
+
+        n = raw[i + 1]
+        if n == "n":
+            out.append("\n")
+            i += 2
+        elif n == "r":
+            out.append("\r")
+            i += 2
+        elif n == "t":
+            out.append("\t")
+            i += 2
+        elif n in {'"', "'", "\\"}:
+            out.append(n)
+            i += 2
+        elif n == "u":
+            # Java: exactly 4 hex digits after \u
+            if i + 6 <= len(raw):
+                hex4 = raw[i + 2 : i + 6]
+                if all(ch in "0123456789abcdefABCDEF" for ch in hex4):
+                    out.append(chr(int(hex4, 16)))
+                    i += 6
+                else:
+                    out.append("\\u")
+                    i += 2
+            else:
+                out.append("\\u")
+                i += 2
+        else:
+            # Unknown escape: drop the backslash like many languages do.
+            out.append(n)
+            i += 2
+
+    return "".join(out)
 
 
 def parse_equals_expected(inner: str) -> str | None:
@@ -204,10 +257,134 @@ def pascal_to_snake(stem: str) -> str:
     return s2.lower()
 
 
+RUST_IDENT_RE = re.compile(r"[^a-zA-Z0-9_]+")
+
+RUST_KEYWORDS = {
+    "as",
+    "break",
+    "const",
+    "continue",
+    "crate",
+    "else",
+    "enum",
+    "extern",
+    "false",
+    "fn",
+    "for",
+    "if",
+    "impl",
+    "in",
+    "let",
+    "loop",
+    "match",
+    "mod",
+    "move",
+    "mut",
+    "pub",
+    "ref",
+    "return",
+    "self",
+    "Self",
+    "static",
+    "struct",
+    "super",
+    "trait",
+    "true",
+    "type",
+    "unsafe",
+    "use",
+    "where",
+    "while",
+    # 2018+
+    "async",
+    "await",
+    "dyn",
+    # reserved
+    "abstract",
+    "become",
+    "box",
+    "do",
+    "final",
+    "macro",
+    "override",
+    "priv",
+    "try",
+    "typeof",
+    "unsized",
+    "virtual",
+    "yield",
+}
+
+
+def rust_ident(s: str) -> str:
+    """
+    Best-effort conversion to a valid Rust identifier (ASCII-ish).
+    Used for generated test/module names only.
+    """
+    s = s.strip()
+    s = s.replace("-", "_").replace(".", "_").replace(" ", "_")
+    s = RUST_IDENT_RE.sub("_", s)
+    s = re.sub(r"_+", "_", s)
+    s = s.strip("_")
+    if not s:
+        return "unknown"
+    if s[0].isdigit():
+        s = "_" + s
+    return s.lower()
+
+
+def rust_safe_ident(s: str) -> str:
+    """Return an identifier safe to use in Rust code (escapes keywords)."""
+    if s in RUST_KEYWORDS:
+        return "r#" + s
+    return s
+
+
 def java_file_to_rust_ident(java_file: str) -> tuple[str, str]:
     stem = java_file.removesuffix(".java")
     snake = pascal_to_snake(stem)
     return snake.upper(), snake
+
+
+def java_file_category(java_file: str) -> str:
+    """
+    Coarse categories to keep the Rust integration test file navigable.
+
+    This is intentionally a heuristic grouping based on Java file stem;
+    it does not affect case extraction, only the generated Rust test layout.
+    """
+    stem = java_file.removesuffix(".java")
+    if stem.endswith("Stress"):
+        stem = stem[: -len("Stress")]
+
+    collections = {"Array", "Map", "Set", "Object"}
+    control_flow = {"If", "Loops", "Switch", "Interval"}
+    operators = {"Operators", "Operations"}
+    primitives = {"Boolean", "Number", "String"}
+    io = {"Files", "JSON", "System"}
+    language = {"Function", "Class", "Globals", "Reference", "Narrowing", "Comments"}
+    misc = {"General", "EdgeCases", "Euler"}
+
+    if stem.startswith("Test"):
+        name = stem[len("Test") :]
+    else:
+        name = stem
+
+    if name in collections:
+        return "collections"
+    if name in control_flow:
+        return "control_flow"
+    if name in operators:
+        return "operators"
+    if name in primitives:
+        return "primitives"
+    if name in io:
+        return "io"
+    if name in language:
+        return "language"
+    if name in misc:
+        return "misc"
+    return "other"
 
 
 def parse_chain(rest_after_code_string: str) -> tuple[dict[str, int], str, object] | None:
@@ -310,10 +487,6 @@ def extract_line_cases(line: str) -> list[tuple[str, str, str, object, dict[str,
         if read is None:
             continue
         code, after_quote = read
-        try:
-            code = bytes(code, "utf-8").decode("unicode_escape")
-        except UnicodeDecodeError:
-            pass
         parsed = parse_chain(line[after_quote:])
         if parsed is None:
             continue
@@ -378,25 +551,45 @@ def main() -> None:
         print(f"error: missing {JAVA_DIR}", file=sys.stderr)
         sys.exit(1)
 
-    by_file: dict[str, list[tuple[str, str, str, object, dict[str, int], int, int, bool]]] = (
-        defaultdict(list)
-    )
+    # Keyed by (java_file, java_test_method_name)
+    by_section: dict[
+        tuple[str, str],
+        list[tuple[str, str, str, object, dict[str, int], int, int, bool]],
+    ] = defaultdict(list)
+
+    # Also keep per-file order for deterministic grouping.
+    file_to_sections: dict[str, list[str]] = defaultdict(list)
 
     for path in sorted(JAVA_DIR.glob("Test*.java")):
         if path.name in SKIP_FILES:
             continue
         java_file = path.name
+        current_java_test_method: str | None = None
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            # JUnit style in this repo: `public void testX_y()` methods.
+            mm = re.search(r"\bpublic\s+void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", line)
+            if mm:
+                current_java_test_method = mm.group(1)
+                if current_java_test_method not in file_to_sections[java_file]:
+                    file_to_sections[java_file].append(current_java_test_method)
+
             for method, code, term, payload, mods, vmin, vmax, strict in extract_line_cases(
                 line
             ):
                 cid = f"{java_file}:{lineno}:{method}.{term}"
-                by_file[java_file].append(
+                section = current_java_test_method or "unknown_section"
+                if section not in file_to_sections[java_file]:
+                    file_to_sections[java_file].append(section)
+                by_section[(java_file, section)].append(
                     (cid, method, code, term, payload, mods, vmin, vmax, strict)
                 )
 
-    sorted_files = sorted(by_file.keys())
-    total = sum(len(by_file[f]) for f in sorted_files)
+    sorted_files = sorted(file_to_sections.keys())
+    total = sum(
+        len(by_section[(jf, sec)])
+        for jf in sorted_files
+        for sec in file_to_sections[jf]
+    )
 
     out_cases: list[str] = []
     out_cases.append("// @generated by scripts/extract_java_vm_cases.py — do not edit by hand")
@@ -431,50 +624,56 @@ def main() -> None:
     out_cases.append("}")
     out_cases.append("")
 
-    group_rows: list[tuple[str, str, str]] = []
+    group_rows: list[tuple[str, str, str, str]] = []
+    # Each group row: (java_file, java_test_method, group_ident, static_name)
 
     for java_file in sorted_files:
-        rows = by_file[java_file]
-        static_suffix, group_snake = java_file_to_rust_ident(java_file)
-        static_name = f"VM_JAVA_CASES_{static_suffix}"
-        out_cases.append(f"pub static {static_name}: &[JavaVmCase] = &[")
+        for section in file_to_sections[java_file]:
+            rows = by_section.get((java_file, section), [])
+            if not rows:
+                continue
 
-        for cid, method, code, term, payload, mods, vmin, vmax, strict in rows:
-            mo = mods.get("max_ops")
-            mr = mods.get("max_ram")
-            max_ops_rust = f"Some({mo})" if mo is not None else "None"
-            max_ram_rust = f"Some({mr})" if mr is not None else "None"
-            expect_rust = emit_expect_rust(term, payload)
-            out_cases.append(
-                emit_case_row(
-                    cid,
-                    method,
-                    code,
-                    expect_rust,
-                    vmin,
-                    vmax,
-                    strict,
-                    max_ops_rust,
-                    max_ram_rust,
+            static_suffix, _file_snake = java_file_to_rust_ident(java_file)
+            section_ident = rust_ident(section)
+            group_ident = f"{rust_ident(java_file.removesuffix('.java'))}__{section_ident}"
+            static_name = f"VM_JAVA_CASES_{static_suffix}__{section_ident.upper()}"
+
+            out_cases.append(f"pub static {static_name}: &[JavaVmCase] = &[")
+            for cid, method, code, term, payload, mods, vmin, vmax, strict in rows:
+                mo = mods.get("max_ops")
+                mr = mods.get("max_ram")
+                max_ops_rust = f"Some({mo})" if mo is not None else "None"
+                max_ram_rust = f"Some({mr})" if mr is not None else "None"
+                expect_rust = emit_expect_rust(term, payload)
+                out_cases.append(
+                    emit_case_row(
+                        cid,
+                        method,
+                        code,
+                        expect_rust,
+                        vmin,
+                        vmax,
+                        strict,
+                        max_ops_rust,
+                        max_ram_rust,
+                    )
                 )
-            )
+            out_cases.append("];")
+            out_cases.append("")
 
-        out_cases.append("];")
-        out_cases.append("")
-        group_rows.append((java_file, group_snake, static_name))
+            group_rows.append((java_file, section, group_ident, static_name))
 
     out_cases.append(f"pub const VM_JAVA_SUITE_TOTAL_CASES: usize = {total};")
     out_cases.append("")
+    out_cases.append("/// `(java_filename, java_test_method, group_ident, cases)`.")
     out_cases.append(
-        "/// `(java_filename, group_snake, cases)` — filter tests: `cargo test java_vm_export_<snake>`."
+        "pub static VM_JAVA_GROUPS: &[(&'static str, &'static str, &'static str, &'static [JavaVmCase])] = &["
     )
-    out_cases.append(
-        "pub static VM_JAVA_GROUPS: &[(&'static str, &'static str, &'static [JavaVmCase])] = &["
-    )
-    for java_file, group_snake, static_name in group_rows:
+    for java_file, section, group_ident, static_name in group_rows:
         jf = rust_string_literal(java_file)
-        gs = rust_string_literal(group_snake)
-        out_cases.append(f"    ({jf}, {gs}, {static_name}),")
+        sec = rust_string_literal(section)
+        gi = rust_string_literal(group_ident)
+        out_cases.append(f"    ({jf}, {sec}, {gi}, {static_name}),")
     out_cases.append("];")
     out_cases.append("")
 
@@ -483,14 +682,40 @@ def main() -> None:
         "// @generated by scripts/extract_java_vm_cases.py — do not edit by hand"
     )
     out_inc.append("")
-    for java_file, group_snake, static_name in group_rows:
-        fn_name = f"java_vm_export_{group_snake}"
-        out_inc.append("#[test]")
-        out_inc.append(
-            f'#[ignore = "Java VM parity — {java_file} — run with --ignored"]'
-        )
-        out_inc.append(f"fn {fn_name}() {{")
-        out_inc.append(f"    run_cases(cases_generated::{static_name});")
+    # Group output by category -> Java file -> @Test method name ("sections").
+    by_cat: dict[str, dict[str, list[tuple[str, str]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for java_file, section, _group_ident, static_name in group_rows:
+        by_cat[java_file_category(java_file)][java_file].append((section, static_name))
+
+    for cat in sorted(by_cat.keys()):
+        out_inc.append(f"mod {rust_safe_ident(cat)} {{")
+        out_inc.append("    use super::*;")
+        out_inc.append("")
+        for java_file in sorted(by_cat[cat].keys()):
+            file_mod = rust_ident(java_file.removesuffix(".java"))
+            out_inc.append(f"    mod {rust_safe_ident(file_mod)} {{")
+            out_inc.append("        use super::*;")
+            out_inc.append("")
+            is_stress = java_file.endswith("Stress.java")
+            for section, static_name in by_cat[cat][java_file]:
+                sec_ident = rust_ident(section)
+                # Inside `mod testset`, prefer `union()` over `testset_union()`.
+                prefix = file_mod + "_"
+                short = sec_ident[len(prefix) :] if sec_ident.startswith(prefix) else sec_ident
+                fn_name = rust_safe_ident(short or sec_ident)
+                out_inc.append("        #[test]")
+                if is_stress:
+                    out_inc.append(
+                        f'        #[ignore = "Java VM parity stress — {java_file} — run with --ignored"]'
+                    )
+                out_inc.append(f"        fn {fn_name}() {{")
+                out_inc.append(f"            run_cases(cases_generated::{static_name});")
+                out_inc.append("        }")
+                out_inc.append("")
+            out_inc.append("    }")
+            out_inc.append("")
         out_inc.append("}")
         out_inc.append("")
 

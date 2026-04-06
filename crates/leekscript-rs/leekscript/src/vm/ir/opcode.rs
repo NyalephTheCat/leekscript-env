@@ -5,7 +5,7 @@
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Opcode {
-    /// Unassigned opcode byte (also the default fill in [`super::DISPATCH`](super::DISPATCH)).
+    /// Unassigned opcode byte (also the default fill in [`DISPATCH`](crate::vm::runtime::interpreter::DISPATCH)).
     Illegal = 0,
     Nop = 1,
     /// Followed by `u32` constant pool index.
@@ -42,9 +42,9 @@ pub enum Opcode {
     Gte = 23,
     /// Pop value; push bool (`!truthy`).
     Not = 24,
-    /// Pop `n` values (last pushed = last element); push one [`Value::Array`](super::value::Value::Array). Followed by `u16` element count `n`.
+    /// Pop `n` values (last pushed = last element); push one [`Value::Array`](crate::vm::value::Value::Array). Followed by `u16` element count `n`.
     ArrayBuild = 25,
-    /// Pop `n` key/value pairs (last pushed = last value); push [`Value::Map`](super::value::Value::Map) in source order. Followed by `u16` pair count `n`.
+    /// Pop `n` key/value pairs (last pushed = last value); push [`Value::Map`](crate::vm::value::Value::Map) in source order. Followed by `u16` pair count `n`.
     MapBuild = 26,
     /// Pop **key**, then **container**; push element (`null` if out of range / missing key / bad container).
     GetElem = 27,
@@ -67,16 +67,16 @@ pub enum Opcode {
     Throw = 35,
     /// Pop rhs, lhs; push bool (`xor(truthy(lhs), truthy(rhs))` like Java `AI.xor`).
     LogicalXor = 36,
-    /// Like [`MapBuild`](Self::MapBuild) but pushes [`Value::Object`](super::value::Value::Object).
+    /// Like [`MapBuild`](Self::MapBuild) but pushes [`Value::Object`](crate::vm::value::Value::Object).
     ObjectBuild = 37,
     /// Truncating integer division (`\`), Java-style toward zero.
     IntDiv = 38,
-    /// Prelude class binding (`Array`, `Null`): `u8` [`super::value::PreludeClass`](super::value::PreludeClass) discriminant (not from constant pool).
+    /// Prelude class binding (`Array`, `Null`): `u8` [`PreludeClass`](crate::vm::value::PreludeClass) discriminant (not from constant pool).
     PushPreludeClass = 39,
     /// Pop **rhs**, then **key**; assign into local `slot`’s array/map (`null` base → push `null`, slot unchanged).
     /// Pushes the assignment expression value (`null` or `rhs`).
     SetElemLocal = 40,
-    /// Pop `n` values (last pushed = last source element); push [`Value::Set`](super::value::Value::Set) (sorted, deduped). Followed by `u16` `n`.
+    /// Pop `n` values (last pushed = last source element); push [`Value::Set`](crate::vm::value::Value::Set) (sorted, deduped). Followed by `u16` `n`.
     SetBuild = 41,
     /// Pop element; read set from local `u16`; update local; push bool (added).
     SetPutLocal = 42,
@@ -105,4 +105,27 @@ pub enum Opcode {
     ///
     /// Stack: pops args (last pushed = last param), then pops callee.
     CallValue = 48,
+    /// Build a closure capturing current locals: `u16` function id, `u16` capture count, then `capture_count * u16` local slots.
+    ///
+    /// Pushes one callable value.
+    MakeClosure = 49,
+    /// Build a class instance: `u32` class-name const index (string), `u16` pair count.
+    ///
+    /// Stack: pops `n` values (last pushed = last value), interleaved as key/value pairs like `ObjectBuild`;
+    /// pushes one instance value.
+    InstanceBuild = 50,
+    /// Pop one number; push `~trunc(x)` as integer (same rules as Java `~` / stdlib bit ops).
+    BitNot = 51,
+    /// Pop rhs, lhs; push `trunc(lhs) & trunc(rhs)` as integer.
+    BitAnd = 52,
+    /// Pop rhs, lhs; push `trunc(lhs) | trunc(rhs)` as integer.
+    BitOr = 53,
+    /// Pop rhs, lhs; push `trunc(lhs) ^ trunc(rhs)` as integer.
+    BitXor = 54,
+    /// Pop rhs, lhs; push `trunc(lhs) << (trunc(rhs) & 63)` (wrapping).
+    Shl = 55,
+    /// Pop rhs, lhs; push `trunc(lhs) >> (trunc(rhs) & 63)` (arithmetic).
+    Shr = 56,
+    /// Pop rhs, lhs; push logical right shift on `trunc(lhs)` as u64 (Java `>>>`).
+    UShr = 57,
 }

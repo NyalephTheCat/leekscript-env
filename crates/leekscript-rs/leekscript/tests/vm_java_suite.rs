@@ -14,7 +14,7 @@
 //! ```
 //!
 //! ```text
-//! cargo test -p leekscript --test vm_java_suite java_vm_export_test_array -- --ignored --nocapture
+//! cargo test -p leekscript --test vm_java_suite java_vm_export_test_array -- --nocapture
 //! cargo test -p leekscript --test vm_java_suite java_generator_vm_export_suite -- --ignored
 //! ```
 
@@ -348,7 +348,7 @@ include!("vm_java_suite/java_vm_export_group_tests.inc.rs");
 #[test]
 #[ignore = "Java generator full parity matrix — run with --ignored"]
 fn java_generator_vm_export_suite() {
-    for (_, _, cases) in cases_generated::VM_JAVA_GROUPS {
+    for (_, _, _, cases) in cases_generated::VM_JAVA_GROUPS {
         run_cases(cases);
     }
 }
@@ -357,7 +357,7 @@ fn java_generator_vm_export_suite() {
 fn java_generator_vm_suite_harness_smoke() {
     let n: usize = cases_generated::VM_JAVA_GROUPS
         .iter()
-        .map(|(_, _, c)| c.len())
+        .map(|(_, _, _, c)| c.len())
         .sum();
     assert_eq!(n, cases_generated::VM_JAVA_SUITE_TOTAL_CASES);
     assert!(

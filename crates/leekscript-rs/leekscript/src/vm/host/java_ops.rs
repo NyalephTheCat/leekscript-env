@@ -1,5 +1,5 @@
 //! Java `LeekExpression`–style static operation counts (`getOperations()` after analyze), used with
-//! [`Opcode::ChargeOps`](super::opcode::Opcode::ChargeOps) at loop boundaries to align with
+//! [`Opcode::ChargeOps`](crate::vm::ir::Opcode::ChargeOps) at loop boundaries to align with
 //! `leekscript/compiler/bloc/{While,For,DoWhile}Block` (`ops(…, getOperations())`, `addCounter(1)`).
 
 use sipha::prelude::AstNode;
@@ -26,6 +26,12 @@ pub(crate) fn binary_op_kind(k: Lex) -> bool {
             | Lex::Slash
             | Lex::Backslash
             | Lex::Percent
+            | Lex::BitAnd
+            | Lex::BitOr
+            | Lex::BitXor
+            | Lex::Shl
+            | Lex::Shr
+            | Lex::UShr
             | Lex::EqEq
             | Lex::NotEq
             | Lex::EqEqEq
@@ -36,6 +42,7 @@ pub(crate) fn binary_op_kind(k: Lex) -> bool {
             | Lex::Gte
             | Lex::AndAnd
             | Lex::OrOr
+            | Lex::Coalesce
             | Lex::InstanceofKw
             | Lex::IsKw
             | Lex::XorKw

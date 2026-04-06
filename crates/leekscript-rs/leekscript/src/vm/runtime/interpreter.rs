@@ -6,11 +6,13 @@
 
 use std::vec::Vec;
 
-use super::bytecode::Bytecode;
-use super::compile::FunctionEntry;
-use super::error::VmError;
-use super::opcode::Opcode;
-use super::value::{NumberBits, PreludeClass, Value};
+use crate::vm::compile::{CompiledChunk, FunctionEntry};
+use crate::vm::ir::{Bytecode, Opcode};
+use crate::vm::runtime::error::VmError;
+use crate::vm::runtime::stdlib;
+use crate::vm::value::{
+    set_value_from_elements, IntervalValue, NumberBits, PreludeClass, Value,
+};
 
 /// Default operation budget (matches Java `AI.MAX_OPERATIONS`).
 pub const DEFAULT_MAX_OPERATIONS: u64 = 20_000_000;
@@ -76,8 +78,24 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::InstanceofTag as usize] = op_instanceof_tag;
     table[Opcode::CoerceIntIfExact as usize] = op_coerce_int_if_exact;
     table[Opcode::CallValue as usize] = op_call_value;
+    table[Opcode::MakeClosure as usize] = op_make_closure;
+    table[Opcode::InstanceBuild as usize] = op_instance_build;
+    table[Opcode::BitNot as usize] = op_bit_not;
+    table[Opcode::BitAnd as usize] = op_bit_and;
+    table[Opcode::BitOr as usize] = op_bit_or;
+    table[Opcode::BitXor as usize] = op_bit_xor;
+    table[Opcode::Shl as usize] = op_shl;
+    table[Opcode::Shr as usize] = op_shr;
+    table[Opcode::UShr as usize] = op_ushr;
     table
 };
+
+#[derive(Clone)]
+struct CallFrame {
+    base: u16,
+    saved_frame: Vec<Value>,
+    saved_captures: Vec<(u16, Value)>,
+}
 
 /// LeekScript bytecode interpreter (stack machine).
 pub struct Vm {
@@ -87,9 +105,13 @@ pub struct Vm {
     stack: Vec<Value>,
     locals: Vec<Value>,
     natives: Vec<NativeFn>,
-    /// User functions from [`super::compile::CompiledChunk::functions`](super::compile::CompiledChunk).
+    /// User functions from [`CompiledChunk::functions`](crate::vm::compile::CompiledChunk).
     pub functions: Vec<FunctionEntry>,
     return_pcs: Vec<usize>,
+    /// Saved locals for nested user-function calls (simple call stack).
+    ///
+    /// Each call saves the callee frame’s locals region so recursive calls don’t clobber it.
+    call_frames: Vec<CallFrame>,
     try_catch_pcs: Vec<usize>,
     /// Last opcode byte dispatched (for [`VmError::IllegalOpcode`]).
     pub current_opcode: u8,
@@ -103,14 +125,17 @@ pub struct Vm {
     pub ram_quads: u64,
     /// `None` = no limit.
     pub max_ram_quads: Option<u64>,
+
+    /// Reused buffer for native-call arguments to avoid per-call allocations.
+    scratch_native_args: Vec<Value>,
 }
 
 impl Vm {
-    /// Build a VM from [`super::compile::CompiledChunk`](super::compile::CompiledChunk): bytecode,
+    /// Build a VM from [`CompiledChunk`](crate::vm::compile::CompiledChunk): bytecode,
     /// [`Self::set_local_count`](Self::set_local_count), and [`Self::set_functions`](Self::set_functions).
-    pub fn from_compiled_chunk(chunk: super::compile::CompiledChunk) -> Result<Self, VmError> {
+    pub fn from_compiled_chunk(chunk: CompiledChunk) -> Result<Self, VmError> {
         let mut vm = Self::new(chunk.bytecode);
-        vm.set_natives(super::stdlib::default_natives());
+        vm.set_natives(stdlib::default_natives());
         vm.set_functions(chunk.functions);
         vm.set_local_count(chunk.local_slots)?;
         Ok(vm)
@@ -130,12 +155,14 @@ impl Vm {
             natives: Vec::new(),
             functions: Vec::new(),
             return_pcs: Vec::new(),
+            call_frames: Vec::new(),
             try_catch_pcs: Vec::new(),
             current_opcode: 0,
             operations: 0,
             max_operations: Some(DEFAULT_MAX_OPERATIONS),
             ram_quads: 0,
             max_ram_quads: Some(DEFAULT_MAX_RAM_QUADS),
+            scratch_native_args: Vec::new(),
         }
     }
 
@@ -144,7 +171,7 @@ impl Vm {
         self.natives = natives;
     }
 
-    /// Install the function table from [`super::compile::compile_chunk_v4`](super::compile::compile_chunk_v4).
+    /// Install the function table from [`compile_chunk_v4`](crate::vm::compile::compile_chunk_v4).
     pub fn set_functions(&mut self, functions: Vec<FunctionEntry>) {
         self.functions = functions;
     }
@@ -183,6 +210,131 @@ impl Vm {
         }
     }
 
+    /// Call a first-class function value synchronously from native code.
+    ///
+    /// This reuses the same calling convention as [`Opcode::CallValue`], but executes until the
+    /// called function returns to the current frame and then returns that value.
+    pub(crate) fn call_value_sync(
+        &mut self,
+        callee: Value,
+        args: Vec<Value>,
+    ) -> Result<Value, VmError> {
+        let depth = self.return_pcs.len();
+        // Set up the call as `CallValue` would.
+        match callee {
+            Value::NativeFunction { nid } => {
+                let f = self
+                    .natives
+                    .get(nid as usize)
+                    .copied()
+                    .ok_or(VmError::BadNativeIndex(nid))?;
+                return f(self, &args);
+            }
+            Value::Function { fid } => {
+                let meta = self
+                    .functions
+                    .get(fid as usize)
+                    .cloned()
+                    .ok_or(VmError::BadFunctionIndex(fid))?;
+                let argc = u8::try_from(args.len()).map_err(|_| VmError::UnexpectedEof)?;
+                if argc != meta.argc {
+                    return Err(VmError::BadFunctionArity {
+                        expected: meta.argc,
+                        got: argc,
+                    });
+                }
+                let base = usize::from(meta.slot_base);
+                let total = usize::from(meta.slot_count);
+                if base.saturating_add(total) > self.locals.len() {
+                    return Err(VmError::BadLocal(
+                        meta.slot_base
+                            .saturating_add(meta.slot_count)
+                            .saturating_sub(1),
+                    ));
+                }
+                let saved = self.locals[base..base.saturating_add(total)].to_vec();
+                self.call_frames.push(CallFrame {
+                    base: meta.slot_base,
+                    saved_frame: saved,
+                    saved_captures: Vec::new(),
+                });
+                self.return_pcs.push(self.pc);
+                for (i, v) in args.into_iter().enumerate() {
+                    let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                    store_local(self, li, v)?;
+                }
+                for i in (meta.argc as usize)..total {
+                    let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                    store_local(self, li, Value::Null)?;
+                }
+                self.pc = meta.entry_pc;
+            }
+            Value::Closure { fid, captures } => {
+                let meta = self
+                    .functions
+                    .get(fid as usize)
+                    .cloned()
+                    .ok_or(VmError::BadFunctionIndex(fid))?;
+                let argc = u8::try_from(args.len()).map_err(|_| VmError::UnexpectedEof)?;
+                if argc != meta.argc {
+                    return Err(VmError::BadFunctionArity {
+                        expected: meta.argc,
+                        got: argc,
+                    });
+                }
+                let base = usize::from(meta.slot_base);
+                let total = usize::from(meta.slot_count);
+                if base.saturating_add(total) > self.locals.len() {
+                    return Err(VmError::BadLocal(
+                        meta.slot_base
+                            .saturating_add(meta.slot_count)
+                            .saturating_sub(1),
+                    ));
+                }
+                let mut saved_captures: Vec<(u16, Value)> = Vec::with_capacity(captures.len());
+                for (slot, v) in &captures {
+                    let cur = self
+                        .locals
+                        .get(usize::from(*slot))
+                        .cloned()
+                        .ok_or(VmError::BadLocal(*slot))?;
+                    saved_captures.push((*slot, cur));
+                    store_local(self, *slot, v.clone())?;
+                }
+                let saved = self.locals[base..base.saturating_add(total)].to_vec();
+                self.call_frames.push(CallFrame {
+                    base: meta.slot_base,
+                    saved_frame: saved,
+                    saved_captures,
+                });
+                self.return_pcs.push(self.pc);
+                for (i, v) in args.into_iter().enumerate() {
+                    let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                    store_local(self, li, v)?;
+                }
+                for i in (meta.argc as usize)..total {
+                    let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                    store_local(self, li, Value::Null)?;
+                }
+                self.pc = meta.entry_pc;
+            }
+            v => return Err(VmError::BadValueCall(v)),
+        }
+
+        // Run until the call returns back to this frame depth.
+        loop {
+            if self.pc >= self.code.len() {
+                return Err(VmError::UnexpectedEof);
+            }
+            let op = self.read_u8()?;
+            self.current_opcode = op;
+            DISPATCH[op as usize](self)?;
+            if op == Opcode::Return as u8 && self.return_pcs.len() == depth {
+                return Ok(self.take_return_value());
+            }
+        }
+    }
+
     /// [`Self::ram_quads`] × 8 (same scaling as Java `System.getUsedRAM`).
     #[must_use]
     pub fn ram_bytes(&self) -> u64 {
@@ -207,6 +359,14 @@ impl Vm {
     /// Add to the instruction counter (Leek Wars `AI.ops` / `addCounter`).
     pub fn add_operations(&mut self, n: u64) -> Result<(), VmError> {
         self.charge_ops(n)
+    }
+
+    /// Add to the RAM counter in **quads** (Leek Wars `AI.ram` style accounting).
+    ///
+    /// This is needed for *in-place* mutations of shared containers (arrays/maps/objects),
+    /// where the `Value` identity in locals/stack does not change but its heuristic size does.
+    pub(crate) fn add_ram_quads(&mut self, quads: u64) -> Result<(), VmError> {
+        self.charge_ram(quads)
     }
 
     fn charge_ops(&mut self, n: u64) -> Result<(), VmError> {
@@ -351,38 +511,52 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
             Value::String(format!("{sa}{sb}"))
         }
         (Value::Array(ax), Value::Array(bx)) => {
+            let axb = ax.borrow();
+            let bxb = bx.borrow();
             let extra = 2u64
-                .saturating_add(ax.len() as u64)
-                .saturating_add(bx.len() as u64);
+                .saturating_add(axb.len() as u64)
+                .saturating_add(bxb.len() as u64);
             vm.charge_ops(extra)?;
-            let mut v = ax.clone();
-            v.extend(bx.iter().cloned());
-            Value::Array(v)
+            let mut v = axb.clone();
+            v.extend(bxb.iter().cloned());
+            Value::Array(std::rc::Rc::new(std::cell::RefCell::new(v)))
         }
         (Value::Array(ax), _) => {
-            vm.charge_ops((ax.len() as u64).saturating_mul(2))?;
-            let mut v = ax.clone();
+            let axb = ax.borrow();
+            vm.charge_ops((axb.len() as u64).saturating_mul(2))?;
+            let mut v = axb.clone();
             v.push(b);
-            Value::Array(v)
+            Value::Array(std::rc::Rc::new(std::cell::RefCell::new(v)))
         }
         (_, Value::Array(bx)) => {
-            vm.charge_ops((bx.len() as u64).saturating_mul(2))?;
-            let mut v = Vec::with_capacity(1 + bx.len());
+            let bxb = bx.borrow();
+            vm.charge_ops((bxb.len() as u64).saturating_mul(2))?;
+            let mut v = Vec::with_capacity(1 + bxb.len());
             v.push(a);
-            v.extend(bx.iter().cloned());
-            Value::Array(v)
+            v.extend(bxb.iter().cloned());
+            Value::Array(std::rc::Rc::new(std::cell::RefCell::new(v)))
         }
         (Value::Map(mx), Value::Map(my)) => {
-            let extra = ((mx.len() + my.len()) * 3) as u64;
+            let extra = ((mx.borrow().len() + my.borrow().len()) * 3) as u64;
             vm.charge_ops(extra)?;
-            Value::Map(Value::map_merge_java(mx, my))
+            let merged = {
+                let mb = mx.borrow();
+                let myb = my.borrow();
+                Value::map_merge_java(mb.as_slice(), myb.as_slice())
+            };
+            Value::Map(std::rc::Rc::new(std::cell::RefCell::new(merged)))
         }
         (Value::Map(mx), Value::Object(my))
         | (Value::Object(mx), Value::Map(my))
         | (Value::Object(mx), Value::Object(my)) => {
-            let extra = ((mx.len() + my.len()) * 3) as u64;
+            let extra = ((mx.borrow().len() + my.borrow().len()) * 3) as u64;
             vm.charge_ops(extra)?;
-            Value::Object(Value::map_merge_java(mx, my))
+            let merged = {
+                let mb = mx.borrow();
+                let myb = my.borrow();
+                Value::map_merge_java(mb.as_slice(), myb.as_slice())
+            };
+            Value::Object(std::rc::Rc::new(std::cell::RefCell::new(merged)))
         }
         _ => Value::Number(match (&a, &b) {
             (Value::Number(an), Value::Number(bn)) => an.add(*bn),
@@ -396,69 +570,45 @@ fn op_add(vm: &mut Vm) -> Result<(), VmError> {
 }
 
 fn op_sub(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
-    let a = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
+    let b = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
     vm.push_stack(Value::Number(a.sub(b)))?;
     Ok(())
 }
 
 fn op_mul(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
-    let a = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
+    let b = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
     vm.push_stack(Value::Number(a.mul(b)))?;
     Ok(())
 }
 
 fn op_div(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
-    let a = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
+    let b = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
     let out = a.div(b).map_err(|_| VmError::DivByZero)?;
     vm.push_stack(Value::Number(out))?;
     Ok(())
 }
 
 fn op_int_div(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
-    let a = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
+    let b = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
     let q = a.int_div(b).map_err(|_| VmError::DivByZero)?;
     vm.push_stack(Value::Number(q))?;
     Ok(())
 }
 
 fn op_mod(vm: &mut Vm) -> Result<(), VmError> {
-    let b = vm.pop_stack()?;
-    let b_nb = b.number_bits().ok_or(VmError::ExpectedNumber)?;
+    let b_nb = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
     let a = vm.pop_stack()?;
     let a_nb = match &a {
-        Value::Array(arr) => arr
-            .first()
-            .and_then(|v| v.number_bits())
-            .ok_or(VmError::ExpectedNumber)?,
-        _ => a.number_bits().ok_or(VmError::ExpectedNumber)?,
+        // Java quirk used in suite: `[x] % y` uses `x`.
+        Value::Array(arr) => number_bits_or_coerce(
+            arr.borrow().first().cloned().unwrap_or(Value::Null),
+        )
+        .ok_or(VmError::ExpectedNumber)?,
+        _ => number_bits_or_coerce(a).ok_or(VmError::ExpectedNumber)?,
     };
     let m = a_nb.modulo(b_nb).map_err(|_| VmError::DivByZero)?;
     vm.push_stack(Value::Number(m))?;
@@ -471,6 +621,93 @@ fn op_neg(vm: &mut Vm) -> Result<(), VmError> {
         .number_bits()
         .ok_or(VmError::ExpectedNumber)?;
     vm.push_stack(Value::Number(x.neg()))?;
+    Ok(())
+}
+
+/// Matches [`crate::vm::runtime::stdlib`] `f64_as_i64_trunc` for bitwise ops.
+fn f64_as_i64_trunc(n: f64) -> i64 {
+    if !n.is_finite() {
+        return 0;
+    }
+    if n >= i64::MAX as f64 {
+        return i64::MAX;
+    }
+    if n <= i64::MIN as f64 {
+        return i64::MIN;
+    }
+    n as i64
+}
+
+fn num_f64_or_coerce(v: Value) -> Option<f64> {
+    match v {
+        Value::Number(n) => Some(n.as_f64()),
+        Value::Null => Some(0.0),
+        Value::Bool(b) => Some(f64::from(u8::from(b))),
+        _ => None,
+    }
+}
+
+fn op_bit_not(vm: &mut Vm) -> Result<(), VmError> {
+    let n = f64_as_i64_trunc(
+        vm.pop_stack()?
+            .as_number()
+            .ok_or(VmError::ExpectedNumber)?,
+    );
+    vm.push_stack(Value::num_int(!n))?;
+    Ok(())
+}
+
+fn op_bit_and(vm: &mut Vm) -> Result<(), VmError> {
+    let b = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::num_int(
+        f64_as_i64_trunc(a) & f64_as_i64_trunc(b),
+    ))?;
+    Ok(())
+}
+
+fn op_bit_or(vm: &mut Vm) -> Result<(), VmError> {
+    let b = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::num_int(
+        f64_as_i64_trunc(a) | f64_as_i64_trunc(b),
+    ))?;
+    Ok(())
+}
+
+fn op_bit_xor(vm: &mut Vm) -> Result<(), VmError> {
+    let b = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    vm.push_stack(Value::num_int(
+        f64_as_i64_trunc(a) ^ f64_as_i64_trunc(b),
+    ))?;
+    Ok(())
+}
+
+fn op_shl(vm: &mut Vm) -> Result<(), VmError> {
+    let b = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let x = f64_as_i64_trunc(a);
+    let s = (f64_as_i64_trunc(b) as u32) & 63;
+    vm.push_stack(Value::num_int(x.wrapping_shl(s)))?;
+    Ok(())
+}
+
+fn op_shr(vm: &mut Vm) -> Result<(), VmError> {
+    let b = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let x = f64_as_i64_trunc(a);
+    let s = (f64_as_i64_trunc(b) as u32) & 63;
+    vm.push_stack(Value::num_int(x.wrapping_shr(s)))?;
+    Ok(())
+}
+
+fn op_ushr(vm: &mut Vm) -> Result<(), VmError> {
+    let b = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = num_f64_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let x = f64_as_i64_trunc(a) as u64;
+    let s = (f64_as_i64_trunc(b) as u32) & 63;
+    vm.push_stack(Value::num_int((x >> s) as i64))?;
     Ok(())
 }
 
@@ -491,6 +728,14 @@ fn store_local(vm: &mut Vm, i: u16, v: Value) -> Result<(), VmError> {
 fn op_return(vm: &mut Vm) -> Result<(), VmError> {
     let ret = vm.pop_stack()?;
     if let Some(ret_pc) = vm.return_pcs.pop() {
+        let frame = vm.call_frames.pop().ok_or(VmError::StackUnderflow)?;
+        for (slot, v) in frame.saved_captures {
+            store_local(vm, slot, v)?;
+        }
+        for (i, v) in frame.saved_frame.into_iter().enumerate() {
+            let li = frame.base.saturating_add(i as u16);
+            store_local(vm, li, v)?;
+        }
         vm.pc = ret_pc;
         vm.push_stack(ret)?;
     } else {
@@ -552,11 +797,18 @@ fn op_call_native(vm: &mut Vm) -> Result<(), VmError> {
         .get(id)
         .copied()
         .ok_or(VmError::BadNativeIndex(id as u16))?;
-    let mut args = vec![Value::Null; argc];
-    for slot in (0..argc).rev() {
-        args[slot] = vm.pop_stack()?;
+
+    let mut args = std::mem::take(&mut vm.scratch_native_args);
+    args.clear();
+    args.reserve(argc);
+    for _ in 0..argc {
+        let v = vm.pop_stack()?;
+        args.push(v);
     }
+    args.reverse();
+
     let out = native(vm, &args)?;
+    vm.scratch_native_args = args;
     vm.push_stack(out)?;
     Ok(())
 }
@@ -633,7 +885,7 @@ fn op_set_build(vm: &mut Vm) -> Result<(), VmError> {
         elems.push(vm.pop_stack()?);
     }
     elems.reverse();
-    vm.push_stack(super::value::set_value_from_elements(elems))?;
+    vm.push_stack(set_value_from_elements(elems))?;
     Ok(())
 }
 
@@ -728,7 +980,7 @@ fn op_interval_build(vm: &mut Vm) -> Result<(), VmError> {
         }
     };
 
-    vm.push_stack(Value::Interval(super::value::IntervalValue {
+    vm.push_stack(Value::Interval(IntervalValue {
         left: coerce(left),
         right: coerce(right),
         left_closed,
@@ -741,14 +993,24 @@ fn op_interval_build(vm: &mut Vm) -> Result<(), VmError> {
 fn op_instanceof_tag(vm: &mut Vm) -> Result<(), VmError> {
     let tag = vm.read_u8()? as i64;
     let v = vm.pop_stack()?;
-    let got = super::stdlib::nf_type_tag(vm, &[v.clone()])?;
-    let Value::Number(nb) = got else {
-        vm.push_stack(Value::Bool(false))?;
-        return Ok(());
+    // `instanceof` is a VM-level type check; it must **not** call `typeOf` / `type`
+    // which has its own Java operation cost.
+    let got: i64 = match &v {
+        Value::Null => 0,
+        Value::Number(_) => 1,
+        Value::Bool(_) => 2,
+        Value::String(_) => 3,
+        Value::Array(_) => 4,
+        Value::Function { .. }
+        | Value::Closure { .. }
+        | Value::NativeFunction { .. } => 5,
+        Value::Class(_) => 6,
+        Value::Object(_) | Value::Instance { .. } => 7,
+        Value::Map(_) => 8,
+        Value::Set(_) => 9,
+        Value::Interval(_) => 10,
     };
-    let n = nb.as_f64();
-    let ok = n.is_finite() && (n.round() - (tag as f64)).abs() < 1e-9;
-    vm.push_stack(Value::Bool(ok))?;
+    vm.push_stack(Value::Bool(got == tag))?;
     Ok(())
 }
 
@@ -759,7 +1021,7 @@ fn op_array_build(vm: &mut Vm) -> Result<(), VmError> {
         elems.push(vm.pop_stack()?);
     }
     elems.reverse();
-    vm.push_stack(Value::Array(elems))?;
+    vm.push_stack(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(elems))))?;
     Ok(())
 }
 
@@ -772,7 +1034,7 @@ fn op_map_build(vm: &mut Vm) -> Result<(), VmError> {
         pairs.push((key, val));
     }
     pairs.reverse();
-    vm.push_stack(Value::Map(pairs))?;
+    vm.push_stack(Value::Map(std::rc::Rc::new(std::cell::RefCell::new(pairs))))?;
     Ok(())
 }
 
@@ -785,47 +1047,88 @@ fn op_object_build(vm: &mut Vm) -> Result<(), VmError> {
         pairs.push((key, val));
     }
     pairs.reverse();
-    vm.push_stack(Value::Object(pairs))?;
+    vm.push_stack(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(pairs))))?;
     Ok(())
 }
 
 fn op_coerce_int_if_exact(vm: &mut Vm) -> Result<(), VmError> {
     let v = vm.pop_stack()?;
     match v {
-        Value::Number(super::value::NumberBits::Real(x)) => {
-            let nb = super::value::NumberBits::coerce_integerish_f64(x);
-            vm.push_stack(Value::Number(nb))?;
+        Value::Null => vm.push_stack(Value::num_int(0))?,
+        Value::Bool(b) => vm.push_stack(Value::num_int(if b { 1 } else { 0 }))?,
+        Value::Number(NumberBits::Real(x)) => {
+            // Java `integer` coercion truncates toward zero (with saturation).
+            vm.push_stack(Value::num_int(f64_as_i64_trunc(x)))?;
         }
         _ => vm.push_stack(v)?,
     }
     Ok(())
 }
 
+fn number_bits_or_coerce(v: Value) -> Option<NumberBits> {
+    match v {
+        Value::Number(n) => Some(n),
+        // Java numeric coercions used throughout the suite.
+        other => Some(NumberBits::coerce_integerish_f64(other.to_real_for_compare())),
+    }
+}
+
 fn array_get(arr: &[Value], key: &Value) -> Value {
-    let Some(n) = key.as_number() else {
+    let n = match key {
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        _ => key.as_number(),
+    };
+    let Some(n) = n else {
         return Value::Null;
     };
     if !n.is_finite() {
         return Value::Null;
     }
     let i = n as i64;
-    if i < 0 {
+    let len = arr.len() as i64;
+    let ix = if i < 0 {
+        // Java LeekScript: negative indices count from the end.
+        len.saturating_add(i)
+    } else {
+        i
+    }
+    ;
+    if ix < 0 {
         return Value::Null;
     }
-    let u = i as usize;
+    let u = ix as usize;
     arr.get(u).cloned().unwrap_or(Value::Null)
 }
 
 fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
     let key = vm.pop_stack()?;
     let container = vm.pop_stack()?;
-    // `.class` on any value yields a class object (`<class Interval>`, …).
+    // `.class`: user instances may store the real class object under `class` (Java
+    // `instance.class.fields`); otherwise use prelude `<class T>` for builtins.
     if matches!(&key, Value::String(s) if s == "class") {
+        if let Value::Instance { fields, .. } = &container {
+            if let Some(v) = fields
+                .borrow()
+                .iter()
+                .find(|(k, _)| k == &key)
+                .map(|(_, v)| v.clone())
+            {
+                vm.push_stack(v)?;
+                return Ok(());
+            }
+        }
         vm.push_stack(Value::Class(PreludeClass::of_value(&container)))?;
         return Ok(());
     }
     let out = match &container {
-        Value::Array(arr) => array_get(arr, &key),
+        Value::Class(_) => {
+            if matches!(&key, Value::String(s) if s == "fields") {
+                Value::Array(std::rc::Rc::new(std::cell::RefCell::new(vec![])))
+            } else {
+                Value::Null
+            }
+        }
+        Value::Array(arr) => array_get(&arr.borrow(), &key),
         Value::Set(s) => {
             if let Some(n) = key.as_number() {
                 if n.is_finite() && n >= 0.0 {
@@ -839,6 +1142,13 @@ fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
             }
         }
         Value::Map(pairs) | Value::Object(pairs) => pairs
+            .borrow()
+            .iter()
+            .find(|(k, _)| k == &key)
+            .map(|(_, v)| v.clone())
+            .unwrap_or(Value::Null),
+        Value::Instance { fields, .. } => fields
+            .borrow()
             .iter()
             .find(|(k, _)| k == &key)
             .map(|(_, v)| v.clone())
@@ -864,7 +1174,38 @@ fn op_get_elem(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
-fn interval_get_at(iv: &super::value::IntervalValue, idx: u64) -> Option<Value> {
+fn op_instance_build(vm: &mut Vm) -> Result<(), VmError> {
+    let name_idx = vm.read_u32()? as usize;
+    let n = vm.read_u16()? as usize;
+    let fn_count = vm.read_u16()? as usize;
+    let class_name = match vm.constants.get(name_idx) {
+        Some(Value::String(s)) => s.clone(),
+        _ => return Err(VmError::BadConstantIndex(name_idx as u32)),
+    };
+    let mut final_fields: Vec<String> = Vec::with_capacity(fn_count);
+    for _ in 0..fn_count {
+        let idx = vm.read_u32()? as usize;
+        match vm.constants.get(idx) {
+            Some(Value::String(s)) => final_fields.push(s.clone()),
+            _ => return Err(VmError::BadConstantIndex(idx as u32)),
+        }
+    }
+    let mut pairs = Vec::with_capacity(n);
+    for _ in 0..n {
+        let val = vm.pop_stack()?;
+        let key = vm.pop_stack()?;
+        pairs.push((key, val));
+    }
+    pairs.reverse();
+    vm.push_stack(Value::Instance {
+        class_name,
+        fields: std::rc::Rc::new(std::cell::RefCell::new(pairs)),
+        final_fields,
+    })?;
+    Ok(())
+}
+
+fn interval_get_at(iv: &IntervalValue, idx: u64) -> Option<Value> {
     let (start, len, is_real) = interval_iter_start_len(iv)?;
     if idx >= len {
         return None;
@@ -877,7 +1218,7 @@ fn interval_get_at(iv: &super::value::IntervalValue, idx: u64) -> Option<Value> 
     })
 }
 
-fn interval_iter_start_len(iv: &super::value::IntervalValue) -> Option<(f64, u64, bool)> {
+fn interval_iter_start_len(iv: &IntervalValue) -> Option<(f64, u64, bool)> {
     let l = iv.left?;
     let r = iv.right?;
     let is_real = matches!(l, NumberBits::Real(_)) || matches!(r, NumberBits::Real(_));
@@ -910,37 +1251,92 @@ fn op_set_elem_local(vm: &mut Vm) -> Result<(), VmError> {
         Value::Null => {
             vm.push_stack(Value::Null)?;
         }
-        Value::Array(mut arr) => {
-            if let Some(n) = key.as_number() {
-                if n.is_finite() && n >= 0.0 {
-                    let i = n as usize;
-                    if i < arr.len() {
-                        arr[i] = rhs.clone();
-                        store_local(vm, slot, Value::Array(arr))?;
+        Value::Array(arr) => {
+            let mut borrowed = arr.borrow_mut();
+            let n = match &key {
+                Value::Bool(b) => Some(f64::from(u8::from(*b))),
+                _ => key.as_number(),
+            };
+            if let Some(n) = n {
+                if n.is_finite() {
+                    let i = n as i64;
+                    let len = borrowed.len() as i64;
+                    let ix = if i < 0 { len.saturating_add(i) } else { i };
+                    if ix >= 0 {
+                        let u = ix as usize;
+                        if u < borrowed.len() {
+                            borrowed[u] = rhs.clone();
+                            vm.push_stack(rhs)?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            vm.push_stack(Value::Null)?;
+        }
+        Value::Map(pairs) => {
+            {
+                let mut borrowed = pairs.borrow_mut();
+                if let Some(pos) = borrowed.iter().position(|(k, _)| k == &key) {
+                    borrowed[pos].1 = rhs.clone();
+                } else {
+                    // RAM limit: maps are accounted as `1 + 2*len`.
+                    vm.charge_ram(2)?;
+                    borrowed.push((key.clone(), rhs.clone()));
+                }
+            }
+            vm.push_stack(rhs)?;
+        }
+        Value::Object(pairs) => {
+            {
+                let mut borrowed = pairs.borrow_mut();
+                if let Some(pos) = borrowed.iter().position(|(k, _)| k == &key) {
+                    borrowed[pos].1 = rhs.clone();
+                } else {
+                    // RAM limit: objects are accounted as `1 + 2*len`.
+                    vm.charge_ram(2)?;
+                    borrowed.push((key.clone(), rhs.clone()));
+                }
+            }
+            vm.push_stack(rhs)?;
+        }
+        Value::Instance {
+            fields,
+            final_fields,
+            ..
+        } => {
+            if let Value::String(s) = &key {
+                if final_fields.iter().any(|f| f == s) {
+                    // Final field: allow a one-time initialization from `null`, otherwise ignore.
+                    let cur = fields
+                        .borrow()
+                        .iter()
+                        .find(|(k, _)| k == &key)
+                        .map(|(_, v)| v.clone())
+                        .unwrap_or(Value::Null);
+                    if matches!(cur, Value::Null) {
+                        let mut borrowed = fields.borrow_mut();
+                        if let Some(pos) = borrowed.iter().position(|(k, _)| k == &key) {
+                            borrowed[pos].1 = rhs.clone();
+                        } else {
+                            borrowed.push((key.clone(), rhs.clone()));
+                        }
                         vm.push_stack(rhs)?;
+                        return Ok(());
+                    } else {
+                        vm.push_stack(cur)?;
                         return Ok(());
                     }
                 }
             }
-            store_local(vm, slot, Value::Array(arr))?;
-            vm.push_stack(Value::Null)?;
-        }
-        Value::Map(mut pairs) => {
-            if let Some(pos) = pairs.iter().position(|(k, _)| k == &key) {
-                pairs[pos].1 = rhs.clone();
+            let mut borrowed = fields.borrow_mut();
+            if let Some(pos) = borrowed.iter().position(|(k, _)| k == &key) {
+                borrowed[pos].1 = rhs.clone();
             } else {
-                pairs.push((key.clone(), rhs.clone()));
+                // RAM limit: instances are accounted as `1 + 2*len` (same as objects).
+                vm.charge_ram(2)?;
+                borrowed.push((key.clone(), rhs.clone()));
             }
-            store_local(vm, slot, Value::Map(pairs))?;
-            vm.push_stack(rhs)?;
-        }
-        Value::Object(mut pairs) => {
-            if let Some(pos) = pairs.iter().position(|(k, _)| k == &key) {
-                pairs[pos].1 = rhs.clone();
-            } else {
-                pairs.push((key.clone(), rhs.clone()));
-            }
-            store_local(vm, slot, Value::Object(pairs))?;
             vm.push_stack(rhs)?;
         }
         _ => {
@@ -953,7 +1349,7 @@ fn op_set_elem_local(vm: &mut Vm) -> Result<(), VmError> {
 fn op_array_len(vm: &mut Vm) -> Result<(), VmError> {
     let v = vm.pop_stack()?;
     let n = match &v {
-        Value::Array(a) => a.len() as i64,
+        Value::Array(a) => a.borrow().len() as i64,
         Value::Set(s) => s.len() as i64,
         Value::Interval(iv) => interval_iter_start_len(iv).map(|(_, l, _)| l as i64).unwrap_or(0),
         _ => 0,
@@ -965,7 +1361,7 @@ fn op_array_len(vm: &mut Vm) -> Result<(), VmError> {
 fn op_map_len(vm: &mut Vm) -> Result<(), VmError> {
     let v = vm.pop_stack()?;
     let n = match &v {
-        Value::Map(m) | Value::Object(m) => m.len() as i64,
+        Value::Map(m) | Value::Object(m) => m.borrow().len() as i64,
         _ => 0,
     };
     vm.push_stack(Value::num_int(n))?;
@@ -978,7 +1374,8 @@ fn op_map_entry_at(vm: &mut Vm) -> Result<(), VmError> {
     let (k, val) = match (&map_v, idx_v.as_number()) {
         (Value::Map(m), Some(n)) | (Value::Object(m), Some(n)) if n.is_finite() && n >= 0.0 => {
             let i = n as usize;
-            m.get(i)
+            m.borrow()
+                .get(i)
                 .map(|p| (p.0.clone(), p.1.clone()))
                 .unwrap_or((Value::Null, Value::Null))
         }
@@ -1016,6 +1413,12 @@ fn op_call_function(vm: &mut Vm) -> Result<(), VmError> {
     for slot in (0..argc as usize).rev() {
         args[slot] = vm.pop_stack()?;
     }
+    let saved = vm.locals[base..base.saturating_add(total)].to_vec();
+    vm.call_frames.push(CallFrame {
+        base: meta.slot_base,
+        saved_frame: saved,
+        saved_captures: Vec::new(),
+    });
     vm.return_pcs.push(vm.pc);
     for (i, v) in args.into_iter().enumerate() {
         let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
@@ -1059,6 +1462,61 @@ fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
                         .saturating_sub(1),
                 ));
             }
+            let saved = vm.locals[base..base.saturating_add(total)].to_vec();
+            vm.call_frames.push(CallFrame {
+                base: meta.slot_base,
+                saved_frame: saved,
+                saved_captures: Vec::new(),
+            });
+            vm.return_pcs.push(vm.pc);
+            for (i, v) in args.into_iter().enumerate() {
+                let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                store_local(vm, li, v)?;
+            }
+            for i in (argc as usize)..total {
+                let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
+                store_local(vm, li, Value::Null)?;
+            }
+            vm.pc = meta.entry_pc;
+            Ok(())
+        }
+        Value::Closure { fid, captures } => {
+            let meta = vm
+                .functions
+                .get(fid as usize)
+                .cloned()
+                .ok_or(VmError::BadFunctionIndex(fid))?;
+            if argc != meta.argc {
+                return Err(VmError::BadFunctionArity {
+                    expected: meta.argc,
+                    got: argc,
+                });
+            }
+            let base = usize::from(meta.slot_base);
+            let total = usize::from(meta.slot_count);
+            if base.saturating_add(total) > vm.locals.len() {
+                return Err(VmError::BadLocal(
+                    meta.slot_base
+                        .saturating_add(meta.slot_count)
+                        .saturating_sub(1),
+                ));
+            }
+            let mut saved_captures: Vec<(u16, Value)> = Vec::with_capacity(captures.len());
+            for (slot, v) in &captures {
+                let cur = vm
+                    .locals
+                    .get(usize::from(*slot))
+                    .cloned()
+                    .ok_or(VmError::BadLocal(*slot))?;
+                saved_captures.push((*slot, cur));
+                store_local(vm, *slot, v.clone())?;
+            }
+            let saved = vm.locals[base..base.saturating_add(total)].to_vec();
+            vm.call_frames.push(CallFrame {
+                base: meta.slot_base,
+                saved_frame: saved,
+                saved_captures,
+            });
             vm.return_pcs.push(vm.pc);
             for (i, v) in args.into_iter().enumerate() {
                 let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
@@ -1083,6 +1541,27 @@ fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
         }
         other => Err(VmError::BadValueCall(other)),
     }
+}
+
+fn op_make_closure(vm: &mut Vm) -> Result<(), VmError> {
+    let fid = vm.read_u16()?;
+    let n = vm.read_u16()? as usize;
+    let mut captures = Vec::with_capacity(n);
+    for _ in 0..n {
+        let slot = vm.read_u16()?;
+        let v = vm
+            .locals
+            .get(usize::from(slot))
+            .cloned()
+            .ok_or(VmError::BadLocal(slot))?;
+        // Minimal parity: don't capture `null` slots (allows self-recursive `var f = function() { f() }` patterns
+        // where the binding is assigned after the function value is created).
+        if !matches!(v, Value::Null) {
+            captures.push((slot, v));
+        }
+    }
+    vm.push_stack(Value::Closure { fid, captures })?;
+    Ok(())
 }
 
 fn op_try_begin(vm: &mut Vm) -> Result<(), VmError> {

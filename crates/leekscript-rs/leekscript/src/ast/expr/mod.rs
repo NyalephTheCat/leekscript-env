@@ -7,7 +7,7 @@ pub use nodes::{
     AnonFunctionExpr, ArrayExpr, BinaryExpr, BracketMapExpr, BuiltinStringifyExpr,
     BuiltinTypeNameExpr, CallExpr, CastExpr, ClassRefExpr, IfExpr, IndexExpr, IntervalExpr,
     LambdaExpr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, SetExpr, SuperExpr, TernaryExpr,
-    UnaryExpr,
+    UnaryExpr, RefExpr,
 };
 pub use root::ExprRoot;
 
@@ -61,4 +61,6 @@ pub enum Expr {
     BuiltinTypeName(BuiltinTypeNameExpr),
     #[ast(kind = Node::BuiltinStringifyExpr)]
     BuiltinStringify(BuiltinStringifyExpr),
+    #[ast(kind = Node::RefExpr)]
+    Ref(RefExpr),
 }

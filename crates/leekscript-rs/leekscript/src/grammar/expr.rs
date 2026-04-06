@@ -1068,10 +1068,21 @@ pub fn define(g: &mut GrammarBuilder) {
                 });
             },
             |g| {
-                // Reference expression: `@ident` (used by Java suite for by-ref semantics).
+                // Reference expression: `@x` / `@(expr)` / `@[...]` (used by Java suite for by-ref semantics).
                 g.node(Node::RefExpr, |g| {
                     g.call_rule(GRule::OpAt);
-                    g.call_rule(GRule::Ident);
+                    sipha::choices!(
+                        g,
+                        |g| {
+                            g.call_rule(GRule::Ident);
+                        },
+                        |g| {
+                            g.call_rule(GRule::ParenExpr);
+                        },
+                        |g| {
+                            g.call_rule(GRule::ArrayExpr);
+                        },
+                    );
                 });
             },
             |g| {

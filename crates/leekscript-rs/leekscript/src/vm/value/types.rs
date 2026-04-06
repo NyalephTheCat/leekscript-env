@@ -1,8 +1,69 @@
 //! Values carried on the VM stack (minimal set for the first execution tier).
 
 use std::cmp::Ordering;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::string::String;
 use std::vec::Vec;
+
+thread_local! {
+    static EXPORT_SEEN: RefCell<HashMap<usize, u8>> = RefCell::new(HashMap::new());
+    static EXPORT_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+struct ExportDepthGuard;
+
+impl ExportDepthGuard {
+    fn enter() -> Self {
+        EXPORT_DEPTH.with(|d| {
+            let cur = d.get();
+            if cur == 0 {
+                EXPORT_SEEN.with(|m| m.borrow_mut().clear());
+            }
+            d.set(cur.saturating_add(1));
+        });
+        Self
+    }
+}
+
+impl Drop for ExportDepthGuard {
+    fn drop(&mut self) {
+        EXPORT_DEPTH.with(|d| {
+            let cur = d.get();
+            let next = cur.saturating_sub(1);
+            d.set(next);
+            if next == 0 {
+                EXPORT_SEEN.with(|m| m.borrow_mut().clear());
+            }
+        });
+    }
+}
+
+struct ExportSeenGuard {
+    key: usize,
+}
+
+impl ExportSeenGuard {
+    fn enter(key: usize) -> Option<Self> {
+        let ok = EXPORT_SEEN.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.contains_key(&key) {
+                return false;
+            }
+            m.insert(key, 1);
+            true
+        });
+        ok.then_some(Self { key })
+    }
+}
+
+impl Drop for ExportSeenGuard {
+    fn drop(&mut self) {
+        // No-op: `EXPORT_SEEN` is cleared when the outermost export call returns.
+    }
+}
 
 /// Numeric value: exact `i64` for integers, IEEE `f64` for reals / non-representable results.
 #[derive(Debug, Clone, Copy)]
@@ -233,9 +294,11 @@ impl PreludeClass {
             Value::Array(_) => Self::Array,
             Value::Map(_) => Self::Map,
             Value::Object(_) => Self::Object,
+            Value::Instance { .. } => Self::Object,
             Value::Set(_) => Self::Set,
             Value::Interval(_) => Self::Interval,
             Value::Function { .. } => Self::Function,
+            Value::Closure { .. } => Self::Function,
             Value::NativeFunction { .. } => Self::Function,
             Value::Class(c) => *c,
         }
@@ -243,7 +306,7 @@ impl PreludeClass {
 }
 
 /// A runtime value (intentionally small; extend for maps, arrays, closures, etc.).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -251,20 +314,68 @@ pub enum Value {
     String(String),
     /// Prelude class (`Array`, `Null`): formatted via [`PreludeClass::java_class_string`], not constant-pool strings.
     Class(PreludeClass),
-    /// Dense array (Java `ArrayLeekValue`–style indexing; equality is deep for this VM).
-    Array(Vec<Value>),
-    /// Insertion-ordered map literal (`[:]` / `[k: v, …]`); merge uses Java `putIfAbsent` rules.
-    Map(Vec<(Value, Value)>),
-    /// Object literal `{a: 1, …}` — Java export uses `{a: 1}` (not bracket-map syntax).
-    Object(Vec<(Value, Value)>),
+    /// Dense array (shared, mutable; Java `ArrayLeekValue` semantics).
+    Array(Rc<RefCell<Vec<Value>>>),
+    /// Insertion-ordered map literal (`[:]` / `[k: v, …]`); reference semantics like Java `MapLeekValue`.
+    Map(Rc<RefCell<Vec<(Value, Value)>>>),
+    /// Object literal `{a: 1, …}` — reference semantics like Java objects.
+    Object(Rc<RefCell<Vec<(Value, Value)>>>),
+    /// User-defined class instance (shared, mutable fields/methods map).
+    ///
+    /// We store the field/method table behind `Rc<RefCell<...>>` so method calls can mutate `this`
+    /// and the mutation is visible to the caller (Java-suite semantics).
+    Instance {
+        class_name: String,
+        fields: Rc<RefCell<Vec<(Value, Value)>>>,
+        final_fields: Vec<String>,
+    },
     /// Set literal `<1, 2, …>` — elements stored sorted (Java display / iteration order).
     Set(Vec<Value>),
     /// Interval literal (`[..]`, `[1..2[`, `]..1]`, …).
     Interval(IntervalValue),
     /// User function handle (first-class function value).
     Function { fid: u16 },
+    /// User function with captured locals.
+    Closure { fid: u16, captures: Vec<(u16, Value)> },
     /// Native function handle (first-class builtin function value).
     NativeFunction { nid: u16 },
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Null, Self::Null) => true,
+            (Self::Bool(a), Self::Bool(b)) => a == b,
+            (Self::Number(a), Self::Number(b)) => a == b,
+            (Self::String(a), Self::String(b)) => a == b,
+            (Self::Class(a), Self::Class(b)) => a == b,
+            (Self::Array(a), Self::Array(b)) => a.borrow().as_slice() == b.borrow().as_slice(),
+            (Self::Map(a), Self::Map(b)) => a.borrow().as_slice() == b.borrow().as_slice(),
+            (Self::Object(a), Self::Object(b)) => a.borrow().as_slice() == b.borrow().as_slice(),
+            (Self::Set(a), Self::Set(b)) => a == b,
+            (Self::Interval(a), Self::Interval(b)) => a == b,
+            (Self::Function { fid: a }, Self::Function { fid: b }) => a == b,
+            (Self::Closure { fid: a, .. }, Self::Closure { fid: b, .. }) => a == b,
+            (Self::NativeFunction { nid: a }, Self::NativeFunction { nid: b }) => a == b,
+            (
+                Self::Instance {
+                    class_name: an,
+                    fields: af,
+                    final_fields: afl,
+                },
+                Self::Instance {
+                    class_name: bn,
+                    fields: bf,
+                    final_fields: bfl,
+                },
+            ) => {
+                an == bn
+                    && afl == bfl
+                    && af.borrow().as_slice() == bf.borrow().as_slice()
+            },
+            _ => false,
+        }
+    }
 }
 
 /// Interval endpoints: `None` means unbounded (±∞ depending on side).
@@ -292,9 +403,11 @@ pub fn value_cmp_for_java_set_display(a: &Value, b: &Value) -> Ordering {
             Value::Array(_) => 5,
             Value::Map(_) => 6,
             Value::Object(_) => 7,
+            Value::Instance { .. } => 7,
             Value::Set(_) => 8,
             Value::Interval(_) => 9,
             Value::Function { .. } => 10,
+            Value::Closure { .. } => 10,
             Value::NativeFunction { .. } => 11,
         }
     }
@@ -318,18 +431,22 @@ pub fn value_cmp_for_java_set_display(a: &Value, b: &Value) -> Ordering {
                 .unwrap_or(Ordering::Equal)
         }
         (Value::Array(ax), Value::Array(bx)) => {
-            let c = ax.len().cmp(&bx.len());
+            let axb = ax.borrow();
+            let bxb = bx.borrow();
+            let c = axb.len().cmp(&bxb.len());
             if c != Ordering::Equal {
                 return c;
             }
-            ax.iter()
-                .zip(bx.iter())
+            axb.iter()
+                .zip(bxb.iter())
                 .map(|(p, q)| value_cmp_for_java_set_display(p, q))
                 .find(|o| *o != Ordering::Equal)
                 .unwrap_or(Ordering::Equal)
         }
         (Value::Map(ax), Value::Map(bx)) | (Value::Object(ax), Value::Object(bx)) => {
-            let c = ax.len().cmp(&bx.len());
+            let axb = ax.borrow();
+            let bxb = bx.borrow();
+            let c = axb.len().cmp(&bxb.len());
             if c != Ordering::Equal {
                 return c;
             }
@@ -386,17 +503,37 @@ impl Value {
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Class(a), Self::Class(b)) => a == b,
             (Self::Array(a), Self::Array(b)) => {
-                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals_equals_v4(y))
+                let ab = a.borrow();
+                let bb = b.borrow();
+                ab.len() == bb.len() && ab.iter().zip(bb.iter()).all(|(x, y)| x.equals_equals_v4(y))
             }
             (Self::Map(a), Self::Map(b)) | (Self::Object(a), Self::Object(b)) => {
-                if a.len() != b.len() {
+                let ab = a.borrow();
+                let bb = b.borrow();
+                if ab.len() != bb.len() {
                     return false;
                 }
-                a.iter().all(|(k, v)| {
-                    b.iter()
+                ab.iter().all(|(k, v)| {
+                    bb.iter()
                         .find(|(bk, _)| bk == k)
                         .is_some_and(|(_, bv)| v.equals_equals_v4(bv))
                 })
+            }
+            (
+                Self::Instance {
+                    class_name: an,
+                    fields: a,
+                    final_fields: _,
+                },
+                Self::Instance {
+                    class_name: bn,
+                    fields: b,
+                    final_fields: _,
+                },
+            ) => {
+                let ao = Value::Object(Rc::new(RefCell::new(a.borrow().clone())));
+                let bo = Value::Object(Rc::new(RefCell::new(b.borrow().clone())));
+                an == bn && ao.equals_equals_v4(&bo)
             }
             (Self::Set(a), Self::Set(b)) => {
                 if a.len() != b.len() {
@@ -405,6 +542,7 @@ impl Value {
                 a.iter().all(|x| b.iter().any(|y| x.equals_equals_v4(y)))
             }
             (Self::Function { fid: a }, Self::Function { fid: b }) => a == b,
+            (Self::Closure { fid: a, .. }, Self::Closure { fid: b, .. }) => a == b,
             (Self::NativeFunction { nid: a }, Self::NativeFunction { nid: b }) => a == b,
             _ => false,
         }
@@ -417,11 +555,13 @@ impl Value {
             Self::Null => 0.0,
             Self::Bool(b) => f64::from(u8::from(*b)),
             Self::Number(n) => n.as_f64(),
-            Self::Array(a) => a.len() as f64,
-            Self::Map(m) | Self::Object(m) => m.len() as f64,
+            Self::Array(a) => a.borrow().len() as f64,
+            Self::Map(m) | Self::Object(m) => m.borrow().len() as f64,
+            Self::Instance { fields, .. } => fields.borrow().len() as f64,
             Self::Set(s) => s.len() as f64,
             Self::Interval(_i) => 1.0,
             Self::Function { .. } => 1.0,
+            Self::Closure { .. } => 1.0,
             Self::NativeFunction { .. } => 1.0,
             Self::Class(c) => {
                 let s = c.java_class_string();
@@ -448,6 +588,32 @@ impl Value {
     /// String form comparable to the Java snippet runner (`TopLevel` / `AI.string`) for tests.
     #[must_use]
     pub fn to_leek_export_string(&self) -> String {
+        let _depth = ExportDepthGuard::enter();
+        // Cycle handling (Java prints a couple of nested levels, then `<...>`).
+        // This is needed for `TestMap` infinite/self-referential structures.
+        let key_opt: Option<usize> = match self {
+            Self::Array(a) => Some(Rc::as_ptr(a) as usize),
+            Self::Map(m) => Some(Rc::as_ptr(m) as usize),
+            Self::Object(o) => Some(Rc::as_ptr(o) as usize),
+            Self::Instance { fields, .. } => Some(Rc::as_ptr(fields) as usize),
+            _ => None,
+        };
+        let _guard = if let Some(key) = key_opt {
+            match ExportSeenGuard::enter(key) {
+                Some(g) => Some(g),
+                None => {
+                    // When a map is encountered again via another structure (e.g. map → array → map),
+                    // Java prints one shallow level (`[0 : <...>]`) rather than just `<...>`.
+                    if let Self::Map(m) = self {
+                        return shallow_map_export(m);
+                    }
+                    return "<...>".into();
+                }
+            }
+        } else {
+            None
+        };
+
         match self {
             Self::Null => "null".into(),
             Self::Bool(b) => if *b { "true" } else { "false" }.into(),
@@ -456,6 +622,7 @@ impl Value {
                 NumberBits::Real(x) => format_java_double_export(*x),
             },
             Self::Array(a) => {
+                let a = a.borrow();
                 let mut out = String::new();
                 out.push('[');
                 for (i, v) in a.iter().enumerate() {
@@ -468,26 +635,52 @@ impl Value {
                 out
             }
             Self::Map(m) => {
-                if m.is_empty() {
+                let snapshot = m.borrow().clone();
+                if snapshot.is_empty() {
                     return "[:]".into();
                 }
                 let mut out = String::from("[");
                 // Java map display is deterministic and (for numeric-ish keys) sorted.
                 // This avoids insertion-order differences and matches the reference test suite.
-                let mut entries: Vec<(&Value, &Value)> = m.iter().map(|(k, v)| (k, v)).collect();
-                entries.sort_by(|(ka, _), (kb, _)| map_key_cmp_for_java_export(ka, kb));
-                for (i, (k, v)) in entries.into_iter().enumerate() {
+                //
+                // Java uses `HashMap` iteration order, which (for small maps) corresponds to
+                // increasing bucket index of the spreaded hash (capacity 16), with insertion
+                // order preserved within a bucket.
+                let mut entries: Vec<(usize, &Value, &Value)> = snapshot
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (k, v))| (i, k, v))
+                    .collect();
+                entries.sort_by_key(|(i, k, _)| (java_hashmap_bucket16(k), *i));
+                for (i, (_orig_i, k, v)) in entries.into_iter().enumerate() {
                     if i > 0 {
                         out.push_str(", ");
                     }
-                    out.push_str(&k.to_leek_export_string());
+                    // Self-reference in keys is possible (`a[a] = 1`); print one level then `<...>`.
+                    out.push_str(&map_value_export_with_self_ref(m, snapshot.as_slice(), k));
                     out.push_str(" : ");
-                    out.push_str(&v.to_leek_export_string());
+                    out.push_str(&map_value_export_with_self_ref(m, snapshot.as_slice(), v));
                 }
                 out.push(']');
                 out
             }
-            Self::Object(o) => format_object_brace_export(o, |v| v.to_leek_export_string()),
+            Self::Object(o) => {
+                let o = o.borrow();
+                format_object_brace_export(o.as_slice(), |v| v.to_leek_export_string())
+            }
+            Self::Instance {
+                class_name,
+                fields,
+                final_fields: _,
+            } => {
+                let borrowed = fields.borrow();
+                // Java suite export for instances is deterministic; sort by field key.
+                let mut sorted = instance_pairs_for_export(borrowed.as_slice());
+                sorted.sort_by(|(ka, _), (kb, _)| object_field_key_export(ka).cmp(&object_field_key_export(kb)));
+                let inner =
+                    format_object_brace_export(sorted.as_slice(), |v| v.to_leek_export_string());
+                format!("{class_name} {inner}")
+            }
             Self::Set(s) => {
                 let mut out = String::from("<");
                 for (i, v) in s.iter().enumerate() {
@@ -522,8 +715,7 @@ impl Value {
                 out.push(rch);
                 out
             }
-            Self::Function { .. } => "#Anonymous Function".into(),
-            Self::NativeFunction { .. } => "#Native Function".into(),
+            Self::Function { .. } | Self::Closure { .. } | Self::NativeFunction { .. } => "#Anonymous Function".into(),
             Self::Class(c) => c.java_class_string(),
             Self::String(s) => {
                 // Java `AI.string`: values that are exactly one JSON string token use a doubled-`"`
@@ -554,7 +746,7 @@ impl Value {
                 // `TestMap.java:244`…).
                 // Leek `string([k : v, …])` / V4 `string({…})` bodies are not valid JSON but use the
                 // same raw embed rule (see `TestString.java` v4 map/object cases).
-                if super::json::decode(s).is_ok() || leek_export_raw_embed_composite_string(s) {
+                if crate::vm::host::json::decode(s).is_ok() || leek_export_raw_embed_composite_string(s) {
                     let mut out = String::with_capacity(s.len() + 2);
                     out.push('"');
                     out.push_str(s);
@@ -583,19 +775,61 @@ impl Value {
     /// (`MAX_RAM` is in quads; `System.getUsedRAM` multiplies by 8 for bytes).
     #[must_use]
     pub fn ram_quads(&self) -> u64 {
+        let mut seen: HashMap<usize, u8> = HashMap::new();
+        self.ram_quads_ctx(&mut seen)
+    }
+
+    fn ram_quads_ctx(&self, seen: &mut HashMap<usize, u8>) -> u64 {
         match self {
             Self::Null | Self::Bool(_) | Self::Class(_) => 1,
             Self::Number(_) => 1,
             Self::String(s) => 1u64.saturating_add(((s.len() as u64).saturating_add(7)) / 8),
-            Self::Array(a) => 1u64.saturating_add(a.iter().map(Self::ram_quads).sum()),
-            Self::Map(m) | Self::Object(m) => 1u64.saturating_add(
-                m.iter()
-                    .map(|(k, v)| k.ram_quads().saturating_add(v.ram_quads()))
-                    .sum(),
-            ),
-            Self::Set(s) => 1u64.saturating_add(s.iter().map(Self::ram_quads).sum()),
+            Self::Array(a) => {
+                let key = Rc::as_ptr(a) as usize;
+                if seen.contains_key(&key) {
+                    return 1;
+                }
+                seen.insert(key, 1);
+                // PERF: avoid cloning/traversing the whole array on every stack push/pop.
+                // The VM uses this as a *budget heuristic*, not an exact heap graph size.
+                let len = a.borrow().len() as u64;
+                seen.remove(&key);
+                1u64.saturating_add(len)
+            }
+            Self::Map(m) | Self::Object(m) => {
+                let key = Rc::as_ptr(m) as usize;
+                if seen.contains_key(&key) {
+                    return 1;
+                }
+                seen.insert(key, 1);
+                // Same heuristic as arrays: count entries, not deep structure.
+                let len = m.borrow().len() as u64;
+                seen.remove(&key);
+                // Each entry stores a key and value.
+                1u64.saturating_add(len.saturating_mul(2))
+            }
+            Self::Instance {
+                fields,
+                class_name,
+                final_fields: _,
+            } => {
+                let key = Rc::as_ptr(fields) as usize;
+                if seen.contains_key(&key) {
+                    return 1;
+                }
+                seen.insert(key, 1);
+                let len = fields.borrow().len() as u64;
+                seen.remove(&key);
+                1u64
+                    .saturating_add(((class_name.len() as u64).saturating_add(7)) / 8)
+                    .saturating_add(len.saturating_mul(2))
+            }
+            Self::Set(s) => 1u64.saturating_add(s.iter().map(|v| v.ram_quads_ctx(seen)).sum()),
             Self::Interval(_i) => 1,
             Self::Function { .. } => 1,
+            Self::Closure { captures, .. } => {
+                1u64.saturating_add(captures.iter().map(|(_, v)| v.ram_quads_ctx(seen)).sum())
+            }
             Self::NativeFunction { .. } => 1,
         }
     }
@@ -625,6 +859,9 @@ impl Value {
                 NumberBits::Real(x) => *x != 0.0,
             },
             Self::String(s) => !s.is_empty(),
+            Self::Array(a) => !a.borrow().is_empty(),
+            Self::Map(m) => !m.borrow().is_empty(),
+            Self::Object(o) => !o.borrow().is_empty(),
             Self::Set(s) => !s.is_empty(),
             // Minimal parity: treat `[a..b]` as truthy unless it's structurally empty (`[x..y]` where x>y),
             // or the special empty literal `[..]`.
@@ -654,9 +891,11 @@ impl Value {
             },
             Self::String(s) => s.clone(),
             Self::Function { .. } => "#Anonymous Function".into(),
+            Self::Closure { .. } => "#Anonymous Function".into(),
             Self::NativeFunction { .. } => "#Native Function".into(),
             Self::Interval(_iv) => self.to_leek_export_string(),
             Self::Array(a) => {
+                let a = a.borrow();
                 let mut out = String::new();
                 out.push('[');
                 for (i, v) in a.iter().enumerate() {
@@ -669,6 +908,7 @@ impl Value {
                 out
             }
             Self::Map(m) => {
+                let m = m.borrow();
                 if m.is_empty() {
                     return "[:]".into();
                 }
@@ -684,7 +924,22 @@ impl Value {
                 out.push(']');
                 out
             }
-            Self::Object(o) => format_object_brace_export(o, |v| v.to_leek_coerce_string()),
+            Self::Object(o) => {
+                let o = o.borrow();
+                format_object_brace_export(o.as_slice(), |v| v.to_leek_coerce_string())
+            }
+            Self::Instance {
+                class_name,
+                fields,
+                final_fields: _,
+            } => {
+                let borrowed = fields.borrow();
+                let mut sorted = instance_pairs_for_export(borrowed.as_slice());
+                sorted.sort_by(|(ka, _), (kb, _)| object_field_key_export(ka).cmp(&object_field_key_export(kb)));
+                let inner =
+                    format_object_brace_export(sorted.as_slice(), |v| v.to_leek_coerce_string());
+                format!("{class_name} {inner}")
+            }
             Self::Set(s) => {
                 let mut out = String::from("<");
                 for (i, v) in s.iter().enumerate() {
@@ -713,9 +968,11 @@ impl Value {
             },
             Self::String(s) => java_string_builtin_v4_json_string(s),
             Self::Function { .. } => "#Anonymous Function".into(),
+            Self::Closure { .. } => "#Anonymous Function".into(),
             Self::NativeFunction { .. } => "#Native Function".into(),
             Self::Interval(_iv) => self.to_leek_export_string(),
             Self::Array(a) => {
+                let a = a.borrow();
                 let mut out = String::new();
                 out.push('[');
                 for (i, v) in a.iter().enumerate() {
@@ -728,6 +985,7 @@ impl Value {
                 out
             }
             Self::Map(m) => {
+                let m = m.borrow();
                 if m.is_empty() {
                     return "[:]".into();
                 }
@@ -743,7 +1001,22 @@ impl Value {
                 out.push(']');
                 out
             }
-            Self::Object(o) => format_object_brace_export(o, |v| v.to_java_string_builtin_v4()),
+            Self::Object(o) => {
+                let o = o.borrow();
+                format_object_brace_export(o.as_slice(), |v| v.to_java_string_builtin_v4())
+            },
+            Self::Instance {
+                class_name,
+                fields,
+                final_fields: _,
+            } => {
+                let borrowed = fields.borrow();
+                let pairs = instance_pairs_for_export(borrowed.as_slice());
+                let inner = format_object_brace_export(pairs.as_slice(), |v| {
+                    v.to_java_string_builtin_v4()
+                });
+                format!("{class_name} {inner}")
+            }
             Self::Set(s) => {
                 let mut out = String::from("<");
                 for (i, v) in s.iter().enumerate() {
@@ -804,6 +1077,16 @@ fn is_leek_ident(s: &str) -> bool {
     it.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// User instances store a synthetic `class` entry for Java `instance.class` / `.fields`; omit it from
+/// export strings (see `TestObject.java` `Test {…}` vs internal `class` reference).
+fn instance_pairs_for_export(fields: &[(Value, Value)]) -> Vec<(Value, Value)> {
+    fields
+        .iter()
+        .filter(|(k, _)| !matches!(k, Value::String(s) if s == "class"))
+        .cloned()
+        .collect()
+}
+
 fn object_field_key_export(k: &Value) -> String {
     match k {
         Value::String(s) if is_leek_ident(s) => s.clone(),
@@ -813,8 +1096,8 @@ fn object_field_key_export(k: &Value) -> String {
 
 fn map_key_cmp_for_java_export(a: &Value, b: &Value) -> Ordering {
     // Java `MapLeekValue.toString` ordering is deterministic. For numeric-ish keys (including
-    // numeric strings like `"20000"`), the Java suite expects **descending** numeric order
-    // (see `TestJSON.java:46-47`). JSON encoding is handled elsewhere and has its own ordering.
+    // numeric strings like `"20000"`), the Java suite expects numeric order. JSON encoding is
+    // handled elsewhere and has its own ordering.
     fn numericish(v: &Value) -> Option<f64> {
         match v {
             Value::Number(n) => Some(n.as_f64()),
@@ -825,13 +1108,148 @@ fn map_key_cmp_for_java_export(a: &Value, b: &Value) -> Ordering {
 
     match (numericish(a), numericish(b)) {
         (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
-            // Descending numeric order.
-            y.partial_cmp(&x).unwrap_or(Ordering::Equal)
+            // Ascending numeric order.
+            x.partial_cmp(&y).unwrap_or(Ordering::Equal)
         }
         (Some(x), None) if x.is_finite() => Ordering::Less,
         (None, Some(y)) if y.is_finite() => Ordering::Greater,
-        _ => a.to_leek_export_string().cmp(&b.to_leek_export_string()),
+        _ => match (a, b) {
+            // Avoid recursive stringification for composite keys (self-referential maps exist).
+            (Value::Map(ax), Value::Map(bx)) => {
+                (Rc::as_ptr(ax) as usize).cmp(&(Rc::as_ptr(bx) as usize))
+            }
+            (Value::Object(ax), Value::Object(bx)) => {
+                (Rc::as_ptr(ax) as usize).cmp(&(Rc::as_ptr(bx) as usize))
+            }
+            (Value::Map(_), _) => Ordering::Greater,
+            (_, Value::Map(_)) => Ordering::Less,
+            (Value::Object(_), _) => Ordering::Greater,
+            (_, Value::Object(_)) => Ordering::Less,
+            _ => a.to_leek_export_string().cmp(&b.to_leek_export_string()),
+        },
     }
+}
+
+fn java_hashmap_bucket16(v: &Value) -> u8 {
+    // Java HashMap bucket index with capacity 16: (h ^ (h >>> 16)) & 15
+    // where `h` is the Java `hashCode()` (32-bit).
+    let h = java_hashcode(v);
+    let spread = h ^ (h >> 16);
+    (spread & 15) as u8
+}
+
+fn java_hashcode(v: &Value) -> u32 {
+    match v {
+        Value::Null => 0,
+        Value::Bool(true) => 1231,
+        Value::Bool(false) => 1237,
+        Value::Number(NumberBits::Int(i)) => java_long_hashcode(*i),
+        Value::Number(NumberBits::Real(x)) => java_double_hashcode(*x),
+        Value::String(s) => java_string_hashcode(s),
+        // Non-primitive keys: approximate with identity hash for deterministic ordering.
+        Value::Array(a) => (Rc::as_ptr(a) as usize) as u32,
+        Value::Map(m) => (Rc::as_ptr(m) as usize) as u32,
+        Value::Object(o) => (Rc::as_ptr(o) as usize) as u32,
+        Value::Instance { fields, .. } => (Rc::as_ptr(fields) as usize) as u32,
+        Value::Set(s) => (s.as_ptr() as usize) as u32,
+        Value::Interval(_) => 0,
+        Value::Function { fid } => *fid as u32,
+        Value::Closure { fid, .. } => *fid as u32,
+        Value::NativeFunction { nid } => *nid as u32,
+        Value::Class(c) => c.to_u8() as u32,
+    }
+}
+
+fn java_long_hashcode(x: i64) -> u32 {
+    let u = x as u64;
+    ((u ^ (u >> 32)) & 0xFFFF_FFFF) as u32
+}
+
+fn java_double_hashcode(x: f64) -> u32 {
+    // Double.hashCode: long bits = doubleToLongBits(x); (int)(bits ^ (bits >>> 32))
+    let bits = x.to_bits();
+    ((bits ^ (bits >> 32)) & 0xFFFF_FFFF) as u32
+}
+
+fn java_string_hashcode(s: &str) -> u32 {
+    // String.hashCode over UTF-16 code units: h = 31*h + c
+    let mut h: i32 = 0;
+    for u in s.encode_utf16() {
+        h = h.wrapping_mul(31).wrapping_add(u as i32);
+    }
+    h as u32
+}
+
+fn map_value_export_with_self_ref(
+    container: &Rc<RefCell<Vec<(Value, Value)>>>,
+    snapshot: &[(Value, Value)],
+    v: &Value,
+) -> String {
+    // Java-style formatting for a value inside a map. If `v` is the same map object, print one
+    // nested level and replace the recursive value with `<...>`.
+    if let Value::Map(inner) = v {
+        if Rc::ptr_eq(inner, container) {
+            if snapshot.is_empty() {
+                return "[:]".into();
+            }
+            let mut out = String::from("[");
+            let mut entries: Vec<(&Value, &Value)> =
+                snapshot.iter().map(|(k, v)| (k, v)).collect();
+            entries.sort_by(|(ka, _), (kb, _)| map_key_cmp_for_java_export(ka, kb));
+            for (i, (k, vv)) in entries.into_iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                if let Value::Map(k_inner) = k {
+                    if Rc::ptr_eq(k_inner, container) {
+                        out.push_str("<...>");
+                    } else {
+                        out.push_str(&k.to_leek_export_string());
+                    }
+                } else {
+                    out.push_str(&k.to_leek_export_string());
+                }
+                out.push_str(" : ");
+                if let Value::Map(vv_inner) = vv {
+                    if Rc::ptr_eq(vv_inner, container) {
+                        out.push_str("<...>");
+                        continue;
+                    }
+                }
+                out.push_str(&vv.to_leek_export_string());
+            }
+            out.push(']');
+            return out;
+        }
+    }
+    v.to_leek_export_string()
+}
+
+fn shallow_map_export(m: &Rc<RefCell<Vec<(Value, Value)>>>) -> String {
+    let snapshot = m.borrow().clone();
+    if snapshot.is_empty() {
+        return "[:]".into();
+    }
+    let mut out = String::from("[");
+    for (i, (k, v)) in snapshot.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        // Keys/values that are composite are collapsed to `<...>` in this shallow view.
+        let k_str = match k {
+            Value::Array(_) | Value::Map(_) | Value::Object(_) | Value::Instance { .. } => "<...>".into(),
+            _ => k.to_leek_export_string(),
+        };
+        let v_str = match v {
+            Value::Array(_) | Value::Map(_) | Value::Object(_) | Value::Instance { .. } => "<...>".into(),
+            _ => v.to_leek_export_string(),
+        };
+        out.push_str(&k_str);
+        out.push_str(" : ");
+        out.push_str(&v_str);
+    }
+    out.push(']');
+    out
 }
 
 fn format_object_brace_export(o: &[(Value, Value)], fmt_val: impl Fn(&Value) -> String) -> String {

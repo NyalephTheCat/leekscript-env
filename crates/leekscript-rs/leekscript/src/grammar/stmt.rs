@@ -292,7 +292,8 @@ pub fn define(g: &mut GrammarBuilder) {
             });
             g.optional(|g| {
                 g.call_rule(GRule::KwExtends);
-                g.call_rule(GRule::Ident);
+                // Java suite allows `extends Array` / `extends Map` etc (type-keywords as names).
+                g.call_rule(GRule::Name);
             });
             g.call_rule(GRule::ClassBody);
         });
@@ -384,6 +385,34 @@ pub fn define(g: &mut GrammarBuilder) {
                     },
                     |g| {
                         g.call_rule(GRule::KwFunction);
+                    },
+                    |g| {
+                        cfg_flags::v2(g);
+                        g.call_rule(GRule::KwArray);
+                    },
+                    |g| {
+                        cfg_flags::v2(g);
+                        g.call_rule(GRule::KwMap);
+                    },
+                    |g| {
+                        cfg_flags::v2(g);
+                        g.call_rule(GRule::KwObject);
+                    },
+                    |g| {
+                        cfg_flags::v2(g);
+                        g.call_rule(GRule::KwSetType);
+                    },
+                    |g| {
+                        cfg_flags::v2(g);
+                        g.call_rule(GRule::KwFunctionType);
+                    },
+                    |g| {
+                        cfg_flags::v2(g);
+                        g.call_rule(GRule::KwIntervalType);
+                    },
+                    |g| {
+                        cfg_flags::v2(g);
+                        g.call_rule(GRule::KwClassType);
                     },
                 );
             },
@@ -521,13 +550,63 @@ pub fn define(g: &mut GrammarBuilder) {
         g.node(Node::GlobalDecl, |g| {
             g.call_rule(GRule::KwGlobal);
             // Disambiguate `global x;` (untyped) from `global integer x;` / `global Map<K,V> m;`.
-            // `LsType` can start with a plain identifier (user-defined type), so we only take the
-            // typed branch when a second identifier follows.
+            //
+            // In Java LeekScript, a typed global declaration starts with a *type keyword* (`integer`,
+            // `real`, `Map`, `Array`, …). A plain identifier after `global` is a variable name, not
+            // a user-defined type name (important for snippets like `global y x = (y = [:])`).
             g.choice(
                 |g| {
                     g.lookahead(|g| {
-                        g.call_rule(GRule::LsType);
-                        g.call_rule(GRule::Ident);
+                        sipha::choices!(
+                            g,
+                            |g| {
+                                g.call_rule(GRule::KwInteger);
+                            },
+                            |g| {
+                                g.call_rule(GRule::KwReal);
+                            },
+                            |g| {
+                                g.call_rule(GRule::KwBoolean);
+                            },
+                            |g| {
+                                g.call_rule(GRule::KwStringType);
+                            },
+                            |g| {
+                                g.call_rule(GRule::KwAny);
+                            },
+                            |g| {
+                                cfg_flags::v2(g);
+                                g.call_rule(GRule::KwArray);
+                            },
+                            |g| {
+                                cfg_flags::v2(g);
+                                g.call_rule(GRule::KwIntervalType);
+                            },
+                            |g| {
+                                cfg_flags::v2(g);
+                                g.call_rule(GRule::KwSetType);
+                            },
+                            |g| {
+                                cfg_flags::v2(g);
+                                g.call_rule(GRule::KwMap);
+                            },
+                            |g| {
+                                cfg_flags::v2(g);
+                                g.call_rule(GRule::KwObject);
+                            },
+                            |g| {
+                                cfg_flags::v2(g);
+                                g.call_rule(GRule::KwFunctionType);
+                            },
+                            |g| {
+                                cfg_flags::v2(g);
+                                g.call_rule(GRule::KwClassType);
+                            },
+                            |g| {
+                                cfg_flags::v3(g);
+                                g.call_rule(GRule::KwNull);
+                            },
+                        );
                     });
                     g.call_rule(GRule::LsType);
                     g.call_rule(GRule::Ident);
