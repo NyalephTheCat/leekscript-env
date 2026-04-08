@@ -5,6 +5,7 @@
 //! the JVM instead of a single explicit opcode → handler table.
 
 use std::vec::Vec;
+use std::any::Any;
 
 use crate::vm::compile::{CompiledChunk, FunctionEntry};
 use crate::vm::ir::{Bytecode, Opcode};
@@ -128,6 +129,9 @@ pub struct Vm {
 
     /// Reused buffer for native-call arguments to avoid per-call allocations.
     scratch_native_args: Vec<Value>,
+
+    /// Host-provided state for native APIs (fight generator, tests, etc).
+    host: Option<Box<dyn Any>>,
 }
 
 impl Vm {
@@ -163,7 +167,23 @@ impl Vm {
             ram_quads: 0,
             max_ram_quads: Some(DEFAULT_MAX_RAM_QUADS),
             scratch_native_args: Vec::new(),
+            host: None,
         }
+    }
+
+    /// Attach host state for native APIs. The VM does not interpret the value.
+    pub fn set_host(&mut self, host: Box<dyn Any>) {
+        self.host = Some(host);
+    }
+
+    /// Borrow typed host state (if present and of type `T`).
+    pub fn host_ref<T: Any>(&self) -> Option<&T> {
+        self.host.as_deref()?.downcast_ref::<T>()
+    }
+
+    /// Mutably borrow typed host state (if present and of type `T`).
+    pub fn host_mut<T: Any>(&mut self) -> Option<&mut T> {
+        self.host.as_deref_mut()?.downcast_mut::<T>()
     }
 
     /// Replace the native function table (index = id used in [`Opcode::CallNative`](Opcode::CallNative)).

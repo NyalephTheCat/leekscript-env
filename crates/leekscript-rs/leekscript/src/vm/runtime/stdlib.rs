@@ -3488,3 +3488,9 @@ pub fn native_id(name: &str) -> Option<u16> {
 pub fn default_natives() -> Vec<NativeFn> {
     STDLIB_NATIVES.iter().map(|(_, f)| *f).collect()
 }
+
+/// Number of stdlib natives (for building extended native tables).
+#[must_use]
+pub fn stdlib_native_count() -> u16 {
+    STDLIB_NATIVES.len() as u16
+}

@@ -40,16 +40,15 @@ pub mod value;
 
 pub use compile::{
     CompileChunkError, CompileError, CompiledChunk, FunctionEntry, compile_chunk_v4,
-    compile_chunk_v4_with_includes,
+    compile_chunk_v4_with_includes, compile_chunk_v4_with_includes_and_native_id_fn,
+    compile_chunk_v4_with_native_id_fn,
 };
 pub use ir::{Bytecode, BytecodeBuilder, Opcode};
 pub use runtime::error::VmError;
 pub use runtime::interpreter::{
     DEFAULT_MAX_OPERATIONS, DEFAULT_MAX_RAM_QUADS, DISPATCH, NativeFn, OpHandler, Vm, op_illegal,
 };
-pub use runtime::stdlib::{
-    default_natives, native_id, stdlib_global_constant_init, stdlib_global_function_init,
-};
+pub use runtime::stdlib::{stdlib_global_constant_init, stdlib_global_function_init};
 /// Alias of [`runtime::stdlib`] so `leekscript::vm::stdlib::…` paths stay stable.
 pub use runtime::stdlib as stdlib;
 pub use value::{NumberBits, PreludeClass, Value};

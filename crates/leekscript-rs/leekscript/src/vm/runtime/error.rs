@@ -29,6 +29,8 @@ pub enum VmError {
     ExpectedInterval,
     /// Native overload / argument types not supported at runtime.
     BadNativeArgs,
+    /// Native API requires host-provided state.
+    MissingHost(&'static str),
     /// Local slot index out of range for the current frame.
     BadLocal(u16),
     /// [`Vm::max_operations`](crate::vm::runtime::interpreter::Vm::max_operations) exceeded (Leek Wars `Error.TOO_MUCH_OPERATIONS`).
@@ -64,6 +66,7 @@ impl fmt::Display for VmError {
             Self::ExpectedArray => write!(f, "expected array"),
             Self::ExpectedInterval => write!(f, "expected interval"),
             Self::BadNativeArgs => write!(f, "native call argument types not supported"),
+            Self::MissingHost(s) => write!(f, "missing host state: {s}"),
             Self::BadLocal(i) => write!(f, "local index {i} out of range"),
             Self::TooManyOperations {
                 limit,

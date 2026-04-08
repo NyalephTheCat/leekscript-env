@@ -1,15 +1,12 @@
 [submodule "crates/sipha"]
 	path = crates/sipha
 	url = git@github.com:sipha-parser/sipha.git
-[submodule "leek-wars-generator"]
-	path = leek-wars-generator
-	url = https://github.com/leek-wars/leek-wars-generator.git
-[submodule "leek-wars"]
-	path = leek-wars
-	url = https://github.com/leek-wars/leek-wars.git
 [submodule "leekscript-code"]
 	path = leekscript-code
 	url = git@github.com:NyalephTheCat/leekscript-code.git
 [submodule "crates/leekscript-rs/leekscript-lsp"]
 	path = crates/leekscript-rs/leekscript-lsp
 	url = git@github.com:NyalephTheCat/leekscript-lsp.git
+[submodule "Leekwars-Tools"]
+	path = Leekwars-Tools
+	url = git@github.com:Bux42/Leekwars-Tools.git

@@ -149,6 +149,23 @@ pub fn compile_chunk_v4(source: &str) -> Result<CompiledChunk, CompileError> {
     compile_root(root, resolved.version)
 }
 
+/// Like [`compile_chunk_v4`], but resolves natives through `native_id_fn` instead of stdlib-only.
+///
+/// The returned bytecode will use [`Opcode::CallNative`](crate::vm::ir::Opcode::CallNative) with the
+/// ids returned by `native_id_fn`, so the caller must install a matching native table on the VM.
+#[allow(dead_code)]
+pub fn compile_chunk_v4_with_native_id_fn(
+    source: &str,
+    native_id_fn: fn(&str) -> Option<u16>,
+) -> Result<CompiledChunk, CompileError> {
+    let lang = vm_parse_options();
+    let resolved = language_options_with_source_directives(source, lang);
+    let doc = parse_doc(source, resolved)?;
+    let root = Root::cast(doc.root().clone())
+        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"))?;
+    compile_root_with_native_id_fn(root, resolved.version, native_id_fn)
+}
+
 /// Load `entry` from `project_root` with the same include rules as `leekscript check`, merge to one
 /// source buffer, then compile like [`compile_chunk_v4`].
 pub fn compile_chunk_v4_with_includes(
@@ -167,6 +184,27 @@ pub fn compile_chunk_v4_with_includes(
         .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"));
     let root = root.map_err(CompileChunkError::Compile)?;
     compile_root(root, resolved.version).map_err(CompileChunkError::Compile)
+}
+
+#[allow(dead_code)]
+pub fn compile_chunk_v4_with_includes_and_native_id_fn(
+    project_root: &Path,
+    entry: &Path,
+    native_id_fn: fn(&str) -> Option<u16>,
+) -> Result<CompiledChunk, CompileChunkError> {
+    let lang = vm_parse_options();
+    let project = include::load_project_with_includes(project_root, entry, lang)
+        .map_err(CompileChunkError::Load)?;
+    let merged = include::merge_included_sources_to_single_file(project_root, &project)
+        .map_err(CompileChunkError::Merge)?;
+    let resolved = language_options_with_source_directives(&merged, lang);
+    let doc =
+        parse_doc(&merged, resolved).map_err(|e| CompileChunkError::Compile(e.into()))?;
+    let root = Root::cast(doc.root().clone())
+        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"));
+    let root = root.map_err(CompileChunkError::Compile)?;
+    compile_root_with_native_id_fn(root, resolved.version, native_id_fn)
+        .map_err(CompileChunkError::Compile)
 }
 
 #[cfg(test)]
@@ -366,6 +404,124 @@ fn compile_root(root: Root, version: Version) -> Result<CompiledChunk, CompileEr
     })
 }
 
+#[allow(dead_code)]
+fn compile_root_with_native_id_fn(
+    root: Root,
+    version: Version,
+    native_id_fn: fn(&str) -> Option<u16>,
+) -> Result<CompiledChunk, CompileError> {
+    let mut cx = CompileCtx::default();
+    cx.native_id_fn = native_id_fn;
+    cx.version = version;
+    cx.emit_stdlib_global_constants();
+    cx.emit_stdlib_global_functions();
+    let stmts: Vec<Stmt> = AstNodeExt::children::<Stmt>(root.syntax()).collect();
+    // Java globals behave like predeclared bindings (visible even before the `global` statement).
+    {
+        let mut in_global = false;
+        let mut want_ident = false;
+        for t in root.syntax().descendant_tokens() {
+            let tok_el = SyntaxElement::Token(t.clone());
+            if syntax_el_is_trivia(&tok_el) {
+                continue;
+            }
+            match Lex::from_syntax_kind(t.kind()) {
+                Some(Lex::GlobalKw) => {
+                    in_global = true;
+                    want_ident = true;
+                }
+                Some(Lex::Semi) => {
+                    in_global = false;
+                    want_ident = false;
+                }
+                Some(Lex::Comma) if in_global => {
+                    want_ident = true;
+                }
+                Some(Lex::Ident) if in_global && want_ident => {
+                    cx.alloc_local(t.text());
+                    want_ident = false;
+                }
+                _ => {}
+            }
+        }
+    }
+    for s in &stmts {
+        if let Stmt::Global(g) = s {
+            let elts: Vec<_> = g
+                .syntax()
+                .children()
+                .filter(|e| !syntax_el_is_trivia(e))
+                .collect();
+            let mut i = 0usize;
+            if let Some(SyntaxElement::Token(t)) = elts.get(i) {
+                if Lex::from_syntax_kind(t.kind()) == Some(Lex::GlobalKw) {
+                    i += 1;
+                }
+            }
+            if let Some(SyntaxElement::Node(n)) = elts.get(i) {
+                if TypeExpr::can_cast(n.kind()) {
+                    i += 1;
+                }
+            }
+            while i < elts.len() {
+                if let SyntaxElement::Token(t) = &elts[i] {
+                    if matches!(Lex::from_syntax_kind(t.kind()), Some(Lex::Semi)) {
+                        break;
+                    }
+                }
+                let SyntaxElement::Token(name_t) = &elts[i] else { break };
+                if name_t.kind() != Lex::Ident.into_syntax_kind() {
+                    break;
+                }
+                cx.alloc_local(name_t.text());
+                i += 1;
+                if let Some(SyntaxElement::Token(t)) = elts.get(i) {
+                    if t.kind() == Lex::Eq.into_syntax_kind() {
+                        i += 1;
+                        if let Some(SyntaxElement::Node(_)) = elts.get(i) {
+                            i += 1;
+                        }
+                    }
+                }
+                if let Some(SyntaxElement::Token(t)) = elts.get(i) {
+                    if t.kind() == Lex::Comma.into_syntax_kind() {
+                        i += 1;
+                    }
+                }
+            }
+        }
+    }
+    let n = stmts.len();
+    for (i, stmt) in stmts.into_iter().enumerate() {
+        let is_last = i + 1 == n;
+        if is_last {
+            if let Stmt::Expr(es) = &stmt {
+                if let Some(e) = es.expr() {
+                    cx.compile_expr(e.clone())?;
+                    let o = java_ops::java_analyzed_ops(&e);
+                    if o > 0 {
+                        cx.builder.emit_charge_ops(o);
+                    }
+                    cx.builder.emit_opcode(Opcode::Return);
+                    return Ok(CompiledChunk {
+                        bytecode: cx.builder.finish(),
+                        local_slots: usize::from(cx.next_local),
+                        functions: cx.functions,
+                    });
+                }
+            }
+        }
+        cx.compile_stmt(stmt)?;
+    }
+    cx.builder.emit_opcode(Opcode::PushNull);
+    cx.builder.emit_opcode(Opcode::Return);
+    Ok(CompiledChunk {
+        bytecode: cx.builder.finish(),
+        local_slots: usize::from(cx.next_local),
+        functions: cx.functions,
+    })
+}
+
 /// Identifiers bound by `for (a in …)` / `for (a : b in …)` (token scan aligned with scope analysis).
 fn foreach_binding_idents(fe: &ForeachStmt) -> Vec<String> {
     let mut out = Vec::new();
@@ -443,6 +599,7 @@ struct CompileCtx {
     switch_tmp_id: u32,
     functions: Vec<FunctionEntry>,
     function_by_name: HashMap<String, u16>,
+    native_id_fn: fn(&str) -> Option<u16>,
 }
 
 impl Default for CompileCtx {
@@ -472,6 +629,7 @@ impl Default for CompileCtx {
             switch_tmp_id: 0,
             functions: Vec::new(),
             function_by_name: HashMap::new(),
+            native_id_fn: crate::vm::runtime::stdlib::native_id,
         }
     }
 }
@@ -3426,7 +3584,7 @@ impl CompileCtx {
                             return Ok(Some(()));
                         }
                     }
-                    if let Some(nid) = crate::vm::runtime::stdlib::native_id(&name) {
+                    if let Some(nid) = (self.native_id_fn)(&name) {
                         self.builder.emit_push_const(Value::NativeFunction { nid });
                         return Ok(Some(()));
                     }
@@ -3680,7 +3838,7 @@ impl CompileCtx {
         } else {
             self.builder.emit_opcode(Opcode::PushNull);
         }
-        let Some(nid) = crate::vm::runtime::stdlib::native_id("intervalRange") else {
+        let Some(nid) = (self.native_id_fn)("intervalRange") else {
             return Err(CompileError::Unsupported("intervalRange native"));
         };
         self.builder.emit_call_native(nid, 4);
@@ -3928,13 +4086,13 @@ impl CompileCtx {
             self.builder.emit_call_function(fid, meta.argc);
             return Ok(true);
         }
-        if crate::vm::runtime::stdlib::native_id(&name).is_some() {
+        if (self.native_id_fn)(&name).is_some() {
             let arg_o: u32 = args.iter().map(|a| java_ops::java_analyzed_ops(a)).sum();
             if arg_o > 0 {
                 self.builder.emit_charge_ops(arg_o);
             }
         }
-        if let Some(nid) = crate::vm::runtime::stdlib::native_id(&name) {
+        if let Some(nid) = (self.native_id_fn)(&name) {
             self.builder.emit_call_native(nid, argc);
             return Ok(true);
         }
@@ -5610,13 +5768,13 @@ impl CompileCtx {
             self.builder.emit_call_function(fid, argc);
             return Ok(());
         }
-        if crate::vm::runtime::stdlib::native_id(&name).is_some() {
+        if (self.native_id_fn)(&name).is_some() {
             let arg_o: u32 = args.iter().map(|a| java_ops::java_analyzed_ops(a)).sum();
             if arg_o > 0 {
                 self.builder.emit_charge_ops(arg_o);
             }
         }
-        if let Some(nid) = crate::vm::runtime::stdlib::native_id(&name) {
+        if let Some(nid) = (self.native_id_fn)(&name) {
             self.builder.emit_call_native(nid, argc);
             // `push(arr, x)` mutates the array in Java; the native returns the new array — store back
             // into a plain local first argument so loops like `push(a, i)` grow `a`.
@@ -6824,7 +6982,7 @@ impl CompileCtx {
                         self.builder.emit_opcode(Opcode::GetElem);
                         return Ok(());
                     }
-                    if let Some(nid) = crate::vm::runtime::stdlib::native_id(&name) {
+                    if let Some(nid) = (self.native_id_fn)(&name) {
                         self.builder.emit_push_const(Value::NativeFunction { nid });
                         return Ok(());
                     }
@@ -6839,7 +6997,7 @@ impl CompileCtx {
     fn emit_binop(&mut self, op: Lex) -> Result<(), CompileError> {
         match op {
             Lex::StarStar => {
-                let Some(nid) = crate::vm::runtime::stdlib::native_id("pow") else {
+                let Some(nid) = (self.native_id_fn)("pow") else {
                     return Err(CompileError::Unsupported("pow native"));
                 };
                 self.builder.emit_call_native(nid, 2);

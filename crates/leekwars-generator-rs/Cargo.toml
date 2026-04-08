@@ -1,0 +1,27 @@
+[package]
+name = "leekwars-generator-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Rust reimplementation of Leek Wars fight generator (early baseline)"
+license = "MIT"
+
+[[bin]]
+name = "leekwars-generator"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+leekscript = { path = "../leekscript-rs/leekscript" }
+miette = { version = "7.6", features = ["fancy"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = { version = "0.8", optional = true }
+sha1 = "0.10"
+
+[features]
+toml = ["dep:toml"]
+java-parity = []
