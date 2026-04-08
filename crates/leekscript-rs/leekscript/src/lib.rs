@@ -87,7 +87,7 @@ pub use sipha::types::{Pos, Span};
 #[cfg(feature = "walk")]
 pub use scope::{
     AnalysisResult, ExprTypeKey, LeekTy, Reference, Scope, ScopeId, SemanticCode,
-    SemanticDiagnostic, SemanticSeverity, run_semantic_analysis,
+    SemanticDiagnostic, SemanticSeverity, Symbol, SymbolId, SymbolKind, run_semantic_analysis,
 };
 
 #[cfg(feature = "transform")]

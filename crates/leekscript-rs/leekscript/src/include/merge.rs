@@ -49,6 +49,31 @@ impl MergedSourceMapping {
             None
         }
     }
+
+    /// Maps a UTF-8 byte offset in `file_path`’s source to the corresponding offset in the merged
+    /// buffer (after signature prelude and include expansion). Used by the LSP to relate editor
+    /// cursors to merged parse trees.
+    ///
+    /// Paths are matched using [`fs::canonicalize`] when possible; falls back to [`Path`] equality.
+    #[must_use]
+    pub fn merged_offset_for_file_byte(&self, file_path: &Path, file_byte: u32) -> Option<u32> {
+        fn path_key(p: &Path) -> PathBuf {
+            fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+        }
+        let want = path_key(file_path);
+        for s in &self.spans {
+            let span_path = path_key(&s.path);
+            if span_path != want {
+                continue;
+            }
+            let chunk = s.merged_end.saturating_sub(s.merged_start);
+            let end_file = s.file_offset.saturating_add(chunk);
+            if file_byte >= s.file_offset && file_byte < end_file {
+                return Some(s.merged_start + (file_byte - s.file_offset));
+            }
+        }
+        None
+    }
 }
 
 /// Failure while merging includes into one buffer.
@@ -419,4 +444,25 @@ fn emit_top_level(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod merged_offset_tests {
+    use super::{MergedSourceMapping, MergedSpanMap};
+    use std::path::PathBuf;
+
+    #[test]
+    fn merged_offset_for_file_byte_round_trip() {
+        let p = PathBuf::from("/proj/a.leek");
+        let mut m = MergedSourceMapping::default();
+        m.spans.push(MergedSpanMap {
+            merged_start: 100,
+            merged_end: 105,
+            path: p.clone(),
+            file_offset: 10,
+        });
+        assert_eq!(m.merged_offset_for_file_byte(&p, 12), Some(102));
+        assert_eq!(m.merged_offset_for_file_byte(&p, 9), None);
+        assert_eq!(m.merged_offset_for_file_byte(&p, 15), None);
+    }
 }
