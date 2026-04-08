@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::report::enums::EffectType;
+
 /// Resolved names from `leek-wars-generator/data/weapons.json` (and `chips.json` when present).
 #[derive(Debug, Default, Clone)]
 pub struct GameNames {
@@ -170,8 +172,8 @@ pub fn format_outcome_human(outcome: &Value) -> String {
 
 /// Like [`format_outcome_human`], but also searches for `data/` starting from `scenario_path`'s ancestors.
 pub fn format_outcome_human_for_path(outcome: &Value, scenario_path: &Path) -> String {
-    let data_dir = find_game_data_dir(scenario_path)
-        .or_else(|| std::env::current_dir().ok().and_then(|cwd| find_game_data_dir(&cwd)));
+    let data_dir =
+        find_game_data_dir(scenario_path).or_else(|| std::env::current_dir().ok().and_then(|cwd| find_game_data_dir(&cwd)));
     let game = data_dir
         .as_ref()
         .map(|p| GameNames::load_from_data_dir(p))
@@ -252,23 +254,14 @@ fn leek_label(names: &HashMap<i64, String>, id: i64) -> String {
     }
 }
 
-fn leek_at_cell(
-    entity_cell: &HashMap<i64, i64>,
-    dead: &HashSet<i64>,
-    cell: i64,
-) -> Option<i64> {
+fn leek_at_cell(entity_cell: &HashMap<i64, i64>, dead: &HashSet<i64>, cell: i64) -> Option<i64> {
     entity_cell
         .iter()
         .find(|(e, c)| **c == cell && !dead.contains(e))
         .map(|(e, _)| *e)
 }
 
-fn append_participants(
-    buf: &mut String,
-    fight: &Value,
-    names: &HashMap<i64, String>,
-    game: &GameNames,
-) {
+fn append_participants(buf: &mut String, fight: &Value, names: &HashMap<i64, String>, game: &GameNames) {
     buf.push_str("Participants (starting positions)\n");
     let Some(leeks) = fight.get("leeks").and_then(|v| v.as_array()) else {
         buf.push_str("  (no leeks in fight JSON)\n");
@@ -384,12 +377,7 @@ impl<'a> TimelineState<'a> {
     }
 }
 
-fn append_actions_timeline(
-    buf: &mut String,
-    fight: &Value,
-    names: &HashMap<i64, String>,
-    game: &GameNames,
-) {
+fn append_actions_timeline(buf: &mut String, fight: &Value, names: &HashMap<i64, String>, game: &GameNames) {
     buf.push_str("Timeline\n");
     let Some(actions) = fight.get("actions").and_then(|v| v.as_array()) else {
         buf.push_str("  (no actions)\n");
@@ -424,38 +412,9 @@ fn hit_word(ok: i64) -> &'static str {
 }
 
 fn effect_type_name(id: i64) -> String {
-    let name = match id {
-        1 => "DAMAGE",
-        2 => "HEAL",
-        3 => "BUFF_STRENGTH",
-        4 => "BUFF_AGILITY",
-        5 => "RELATIVE_SHIELD",
-        6 => "ABSOLUTE_SHIELD",
-        7 => "BUFF_MP",
-        8 => "BUFF_TP",
-        9 => "DEBUFF",
-        10 => "TELEPORT",
-        11 => "INVERT",
-        12 => "BOOST_MAX_LIFE",
-        13 => "POISON",
-        14 => "SUMMON",
-        15 => "RESURRECT",
-        16 => "KILL",
-        17 => "SHACKLE_MP",
-        18 => "SHACKLE_TP",
-        19 => "SHACKLE_STRENGTH",
-        20 => "DAMAGE_RETURN",
-        25 => "AFTEREFFECT",
-        28 => "LIFE_DAMAGE",
-        30 => "NOVA_DAMAGE",
-        45 => "NOVA_VITALITY",
-        _ => "",
-    };
-    if name.is_empty() {
-        format!("EFFECT_TYPE_{id}")
-    } else {
-        name.to_string()
-    }
+    EffectType::from_i64(id)
+        .map(|e| e.name().to_string())
+        .unwrap_or_else(|| format!("EFFECT_TYPE_{id}"))
 }
 
 fn format_action_line(state: &TimelineState, a: &[Value]) -> String {
@@ -751,7 +710,10 @@ fn append_logs_summary(buf: &mut String, logs: Option<&Value>) {
         return;
     }
 
-    buf.push_str(&format!("  {}\n", serde_json::to_string(logs).unwrap_or_default()));
+    buf.push_str(&format!(
+        "  {}\n",
+        serde_json::to_string(logs).unwrap_or_default()
+    ));
 }
 
 #[cfg(test)]
@@ -814,3 +776,4 @@ mod tests {
         );
     }
 }
+

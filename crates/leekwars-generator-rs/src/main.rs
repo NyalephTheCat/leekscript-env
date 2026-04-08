@@ -73,8 +73,37 @@ struct Args {
     #[arg(long)]
     reset_registers: bool,
 
-    /// Scenario JSON path (default) or AI path (with `--analyze`)
-    file: PathBuf,
+    /// Run a batch job from TOML or JSON (`batch-configs/*.toml`). Prints a `BatchResult` JSON object (summary + all outcomes).
+    #[cfg(feature = "batch")]
+    #[arg(long, conflicts_with_all = ["analyze", "fight_report", "format", "pretty", "snapshot_at", "timeline_only", "no_logs"])]
+    batch: Option<PathBuf>,
+
+    /// With `--batch`: write the human-readable batch report to this path (UTF-8 text).
+    #[cfg(feature = "batch")]
+    #[arg(long, requires = "batch")]
+    batch_text_out: Option<PathBuf>,
+
+    /// With `--batch` and `--out`: do not print the human-readable report to stdout (JSON still written to `--out`).
+    /// Ignored when `--batch-report` is set (that flag always prints the report to stdout).
+    #[cfg(feature = "batch")]
+    #[arg(long, requires = "batch")]
+    batch_no_human_stdout: bool,
+
+    /// With `--batch`: always print the human-readable batch report to stdout.
+    /// With `--out` and no `--batch-report`, the report is printed by default unless `--batch-no-human-stdout` is set.
+    /// With `--batch-report` and no `--out`, JSON is not printed to stdout (human report only).
+    #[cfg(feature = "batch")]
+    #[arg(long, requires = "batch")]
+    batch_report: bool,
+
+    /// With `--batch`: do not print run progress to stderr (default is progress on stderr so stdout stays clean).
+    #[cfg(feature = "batch")]
+    #[arg(long, requires = "batch")]
+    no_batch_progress: bool,
+
+    /// Scenario JSON path (default) or AI path (with `--analyze`).
+    #[cfg_attr(feature = "batch", doc = " Or omit when using `--batch`.")]
+    file: Option<PathBuf>,
 }
 
 fn emit_scenario_output(args: &Args, payload: &str) -> miette::Result<()> {
@@ -120,6 +149,62 @@ fn effective_format(args: &Args) -> OutputFormat {
 fn main() -> miette::Result<()> {
     let args = Args::parse();
 
+    #[cfg(feature = "batch")]
+    if let Some(batch_path) = &args.batch {
+        let generator = leekwars_generator_rs::Generator {
+            verbose: args.verbose,
+            signature_files: leekwars_generator_rs::Generator::new().signature_files,
+            register_manager: None,
+            trace_entity: None,
+        };
+        let runner = leekwars_generator_rs::BatchRunner {
+            generator,
+            show_progress: !args.no_batch_progress,
+        };
+        let job = leekwars_generator_rs::BatchRunner::load_job_from_file(batch_path)?;
+        let result = runner.run(&job)?;
+        let payload = serde_json::to_string_pretty(&result).into_diagnostic()?;
+        let human = leekwars_generator_rs::format_batch_human(&job, &result);
+
+        if args.batch_report && args.out.is_none() {
+            println!("{human}");
+            if let Some(p) = &args.batch_text_out {
+                fs::write(p, human.as_bytes())
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("failed to write batch report to `{}`", p.display()))?;
+            }
+            return Ok(());
+        }
+
+        if let Some(out) = &args.out {
+            fs::write(out, payload.as_bytes())
+                .into_diagnostic()
+                .wrap_err_with(|| format!("failed to write batch result to `{}`", out.display()))?;
+            let human_stdout = args.batch_report || !args.batch_no_human_stdout;
+            if human_stdout {
+                println!("{human}");
+            }
+        } else {
+            println!("{payload}");
+        }
+
+        if let Some(p) = &args.batch_text_out {
+            fs::write(p, human.as_bytes())
+                .into_diagnostic()
+                .wrap_err_with(|| format!("failed to write batch report to `{}`", p.display()))?;
+        }
+        return Ok(());
+    }
+
+    let Some(file) = args.file.clone() else {
+        #[cfg(feature = "batch")]
+        return Err(miette::miette!(
+            "missing scenario or AI path: pass `file` or use `--batch <job.toml>`"
+        ));
+        #[cfg(not(feature = "batch"))]
+        return Err(miette::miette!("missing scenario or AI path: pass `file`"));
+    };
+
     if args.analyze && args.fight_report {
         return Err(miette::miette!(
             "`--analyze` is for AI files; `--fight-report` applies to scenario runs. Use only one."
@@ -127,11 +212,11 @@ fn main() -> miette::Result<()> {
     }
 
     if args.analyze {
-        let src = fs::read_to_string(&args.file)
+        let src = fs::read_to_string(&file)
             .into_diagnostic()
-            .wrap_err_with(|| format!("failed to read AI file `{}`", args.file.display()))?;
+            .wrap_err_with(|| format!("failed to read AI file `{}`", file.display()))?;
 
-        let diags = leekwars_generator_rs::analyze_ai_source_with_path(&src, Some(&args.file))
+        let diags = leekwars_generator_rs::analyze_ai_source_with_path(&src, Some(&file))
             .map_err(|e| miette::miette!("{e:?}"))
             .wrap_err("failed to parse AI")?;
 
@@ -170,7 +255,7 @@ fn main() -> miette::Result<()> {
         },
         trace_entity: args.trace_entity,
     };
-    let outcome = generator.run_scenario_from_file(&args.file)?;
+    let outcome = generator.run_scenario_from_file(&file)?;
     let format = effective_format(&args);
     let payload = match format {
         OutputFormat::Json | OutputFormat::JsonPretty => {
@@ -207,7 +292,7 @@ fn main() -> miette::Result<()> {
                 let game = leekwars_generator_rs::GameNames::load_from_data_dir(dir);
                 leekwars_generator_rs::format_outcome_human_with_game(&v, &game)
             } else {
-                leekwars_generator_rs::format_outcome_human_for_path(&v, &args.file)
+                leekwars_generator_rs::format_outcome_human_for_path(&v, &file)
             }
         }
     };

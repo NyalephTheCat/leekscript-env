@@ -6,9 +6,7 @@ pub fn toml_to_json(v: &toml::Value) -> serde_json::Value {
         toml::Value::Float(f) => serde_json::json!(*f),
         toml::Value::Boolean(b) => serde_json::Value::Bool(*b),
         toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
-        toml::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(toml_to_json).collect())
-        }
+        toml::Value::Array(arr) => serde_json::Value::Array(arr.iter().map(toml_to_json).collect()),
         toml::Value::Table(t) => serde_json::Value::Object(
             t.iter()
                 .map(|(k, v)| (k.clone(), toml_to_json(v)))

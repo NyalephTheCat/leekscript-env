@@ -78,12 +78,7 @@ impl Field {
 
     /// Shortest path over 4-neighbor grid. Returned path includes `start` and `goal`.
     #[must_use]
-    pub fn shortest_path(
-        &self,
-        start: i64,
-        goal: i64,
-        blocked: &HashSet<i64>,
-    ) -> Option<Vec<i64>> {
+    pub fn shortest_path(&self, start: i64, goal: i64, blocked: &HashSet<i64>) -> Option<Vec<i64>> {
         if start == goal {
             return Some(vec![start]);
         }

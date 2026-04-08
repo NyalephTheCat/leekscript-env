@@ -288,7 +288,7 @@ impl Generator {
                 let chunk = leekscript::vm::compile_chunk_v4_with_includes_and_native_id_fn(
                     &canon_root,
                     &canon_entry,
-                    crate::leekwars_vm::native_id,
+                    crate::vm::native_id,
                 )
                 .map_err(|er| miette::miette!("{er}"))?;
                 let key = if cfg!(feature = "java-parity") {
@@ -311,8 +311,8 @@ impl Generator {
             // Tick cooldowns/effects at start of turn (parity building blocks).
             {
                 let mut st = state.borrow_mut();
-                crate::leekwars_vm::tick_chip_cooldowns_public(&mut st);
-                crate::leekwars_vm::tick_effects_start_turn_public(&mut st);
+                crate::vm::tick_chip_cooldowns_public(&mut st);
+                crate::vm::tick_effects_start_turn_public(&mut st);
             }
 
             // Refresh TP/MP at the start of the turn (baseline policy).
@@ -321,7 +321,7 @@ impl Generator {
                 for e in st.entities.values_mut() {
                     if e.life > 0 {
                         // Apply derived TP/MP modifiers (e.g. shackles) before refresh.
-                        crate::leekwars_vm::recompute_derived_buffs(e);
+                        crate::vm::combat::recompute_derived_buffs(e);
                         let max_tp = (e.max_tp + e.tp_bonus).max(0);
                         let max_mp = (e.max_mp + e.mp_bonus).max(0);
                         e.tp = max_tp;
@@ -598,13 +598,13 @@ impl Generator {
         let chunk = leekscript::vm::compile_chunk_v4_with_includes_and_native_id_fn(
             &canon_root,
             &canon_entry,
-            crate::leekwars_vm::native_id,
+            crate::vm::native_id,
         )
         .map_err(|e| miette::miette!("{e}"))?;
 
         let mut vm = leekscript::vm::Vm::from_compiled_chunk(chunk)
             .map_err(|e| miette::miette!("{e}"))?;
-        vm.set_natives(crate::leekwars_vm::default_natives());
+        vm.set_natives(crate::vm::default_natives());
         vm.set_host(Box::new(LeekWarsContext {
             self_id: self_id as i64,
             state,
@@ -635,7 +635,7 @@ impl Generator {
     ) -> miette::Result<Value> {
         let mut vm = leekscript::vm::Vm::from_compiled_chunk(chunk)
             .map_err(|e| miette::miette!("{e}"))?;
-        vm.set_natives(crate::leekwars_vm::default_natives());
+        vm.set_natives(crate::vm::default_natives());
         vm.set_host(Box::new(LeekWarsContext {
             self_id: self_id as i64,
             state,
@@ -832,7 +832,7 @@ fn compute_start_order_for_scenario(
     order
 }
 
-fn load_weapons_db(generator_root: &Path) -> std::collections::HashMap<i64, crate::leekwars_vm::WeaponDef> {
+fn load_weapons_db(generator_root: &Path) -> std::collections::HashMap<i64, crate::vm::WeaponDef> {
     let mut out = std::collections::HashMap::new();
     let path = generator_root.join("data/weapons.json");
     let Ok(src) = std::fs::read_to_string(&path) else {
@@ -853,8 +853,8 @@ fn load_weapons_db(generator_root: &Path) -> std::collections::HashMap<i64, crat
         let min_range = wobj.get("min_range").and_then(|x| x.as_i64()).unwrap_or(0);
         let max_range = wobj.get("max_range").and_then(|x| x.as_i64()).unwrap_or(0);
         let launch_type_raw = wobj.get("launch_type").and_then(|x| x.as_i64()).unwrap_or(7);
-        let launch_type = crate::leekwars_vm::LaunchType::from_i64(launch_type_raw)
-            .unwrap_or(crate::leekwars_vm::LaunchType::Circle);
+        let launch_type = crate::vm::LaunchType::from_i64(launch_type_raw)
+            .unwrap_or(crate::vm::LaunchType::Circle);
         let max_uses = wobj.get("max_uses").and_then(|x| x.as_i64()).unwrap_or(-1);
         let los = wobj
             .get("los")
@@ -879,9 +879,9 @@ fn load_weapons_db(generator_root: &Path) -> std::collections::HashMap<i64, crat
 
         out.insert(
             item,
-            crate::leekwars_vm::WeaponDef {
-                item: crate::leekwars_vm::WeaponItemId(item),
-                template: crate::leekwars_vm::WeaponTemplateId(template),
+            crate::vm::WeaponDef {
+                item: crate::vm::WeaponItemId(item),
+                template: crate::vm::WeaponTemplateId(template),
                 cost,
                 min_range,
                 max_range,
@@ -896,7 +896,7 @@ fn load_weapons_db(generator_root: &Path) -> std::collections::HashMap<i64, crat
     out
 }
 
-fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate::leekwars_vm::ChipDef> {
+fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate::vm::ChipDef> {
     let mut out = std::collections::HashMap::new();
     let path = generator_root.join("data/chips.json");
     let Ok(src) = std::fs::read_to_string(&path) else {
@@ -917,8 +917,8 @@ fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate:
         let min_range = co.get("min_range").and_then(|x| x.as_i64()).unwrap_or(0);
         let max_range = co.get("max_range").and_then(|x| x.as_i64()).unwrap_or(0);
         let launch_type_raw = co.get("launch_type").and_then(|x| x.as_i64()).unwrap_or(7);
-        let launch_type = crate::leekwars_vm::LaunchType::from_i64(launch_type_raw)
-            .unwrap_or(crate::leekwars_vm::LaunchType::Circle);
+        let launch_type = crate::vm::LaunchType::from_i64(launch_type_raw)
+            .unwrap_or(crate::vm::LaunchType::Circle);
         let area = co.get("area").and_then(|x| x.as_i64()).unwrap_or(1);
         let los = co.get("los").and_then(|x| x.as_bool()).unwrap_or(true);
         let cooldown = co.get("cooldown").and_then(|x| x.as_i64()).unwrap_or(0);
@@ -929,12 +929,12 @@ fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate:
         if let Some(arr) = co.get("effects").and_then(|x| x.as_array()) {
             for ev in arr {
                 let Some(eo) = ev.as_object() else { continue };
-                let Some(effect_id) = crate::leekwars_vm::EffectType::from_i64(
+                let Some(effect_id) = crate::vm::EffectType::from_i64(
                     eo.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
                 ) else {
                     continue;
                 };
-                effects.push(crate::leekwars_vm::ChipEffectDef {
+                effects.push(crate::vm::ChipEffectDef {
                     id: effect_id,
                     value1: eo.get("value1").and_then(|x| x.as_f64()).unwrap_or(0.0),
                     value2: eo.get("value2").and_then(|x| x.as_f64()).unwrap_or(0.0),
@@ -947,9 +947,9 @@ fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate:
         }
         out.insert(
             item,
-            crate::leekwars_vm::ChipDef {
-                item: crate::leekwars_vm::ChipItemId(item),
-                template: crate::leekwars_vm::ChipTemplateId(template),
+            crate::vm::ChipDef {
+                item: crate::vm::ChipItemId(item),
+                template: crate::vm::ChipTemplateId(template),
                 cost,
                 min_range,
                 max_range,
@@ -969,7 +969,7 @@ fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate:
 
 fn load_summons_db(
     generator_root: &Path,
-) -> std::collections::HashMap<crate::leekwars_vm::SummonId, crate::leekwars_vm::SummonDef> {
+) -> std::collections::HashMap<crate::vm::SummonId, crate::vm::SummonDef> {
     let mut out = std::collections::HashMap::new();
     let path = generator_root.join("data/summons.json");
     let Ok(src) = std::fs::read_to_string(&path) else {
@@ -994,8 +994,8 @@ fn load_summons_db(
             let b = arr.get(1).and_then(|x| x.as_i64()).unwrap_or(0);
             (a, b)
         };
-        let sid = crate::leekwars_vm::SummonId(id);
-        out.insert(sid, crate::leekwars_vm::SummonDef{
+        let sid = crate::vm::SummonId(id);
+        out.insert(sid, crate::vm::SummonDef{
             id: sid,
             name,
             chips,
@@ -1049,7 +1049,7 @@ fn parse_scenario_from_path(path: &Path, src: &str) -> miette::Result<Scenario> 
         {
             let tv: toml::Value = toml::from_str(src)
                 .map_err(|e| miette::miette!("failed to parse scenario toml: {e}"))?;
-            let jv = crate::toml_bridge::toml_to_json(&tv);
+            let jv = crate::util::toml_bridge::toml_to_json(&tv);
             return serde_json::from_value::<Scenario>(jv)
                 .map_err(|e| miette::miette!("failed to decode scenario from toml: {e}"));
         }

@@ -22,6 +22,12 @@ thiserror = "2"
 toml = { version = "0.8", optional = true }
 sha1 = "0.10"
 
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", default-features = false }
+
 [features]
+default = ["toml"]
 toml = ["dep:toml"]
+# Batch job CLI (`--batch`); off by default while batch generation is temporarily disabled.
+batch = []
 java-parity = []

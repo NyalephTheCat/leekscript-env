@@ -1,27 +1,32 @@
 pub mod analyze;
-pub mod fight_report;
-pub mod field;
-pub mod world_map;
 pub mod generator;
-pub mod leekwars_vm;
+pub mod map;
 pub mod outcome;
-pub mod registers;
+pub mod persistence;
+pub mod report;
 pub mod scenario;
-pub mod snapshot;
+pub mod util;
+pub mod vm;
+
+// Compatibility shims for legacy paths used by `vm/state.rs` include!.
+mod registers;
+mod world_map;
+
 pub mod batch;
-pub mod toml_bridge;
+pub mod snapshot;
 
 pub use analyze::{AnalyzeDiagnostic, analyze_ai_source, analyze_ai_source_with_path};
-pub use fight_report::{
-    find_game_data_dir, format_outcome_human, format_outcome_human_for_path,
-    format_outcome_human_with_game, GameNames,
+pub use report::{
+    find_game_data_dir, format_outcome_human, format_outcome_human_for_path, format_outcome_human_with_game,
+    GameNames,
 };
 pub use generator::Generator;
-pub use leekwars_vm::{LeekWarsContext, LeekWarsEntity, LeekWarsState};
+pub use vm::{LeekWarsContext, LeekWarsEntity, LeekWarsState};
 pub use outcome::Outcome;
-pub use registers::{FileRegisterManager, InMemoryRegisterManager, RegisterManager, RegisterManagerRc, Registers};
-pub use registers::DirRegisterManager;
+pub use persistence::{
+    DirRegisterManager, FileRegisterManager, InMemoryRegisterManager, RegisterManager, RegisterManagerRc, Registers,
+};
 pub use scenario::Scenario;
 pub use snapshot::{FightSnapshot, snapshot_at_action_index};
-pub use batch::{BatchJob, BatchResult, BatchRunner};
+pub use batch::{format_batch_human, BatchJob, BatchResult, BatchRunner, EntityCartesianBlock, SweepCartesian};
 

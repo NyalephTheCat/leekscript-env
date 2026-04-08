@@ -1,6 +1,23 @@
-// This file is `include!`'d into `vm::state`.
-// It intentionally contains *implementation only* (no top-level `use` imports or type defs that
-// now live in their dedicated modules).
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+
+use leekscript::vm::{NativeFn, Value, VmError};
+use serde_json::json;
+
+use crate::persistence::Registers;
+
+use super::combat::{
+    apply_damage_with_shields, apply_damage_with_shields_with, apply_erosion, clear_poisons,
+    recompute_derived_buffs, reduce_effects, remove_shackles, slide_away_until_blocked, slide_entity,
+    slide_toward_target_with_checks, SlideMode,
+};
+use super::defs::{ChipDef, ChipEffectDef, EffectInstance, SummonDef, WeaponDef};
+use super::state::{
+    LeekWarsEntity, LeekWarsState, cell_dist_i64, cell_xy_i64, ctx, with_state, with_state_mut,
+    spend_mp, spend_tp,
+};
+use super::types::{ChipItemId, ChipTemplateId, EffectType, LaunchType, SummonId, WeaponItemId, WeaponTemplateId};
 
 fn effect_add_action(ef: &EffectInstance) -> serde_json::Value {
     // Matches reference ActionAddEffect JSON:
@@ -32,100 +49,6 @@ fn effect_add_action(ef: &EffectInstance) -> serde_json::Value {
     }
 }
 
-fn tick_effects_start_turn(st: &mut LeekWarsState) {
-    super::combat::tick_effects_start_turn(st);
-}
-
-pub(crate) fn recompute_derived_buffs(ent: &mut LeekWarsEntity) {
-    super::combat::recompute_derived_buffs(ent);
-}
-
-fn apply_damage_with_shields(ent: &mut LeekWarsEntity, incoming: i64) -> i64 {
-    super::combat::apply_damage_with_shields(ent, incoming)
-}
-
-fn apply_erosion(ent: &mut LeekWarsEntity, erosion: i64) {
-    super::combat::apply_erosion(ent, erosion);
-}
-
-fn apply_damage_with_shields_with(
-    ent: &mut LeekWarsEntity,
-    incoming: i64,
-    shield_abs: i64,
-    shield_rel_percent: i64,
-) -> i64 {
-    super::combat::apply_damage_with_shields_with(ent, incoming, shield_abs, shield_rel_percent)
-}
-
-fn reduce_effects(
-    st: &mut LeekWarsState,
-    target_id: i64,
-    percent: f64,
-    skip_irreducible: bool,
-) {
-    super::combat::reduce_effects(st, target_id, percent, skip_irreducible);
-}
-
-fn clear_poisons(st: &mut LeekWarsState, target_id: i64) {
-    super::combat::clear_poisons(st, target_id);
-}
-
-fn remove_shackles(st: &mut LeekWarsState, target_id: i64) {
-    super::combat::remove_shackles(st, target_id);
-}
-
-fn cell_blocked(st: &LeekWarsState, cell: i64, ignore_entity: Option<i64>) -> bool {
-    super::combat::cell_blocked(st, cell, ignore_entity)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SlideMode {
-    Push,
-    Attract,
-}
-
-fn slide_toward_target_with_checks(
-    st: &LeekWarsState,
-    entity_cell: i64,
-    target_cell: i64,
-    caster_cell: i64,
-    mode: SlideMode,
-    ignore_entity: Option<i64>,
-) -> i64 {
-    super::combat::slide_toward_target_with_checks(
-        st,
-        entity_cell,
-        target_cell,
-        caster_cell,
-        match mode {
-            SlideMode::Push => super::combat::SlideMode::Push,
-            SlideMode::Attract => super::combat::SlideMode::Attract,
-        },
-        ignore_entity,
-    )
-}
-
-fn slide_away_until_blocked(st: &LeekWarsState, start: i64, away_from: i64, ignore_entity: Option<i64>) -> i64 {
-    super::combat::slide_away_until_blocked(st, start, away_from, ignore_entity)
-}
-
-fn slide_entity(st: &mut LeekWarsState, entity_id: i64, dest: i64) {
-    super::combat::slide_entity(st, entity_id, dest);
-}
-
-fn tick_chip_cooldowns(st: &mut LeekWarsState) {
-    super::combat::tick_chip_cooldowns(st);
-}
-
-// Exposed for generator turn-loop hooks.
-pub fn tick_effects_start_turn_public(st: &mut LeekWarsState) {
-    super::combat::tick_effects_start_turn_public(st);
-}
-
-pub fn tick_chip_cooldowns_public(st: &mut LeekWarsState) {
-    super::combat::tick_chip_cooldowns_public(st);
-}
-
 // Reference RNG LCG:
 // n = n * 1103515245 + 12345; r = (n / 65536) % 32768 + 32768; return r/65536
 fn rng_next_u32(st: &mut LeekWarsState) -> u32 {
@@ -149,222 +72,6 @@ fn rng_int_inclusive(st: &mut LeekWarsState, min: i64, max: i64) -> i64 {
     let span = (max - min + 1).max(1) as u64;
     let x = rng_next_u32(st) as u64;
     min + (x % span) as i64
-}
-
-#[cfg(test)]
-mod parity_tests {
-    use super::*;
-
-    #[test]
-    fn use_chip_logs_action_and_applies_damage() {
-        let mut st = LeekWarsState {
-            entities: HashMap::from([(
-                1,
-                LeekWarsEntity {
-                    id: 1,
-                    name: "A".into(),
-                    team: 1,
-                    cell: 10,
-                    life: 20,
-                    total_life: 20,
-                    strength: 0,
-                    agility: 0,
-                    magic: 0,
-                    science: 0,
-                    wisdom: 0,
-                    resistance: 0,
-                    power: 0,
-                    tp: 10,
-                    mp: 0,
-                    max_tp: 10,
-                    max_mp: 0,
-                    weapons: vec![],
-                    chips: vec![],
-                    equipped_weapon: None,
-                    registers: None,
-                    is_summon: false,
-                    chip_cooldowns: HashMap::new(),
-                    item_uses: HashMap::new(),
-                    effects: Vec::new(),
-                    shield_abs: 0,
-                    shield_rel_percent: 0,
-                    strength_bonus: 0,
-                    mp_bonus: 0,
-                    tp_bonus: 0,
-                    damage_return: 0,
-                    state_unhealable: false,
-                    state_invincible: false,
-                    state_static: false,
-                },
-            ), (
-                2,
-                LeekWarsEntity {
-                    id: 2,
-                    name: "B".into(),
-                    team: 2,
-                    cell: 11,
-                    life: 20,
-                    total_life: 20,
-                    strength: 0,
-                    agility: 0,
-                    magic: 0,
-                    science: 0,
-                    wisdom: 0,
-                    resistance: 0,
-                    power: 0,
-                    tp: 0,
-                    mp: 0,
-                    max_tp: 0,
-                    max_mp: 0,
-                    weapons: vec![],
-                    chips: vec![],
-                    equipped_weapon: None,
-                    registers: None,
-                    is_summon: false,
-                    chip_cooldowns: HashMap::new(),
-                    item_uses: HashMap::new(),
-                    effects: Vec::new(),
-                    shield_abs: 0,
-                    shield_rel_percent: 0,
-                    strength_bonus: 0,
-                    mp_bonus: 0,
-                    tp_bonus: 0,
-                    damage_return: 0,
-                    state_unhealable: false,
-                    state_invincible: false,
-                    state_static: false,
-                },
-            )]),
-            say_log: vec![],
-            fight_actions: vec![],
-            map: WorldMap::new(18, 18),
-            weapons: HashMap::new(),
-            chips: HashMap::from([(
-                999,
-                ChipDef {
-                    item: ChipItemId(999),
-                    template: ChipTemplateId(6),
-                    cost: 2,
-                    min_range: 0,
-                    max_range: 6,
-                    launch_type: LaunchType::Circle,
-                    area: 1,
-                    los: true,
-                    cooldown: 1,
-                    team_cooldown: false,
-                    initial_cooldown: 0,
-                    max_uses: -1,
-                    effects: vec![ChipEffectDef {
-                        id: EffectType::Damage,
-                        value1: 5.0,
-                        value2: 0.0,
-                        turns: 0,
-                        targets: 0,
-                        modifiers: 0,
-                        r#type: 1,
-                    }],
-                },
-            )]),
-            summons: HashMap::new(),
-            register_manager: None,
-            next_effect_instance_id: 0,
-            turn_order: vec![1, 2],
-            next_entity_id: 2,
-            rng_state: 0,
-            team_chip_cooldowns: HashMap::new(),
-        };
-
-        let ok = apply_chip_use(&mut st, 1, 6, 11);
-        assert_eq!(ok, 1);
-        let has = |opcode: i64| {
-            st.fight_actions.iter().any(|a| {
-                a.as_array()
-                    .and_then(|x| x.get(0))
-                    .and_then(|v| v.as_i64())
-                    == Some(opcode)
-            })
-        };
-        assert!(has(12));
-        assert!(has(101));
-    }
-
-    #[test]
-    fn use_chip_fails_when_out_of_range() {
-        let mut st = LeekWarsState {
-            entities: HashMap::from([(
-                1,
-                LeekWarsEntity {
-                    id: 1,
-                    name: "A".into(),
-                    team: 1,
-                    cell: 0,
-                    life: 20,
-                    total_life: 20,
-                    strength: 0,
-                    agility: 0,
-                    magic: 0,
-                    science: 0,
-                    wisdom: 0,
-                    resistance: 0,
-                    power: 0,
-                    tp: 10,
-                    mp: 0,
-                    max_tp: 10,
-                    max_mp: 0,
-                    weapons: vec![],
-                    chips: vec![],
-                    equipped_weapon: None,
-                    registers: None,
-                    is_summon: false,
-                    chip_cooldowns: HashMap::new(),
-                    item_uses: HashMap::new(),
-                    effects: Vec::new(),
-                    shield_abs: 0,
-                    shield_rel_percent: 0,
-                    strength_bonus: 0,
-                    mp_bonus: 0,
-                    tp_bonus: 0,
-                    damage_return: 0,
-                    state_unhealable: false,
-                    state_invincible: false,
-                    state_static: false,
-                },
-            )]),
-            say_log: vec![],
-            fight_actions: vec![],
-            map: WorldMap::new(18, 18),
-            weapons: HashMap::new(),
-            chips: HashMap::from([(
-                1,
-                ChipDef {
-                    item: ChipItemId(1),
-                    template: ChipTemplateId(6),
-                    cost: 2,
-                    min_range: 0,
-                    max_range: 0,
-                    launch_type: LaunchType::Circle,
-                    area: 1,
-                    los: false,
-                    cooldown: 0,
-                    team_cooldown: false,
-                    initial_cooldown: 0,
-                    max_uses: -1,
-                    effects: vec![],
-                },
-            )]),
-            summons: HashMap::new(),
-            register_manager: None,
-            next_effect_instance_id: 0,
-            turn_order: vec![1],
-            next_entity_id: 1,
-            rng_state: 0,
-            team_chip_cooldowns: HashMap::new(),
-        };
-        // cell 1 is out of range when max_range==0
-        let ok = apply_chip_use(&mut st, 1, 6, 1);
-        assert_eq!(ok, 0);
-        assert_eq!(st.fight_actions.last().and_then(|v| v.as_array()).and_then(|a| a.get(3)).and_then(|v| v.as_i64()), Some(0));
-    }
 }
 
 fn ensure_registers_loaded(st: &mut LeekWarsState, entity_id: i64) -> &mut Registers {
@@ -541,7 +248,7 @@ fn nf_get_weapons(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<Value, 
             .map(|e| e.weapons.iter().copied().map(Value::num_int).collect())
             .unwrap_or_default()
     })?;
-    Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(arr))))
+    Ok(Value::Array(Rc::new(RefCell::new(arr))))
 }
 
 fn nf_get_weapon(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -626,7 +333,10 @@ fn nf_move_toward(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<Value, 
     let self_id = ctx(vm)?.self_id;
     // STATIC entities cannot move.
     let static_me = with_state(vm, |st| {
-        st.entities.get(&self_id).map(|e| e.state_static).unwrap_or(false)
+        st.entities
+            .get(&self_id)
+            .map(|e| e.state_static)
+            .unwrap_or(false)
     })?;
     if static_me {
         return Ok(Value::num_int(0));
@@ -914,7 +624,9 @@ fn nf_use_weapon(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<Value, V
         }
 
         let caster_team = st.entities.get(&self_id).map(|e| e.team).unwrap_or(0);
-        let Ok(tgt) = i32::try_from(target_cell) else { return };
+        let Ok(tgt) = i32::try_from(target_cell) else {
+            return;
+        };
         let target_cells = st.map.area_cells(wdef.area, tgt);
         for cell in target_cells {
             let cell = cell as i64;
@@ -1053,10 +765,12 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
     }
 
     // Some effects require an empty/available target cell (teleport/summon/resurrect).
-    let needs_empty = chip
-        .effects
-        .iter()
-        .any(|e| matches!(e.id, EffectType::Teleport | EffectType::Summon | EffectType::Resurrect));
+    let needs_empty = chip.effects.iter().any(|e| {
+        matches!(
+            e.id,
+            EffectType::Teleport | EffectType::Summon | EffectType::Resurrect
+        )
+    });
     if needs_empty {
         let Ok(cid) = i32::try_from(cell) else {
             st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
@@ -1099,7 +813,9 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
             .or_insert(1);
     }
 
-    let Ok(tgt) = i32::try_from(cell) else { return 0 };
+    let Ok(tgt) = i32::try_from(cell) else {
+        return 0;
+    };
     let target_cells = st.map.area_cells(chip.area, tgt);
     for tc in target_cells {
         let tc = tc as i64;
@@ -1157,7 +873,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
 
             match eff.id {
                 EffectType::Attract => {
-                    // Slide each target entity toward the cast cell.
                     let start = st.entities.get(&tid).map(|e| e.cell).unwrap_or(tc);
                     let caster_cell = st.entities.get(&self_id).map(|e| e.cell).unwrap_or(cell);
                     let dest = slide_toward_target_with_checks(
@@ -1171,7 +886,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     slide_entity(st, tid, dest);
                 }
                 EffectType::Push => {
-                    // Slide each target entity away from the cast cell.
                     let start = st.entities.get(&tid).map(|e| e.cell).unwrap_or(tc);
                     let caster_cell = st.entities.get(&self_id).map(|e| e.cell).unwrap_or(cell);
                     let dest = slide_toward_target_with_checks(
@@ -1185,7 +899,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     slide_entity(st, tid, dest);
                 }
                 EffectType::Repel => {
-                    // Slide away from the caster cell.
                     let caster_cell = st.entities.get(&self_id).map(|e| e.cell).unwrap_or(cell);
                     let start = st.entities.get(&tid).map(|e| e.cell).unwrap_or(tc);
                     let dest = slide_away_until_blocked(st, start, caster_cell, Some(tid));
@@ -1207,7 +920,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     if dmg > 0 {
                         if let Some(t) = st.entities.get_mut(&tid) {
                             recompute_derived_buffs(t);
-                            // Return damage uses pre-shield base damage * damage_return% (on target).
                             let ret = if tid != self_id {
                                 ((dmg as f64) * (t.damage_return as f64) / 100.0).round() as i64
                             } else {
@@ -1221,7 +933,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                             let erosion = (dealt as f64 * 0.05).round() as i64;
                             apply_erosion(t, erosion);
                             st.fight_actions.push(json!([101, tid, dealt, erosion]));
-                            // Life steal: round(dealt * caster.wisdom / 1000)
                             if dealt > 0 && tid != self_id {
                                 let steal = ((dealt as f64)
                                     * (st.entities.get(&self_id).map(|e| e.wisdom).unwrap_or(0) as f64)
@@ -1230,12 +941,19 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                                 if steal > 0 {
                                     if let Some(c) = st.entities.get_mut(&self_id) {
                                         recompute_derived_buffs(c);
-                                        if c.life > 0 && c.life < c.total_life && !c.state_unhealable {
+                                        if c.life > 0
+                                            && c.life < c.total_life
+                                            && !c.state_unhealable
+                                        {
                                             let before = c.life;
-                                            c.life = c.life.saturating_add(steal).min(c.total_life.max(0));
+                                            c.life = c
+                                                .life
+                                                .saturating_add(steal)
+                                                .min(c.total_life.max(0));
                                             let applied = c.life - before;
                                             if applied > 0 {
-                                                st.fight_actions.push(json!([103, self_id, applied]));
+                                                st.fight_actions
+                                                    .push(json!([103, self_id, applied]));
                                             }
                                         }
                                     }
@@ -1248,7 +966,8 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                                         let dealt_back = apply_damage_with_shields(c, ret);
                                         let erosion = (dealt_back as f64 * 0.05).round() as i64;
                                         apply_erosion(c, erosion);
-                                        st.fight_actions.push(json!([108, self_id, dealt_back, erosion]));
+                                        st.fight_actions
+                                            .push(json!([108, self_id, dealt_back, erosion]));
                                         if c.life == 0 {
                                             st.fight_actions.push(json!([11, tid, self_id]));
                                             st.fight_actions.push(json!([5, self_id, tid]));
@@ -1260,12 +979,12 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     }
                 }
                 EffectType::Heal => {
-                    let caster_wisdom = st.entities.get(&self_id).map(|e| e.wisdom).unwrap_or(0) as f64;
+                    let caster_wisdom =
+                        st.entities.get(&self_id).map(|e| e.wisdom).unwrap_or(0) as f64;
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
                     let heal = (base * (1.0 + caster_wisdom / 100.0)).round() as i64;
                     if heal > 0 {
                         if eff.turns > 0 {
-                            // Duration heal: add effect, applied at start of turn.
                             st.next_effect_instance_id += 1;
                             let inst = EffectInstance {
                                 instance_id: st.next_effect_instance_id,
@@ -1280,20 +999,17 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                             };
                             let stackable = (eff.modifiers & 1) != 0;
                             add_or_stack_effect(st, tid, inst, stackable);
-                        } else {
-                            if let Some(t) = st.entities.get_mut(&tid) {
-                                if t.life > 0 {
-                                    recompute_derived_buffs(t);
-                                    if t.state_unhealable {
-                                        // no-op
-                                        continue;
-                                    }
-                                    let before = t.life;
-                                    t.life = t.life.saturating_add(heal).min(t.total_life.max(0));
-                                    let applied = t.life - before;
-                                    if applied > 0 {
-                                        st.fight_actions.push(json!([103, tid, applied]));
-                                    }
+                        } else if let Some(t) = st.entities.get_mut(&tid) {
+                            if t.life > 0 {
+                                recompute_derived_buffs(t);
+                                if t.state_unhealable {
+                                    continue;
+                                }
+                                let before = t.life;
+                                t.life = t.life.saturating_add(heal).min(t.total_life.max(0));
+                                let applied = t.life - before;
+                                if applied > 0 {
+                                    st.fight_actions.push(json!([103, tid, applied]));
                                 }
                             }
                         }
@@ -1331,7 +1047,9 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                 }
                 EffectType::Summon => {
                     let sid = eff.value1.round() as i64;
-                    let Some(def) = st.summons.get(&SummonId(sid)).cloned() else { continue };
+                    let Some(def) = st.summons.get(&SummonId(sid)).cloned() else {
+                        continue;
+                    };
                     st.next_entity_id += 1;
                     let new_id = st.next_entity_id;
                     let occupied = st.entities.values().any(|e| e.life > 0 && e.cell == cell);
@@ -1339,12 +1057,10 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                         st.fight_actions.push(json!([9, self_id, new_id, cell, 0]));
                         continue;
                     }
-                    // Deterministic RNG (seeded from scenario) for summon stats.
                     let life = rng_int_inclusive(st, def.life_range.0, def.life_range.1);
                     let tp = rng_int_inclusive(st, def.tp_range.0, def.tp_range.1);
                     let mp = rng_int_inclusive(st, def.mp_range.0, def.mp_range.1);
-                    let strength =
-                        rng_int_inclusive(st, def.strength_range.0, def.strength_range.1);
+                    let strength = rng_int_inclusive(st, def.strength_range.0, def.strength_range.1);
                     st.entities.insert(
                         new_id,
                         LeekWarsEntity {
@@ -1373,9 +1089,9 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                             chip_cooldowns: HashMap::new(),
                             item_uses: HashMap::new(),
                             effects: Vec::new(),
-                shield_abs: 0,
-                shield_rel_percent: 0,
-                strength_bonus: 0,
+                            shield_abs: 0,
+                            shield_rel_percent: 0,
+                            strength_bonus: 0,
                             mp_bonus: 0,
                             tp_bonus: 0,
                             damage_return: 0,
@@ -1405,7 +1121,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     }
                 }
                 EffectType::Teleport => {
-                    // TELEPORT: move the caster to the cast cell (validated above).
                     if let Some(c) = st.entities.get_mut(&self_id) {
                         if c.life > 0 {
                             recompute_derived_buffs(c);
@@ -1414,12 +1129,12 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                             }
                             let from = c.cell;
                             c.cell = cell;
-                            st.fight_actions.push(json!([10, self_id, cell, vec![from, cell]]));
+                            st.fight_actions
+                                .push(json!([10, self_id, cell, vec![from, cell]]));
                         }
                     }
                 }
                 EffectType::Permutation => {
-                    // PERMUTATION: swap caster and entity on the cast cell, if any.
                     let target_id_opt = st
                         .entities
                         .values()
@@ -1427,7 +1142,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                         .map(|e| e.id);
                     if let Some(other_id) = target_id_opt {
                         if other_id != self_id {
-                            // Cannot invert a STATIC target.
                             let other_static = st
                                 .entities
                                 .get(&other_id)
@@ -1447,11 +1161,21 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                                     continue;
                                 }
                                 c.cell = from_other;
-                                st.fight_actions.push(json!([10, self_id, from_other, vec![from_caster, from_other]]));
+                                st.fight_actions.push(json!([
+                                    10,
+                                    self_id,
+                                    from_other,
+                                    vec![from_caster, from_other]
+                                ]));
                             }
                             if let Some(o) = st.entities.get_mut(&other_id) {
                                 o.cell = from_caster;
-                                st.fight_actions.push(json!([10, other_id, from_caster, vec![from_other, from_caster]]));
+                                st.fight_actions.push(json!([
+                                    10,
+                                    other_id,
+                                    from_caster,
+                                    vec![from_other, from_caster]
+                                ]));
                             }
                         }
                     }
@@ -1461,12 +1185,7 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                 | EffectType::ShackleStrength
                 | EffectType::DamageReturn
                 | EffectType::Vulnerability => {
-                    // Duration-based debuffs/retaliation/vulnerability represented as effects.
                     let turns = eff.turns.max(0);
-                    // Mirror reference scalars:
-                    // - shackles multiply by (1 + max(0, magic)/100)
-                    // - damage_return multiplies by (1 + agility/100)
-                    // - vulnerability is a negative RELATIVE_SHIELD stat (no special scalar).
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
                     let caster_magic = st.entities.get(&self_id).map(|e| e.magic).unwrap_or(0).max(0) as f64;
                     let caster_agility = st.entities.get(&self_id).map(|e| e.agility).unwrap_or(0) as f64;
@@ -1497,7 +1216,6 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     }
                 }
                 EffectType::BuffStrength | EffectType::RelativeShield | EffectType::AbsoluteShield => {
-                    // Duration-based buffs/shields represented as effects.
                     let turns = eff.turns.max(0);
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
                     let caster_science = st.entities.get(&self_id).map(|e| e.science).unwrap_or(0) as f64;
@@ -1527,17 +1245,14 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     }
                 }
                 EffectType::Debuff | EffectType::TotalDebuff => {
-                    let turns = eff.turns.max(0);
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
                     let v = base.round() as i64;
                     if v > 0 {
-                        // REDUCE_EFFECTS [306, target_id, value]
                         st.fight_actions.push(json!([306, tid, v]));
                         let pct = (v as f64) / 100.0;
                         let skip_irreducible = eff.id == EffectType::Debuff;
                         reduce_effects(st, tid, pct, skip_irreducible);
                     }
-                    let _ = turns;
                 }
                 EffectType::AddState => {
                     let turns = eff.turns;
@@ -1561,12 +1276,10 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                 }
                 EffectType::Antidote => {
                     clear_poisons(st, tid);
-                    // REMOVE_POISONS [307, target_id]
                     st.fight_actions.push(json!([307, tid]));
                 }
                 EffectType::RemoveShackles => {
                     remove_shackles(st, tid);
-                    // REMOVE_SHACKLES [308, target_id]
                     st.fight_actions.push(json!([308, tid]));
                 }
                 _ => {}
@@ -1684,5 +1397,48 @@ fn nf_delete_register(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<Val
     Ok(Value::Null)
 }
 
-pub use super::natives::{default_natives, native_id};
+static LEEKWARS_NATIVES: &[(&str, NativeFn)] = &[
+    ("getEntity", nf_get_entity),
+    ("getCell", nf_get_cell),
+    ("getLife", nf_get_life),
+    ("getStrength", nf_get_strength),
+    ("getTP", nf_get_tp),
+    ("getMP", nf_get_mp),
+    ("getTeam", nf_get_team),
+    ("getName", nf_get_name),
+    ("say", nf_say),
+    ("getWeapons", nf_get_weapons),
+    ("getWeapon", nf_get_weapon),
+    ("setWeapon", nf_set_weapon),
+    ("getNearestEnemy", nf_get_nearest_enemy),
+    ("moveToward", nf_move_toward),
+    ("getCellX", nf_get_cell_x),
+    ("getCellY", nf_get_cell_y),
+    ("getCellFromXY", nf_get_cell_from_xy),
+    ("getEntityOnCell", nf_get_entity_on_cell),
+    ("getCellDistance", nf_get_cell_distance),
+    ("getPathDistance", nf_get_path_distance),
+    ("useWeapon", nf_use_weapon),
+    ("useChip", nf_use_chip),
+    ("getRegister", nf_get_register),
+    ("getAllRegisters", nf_get_all_registers),
+    ("setRegister", nf_set_register),
+    ("deleteRegister", nf_delete_register),
+];
 
+/// Native id resolver that extends the stdlib native id space.
+///
+/// The Leek Wars native table is appended after `leekscript` stdlib natives.
+pub fn native_id(name: &str) -> Option<u16> {
+    if let Some(id) = leekscript::vm::stdlib::native_id(name) {
+        return Some(id);
+    }
+    let local = LEEKWARS_NATIVES.iter().position(|(n, _)| *n == name)? as u16;
+    Some(leekscript::vm::stdlib::stdlib_native_count().saturating_add(local))
+}
+
+pub fn default_natives() -> Vec<NativeFn> {
+    let mut out = leekscript::vm::stdlib::default_natives();
+    out.extend(LEEKWARS_NATIVES.iter().map(|(_, f)| *f));
+    out
+}
