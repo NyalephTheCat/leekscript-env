@@ -870,14 +870,24 @@ pub fn define(g: &mut GrammarBuilder) {
         });
     });
 
-    // Top-level / anonymous `function` parameters — `= expr` only with experimental fn optional params.
+    // Top-level / anonymous `function` parameters — `= expr` under LSv4 or signature/stub mode.
     g.parser_rule(GRule::FunctionFnParam.as_str(), |g| {
         g.node(Node::FnParam, |g| {
             g.call_rule(GRule::FnParamCore);
             g.optional(|g| {
-                cfg_flags::exp_fn_optional_params(g);
-                g.call_rule(GRule::Eq);
-                g.call_rule(GRule::Expr);
+                sipha::choices!(
+                    g,
+                    |g| {
+                        cfg_flags::v4(g);
+                        g.call_rule(GRule::Eq);
+                        g.call_rule(GRule::Expr);
+                    },
+                    |g| {
+                        g.if_flag(FLAG_SIGNATURE_MODE);
+                        g.call_rule(GRule::Eq);
+                        g.call_rule(GRule::Expr);
+                    },
+                );
             });
         });
     });

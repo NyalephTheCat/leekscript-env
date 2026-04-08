@@ -221,7 +221,7 @@ fn signature_mode_accepts_function_stub_and_block() {
 }
 
 #[test]
-fn signature_mode_allows_default_on_stub_without_fn_optional_in_language_options() {
+fn signature_mode_allows_default_on_stub() {
     parse_signature_doc(
         "function arrayFlatten<T>(Array<T> array, integer depth = 1) => Array<T>;",
         Version::V4,
@@ -243,16 +243,13 @@ fn method_params_allow_default_without_experimental() {
 }
 
 #[test]
-fn function_default_param_requires_experimental() {
-    assert!(parse_doc("function f(a = 1) { return a; }", Version::V4).is_err());
-    let opts = LanguageOptions::new(
-        Version::V4,
-        ExperimentalFeatures {
-            fn_optional_params: true,
-            ..ExperimentalFeatures::NONE
-        },
-    );
-    parse_doc("function f(a = 1) { return a; }", opts).expect("experimental function default");
+fn function_default_param_allowed_in_v4() {
+    parse_doc("function f(a = 1) { return a; }", Version::V4).expect("v4 function default param");
+}
+
+#[test]
+fn function_default_param_rejected_before_v4() {
+    assert!(parse_doc("function f(a = 1) { return a; }", Version::V3).is_err());
 }
 
 #[test]

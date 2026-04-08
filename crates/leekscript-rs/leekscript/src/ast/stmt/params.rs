@@ -30,7 +30,7 @@ impl FnParam {
         fn_param_binding_token(self.syntax()).map(|t| t.text_range())
     }
 
-    /// Default value after `=` when present (`method` parameters, or `function` with experimental optional params).
+    /// Default value after `=` when present (`method` parameters, or top-level / anonymous `function` in LSv4).
     #[must_use]
     pub fn default_expr(&self) -> Option<Expr> {
         self.syntax().child::<Expr>()

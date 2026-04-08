@@ -129,7 +129,6 @@ fn vm_parse_options() -> LanguageOptions {
         ExperimentalFeatures {
             lexical_const: true,
             exceptions: true,
-            fn_optional_params: true,
             templates: true,
             ..ExperimentalFeatures::NONE
         },

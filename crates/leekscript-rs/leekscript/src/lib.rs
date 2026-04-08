@@ -27,7 +27,8 @@
 //!
 //! Leading comments can set the parse dialect and experimental flags before any other tokens:
 //! `// leeklang: version=v4 experimental-let=true` (also `//! …`, block `/* … */`, and `dialect=`).
-//! Optional flags also include `experimental-fn-optional-params` and `experimental-templates` (or `experimental-generics`).
+//! Default values on `function (…)` parameters are part of dialect v4; optional flags include
+//! `experimental-templates` (or `experimental-generics`).
 //! See [`parse::language_options_with_source_directives`]. Merged buffers only honor directives at
 //! the very start of the combined source.
 //!

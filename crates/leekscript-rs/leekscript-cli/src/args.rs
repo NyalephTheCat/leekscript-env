@@ -36,7 +36,7 @@ pub(crate) struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = Dialect::V4)]
     pub(crate) dialect: Dialect,
 
-    /// Enable every experimental parse feature (`let`, `match`, modules, exceptions, `goto`, `break n`, function defaults, templates, …).
+    /// Enable every experimental parse feature (`let`, `match`, modules, exceptions, `goto`, `break n`, templates, …).
     #[arg(long, global = true)]
     pub(crate) experimental: bool,
 
@@ -61,9 +61,6 @@ pub(crate) struct Cli {
     /// Experimental: `break N` / `continue N` loop levels.
     #[arg(long = "experimental-loop-levels", global = true)]
     pub(crate) experimental_loop_levels: bool,
-    /// Experimental: default values on top-level / anonymous `function (a = 1)` parameters (methods always allow `=`).
-    #[arg(long = "experimental-fn-optional-params", global = true)]
-    pub(crate) experimental_fn_optional_params: bool,
     /// Experimental: template parameters on classes and `function` declarations (`function f<T>(…)`, `class C<T>`, `function<T>(…) {}`; not arrow lambdas).
     #[arg(long = "experimental-templates", global = true)]
     pub(crate) experimental_templates: bool,
@@ -85,7 +82,6 @@ pub(crate) fn language_options(cli: &Cli) -> LanguageOptions {
             exceptions: cli.experimental_exceptions,
             goto: cli.experimental_goto,
             loop_levels: cli.experimental_loop_levels,
-            fn_optional_params: cli.experimental_fn_optional_params,
             templates: cli.experimental_templates,
         }
     };

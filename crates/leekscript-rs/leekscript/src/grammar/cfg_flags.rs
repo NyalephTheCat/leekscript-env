@@ -1,9 +1,8 @@
 //! Emits `GrammarBuilder` parse-context flag checks for version and experimental gates.
 
 use crate::parse::version::{
-    FLAG_EXP_EXCEPTIONS, FLAG_EXP_FN_OPTIONAL_PARAMS, FLAG_EXP_GOTO, FLAG_EXP_LET,
-    FLAG_EXP_LEXICAL_CONST, FLAG_EXP_LOOP_LEVELS, FLAG_EXP_MATCH, FLAG_EXP_MODULES,
-    FLAG_EXP_TEMPLATES, FLAG_V1, FLAG_V2, FLAG_V3, FLAG_V4,
+    FLAG_EXP_EXCEPTIONS, FLAG_EXP_GOTO, FLAG_EXP_LET, FLAG_EXP_LEXICAL_CONST, FLAG_EXP_LOOP_LEVELS,
+    FLAG_EXP_MATCH, FLAG_EXP_MODULES, FLAG_EXP_TEMPLATES, FLAG_V1, FLAG_V2, FLAG_V3, FLAG_V4,
 };
 use sipha::prelude::*;
 
@@ -53,10 +52,6 @@ pub(crate) fn exp_loop_levels(g: &mut GrammarBuilder) {
 
 pub(crate) fn not_exp_loop_levels(g: &mut GrammarBuilder) {
     g.if_not_flag(FLAG_EXP_LOOP_LEVELS);
-}
-
-pub(crate) fn exp_fn_optional_params(g: &mut GrammarBuilder) {
-    g.if_flag(FLAG_EXP_FN_OPTIONAL_PARAMS);
 }
 
 pub(crate) fn exp_templates(g: &mut GrammarBuilder) {

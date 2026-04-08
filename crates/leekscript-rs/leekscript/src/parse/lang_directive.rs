@@ -18,7 +18,7 @@
 //! - **Per-flag** (booleans as `true`/`false`/`on`/`off`/`yes`/`no`/`1`/`0`):
 //!   `experimental-let`, `experimental-const` (alias `experimental-lexical-const`),
 //!   `experimental-match`, `experimental-modules`, `experimental-exceptions`, `experimental-goto`,
-//!   `experimental-loop-levels`.
+//!   `experimental-loop-levels`, `experimental-templates` (alias `experimental-generics`).
 //!
 //! Example:
 //! `//! leeklang: version=v4 experimental=none experimental-let=true`
@@ -254,11 +254,6 @@ fn apply_kv(opts: &mut LanguageOptions, key: &str, value: &str) {
         "experimental_loop_levels" => {
             if let Some(b) = parse_bool_loose(value) {
                 opts.experimental.loop_levels = b;
-            }
-        }
-        "experimental_fn_optional_params" | "experimental_function_optional_params" => {
-            if let Some(b) = parse_bool_loose(value) {
-                opts.experimental.fn_optional_params = b;
             }
         }
         "experimental_templates" | "experimental_generics" => {

@@ -23,12 +23,10 @@ pub const FLAG_EXP_EXCEPTIONS: FlagId = 12;
 pub const FLAG_EXP_GOTO: FlagId = 13;
 /// `break N` / `continue N` numeric loop levels.
 pub const FLAG_EXP_LOOP_LEVELS: FlagId = 14;
-/// Default values on top-level / anonymous `function (…)`: `function f(a = 1) {}` (methods always allow `=`).
-pub const FLAG_EXP_FN_OPTIONAL_PARAMS: FlagId = 15;
 /// Template parameters on classes, top-level functions, and anonymous functions: `function id<T>(…)`, `class C<T>`, `function<T>(…) {}` (not arrow lambdas — `<T>` would clash with `<…>` set literals).
-pub const FLAG_EXP_TEMPLATES: FlagId = 16;
+pub const FLAG_EXP_TEMPLATES: FlagId = 15;
 /// While set, bare `>` is not parsed as relational greater-than (it closes `<…>` set literals).
-pub const FLAG_IN_SET_LITERAL: FlagId = 17;
+pub const FLAG_IN_SET_LITERAL: FlagId = 16;
 
 /// Optional parse features layered on top of a base [`Version`] (typically [`Version::V4`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +38,6 @@ pub struct ExperimentalFeatures {
     pub exceptions: bool,
     pub goto: bool,
     pub loop_levels: bool,
-    pub fn_optional_params: bool,
     pub templates: bool,
 }
 
@@ -59,7 +56,6 @@ impl ExperimentalFeatures {
         exceptions: false,
         goto: false,
         loop_levels: false,
-        fn_optional_params: false,
         templates: false,
     };
 
@@ -71,7 +67,6 @@ impl ExperimentalFeatures {
         exceptions: true,
         goto: true,
         loop_levels: true,
-        fn_optional_params: true,
         templates: true,
     };
 
@@ -103,9 +98,6 @@ impl ExperimentalFeatures {
         }
         if self.loop_levels {
             ctx.set(FLAG_EXP_LOOP_LEVELS);
-        }
-        if self.fn_optional_params {
-            ctx.set(FLAG_EXP_FN_OPTIONAL_PARAMS);
         }
         if self.templates {
             ctx.set(FLAG_EXP_TEMPLATES);
@@ -156,8 +148,8 @@ impl LanguageOptions {
 
     /// Parse context for signature / stub units (`function … => T;`) and merged `--signatures` checks.
     ///
-    /// Includes [`FLAG_EXP_FN_OPTIONAL_PARAMS`] so stub parameters may use
-    /// defaults (`integer depth = 1`) without enabling that experiment for normal [`parse_doc`] calls.
+    /// Default values on stub parameters (`integer depth = 1`) are allowed whenever [`FLAG_SIGNATURE_MODE`]
+    /// is set, including when the dialect label is below v4 (see `FunctionFnParam` grammar).
     ///
     /// Includes [`FLAG_EXP_TEMPLATES`] because API / stdlib stubs are overwhelmingly generic
     /// (`function mapValues<T, U>(…)`) and must parse as real top-level function declarations for scope analysis.
@@ -165,7 +157,6 @@ impl LanguageOptions {
     pub fn signature_parse_context(self) -> ParseContext {
         let mut ctx = self.parse_context();
         ctx.set(FLAG_SIGNATURE_MODE);
-        ctx.set(FLAG_EXP_FN_OPTIONAL_PARAMS);
         ctx.set(FLAG_EXP_TEMPLATES);
         ctx
     }
@@ -212,7 +203,7 @@ impl Version {
     /// lexer/parser behavior which remains gated on `FLAG_V1` alone.
     #[must_use]
     pub fn to_parse_context(self) -> ParseContext {
-        let mut ctx = ParseContext::with_capacity_for(FLAG_EXP_TEMPLATES);
+        let mut ctx = ParseContext::with_capacity_for(FLAG_IN_SET_LITERAL);
         match self {
             Version::V1 => ctx.set(FLAG_V1),
             Version::V2 => ctx.set(FLAG_V2),
@@ -235,7 +226,6 @@ impl Version {
     pub fn to_signature_parse_context(self) -> ParseContext {
         let mut ctx = self.to_parse_context();
         ctx.set(FLAG_SIGNATURE_MODE);
-        ctx.set(FLAG_EXP_FN_OPTIONAL_PARAMS);
         ctx.set(FLAG_EXP_TEMPLATES);
         ctx
     }

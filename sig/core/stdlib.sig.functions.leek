@@ -1,4 +1,4 @@
-// leeklang: version=v4 experimental-templates=true experimental-fn-optional-params=true
+// leeklang: version=v4 experimental-templates=true
 // sig/core/stdlib.sig.functions.leek — language / standard-library stubs (no Leek Wars fight API).
 
 // --- Functions ---

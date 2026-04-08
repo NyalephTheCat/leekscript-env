@@ -1,4 +1,4 @@
-// leeklang: version=v4 experimental-templates=true experimental-fn-optional-params=true
+// leeklang: version=v4 experimental-templates=true
 // sig/leekwars/leekwars.sig.functions.leek — Leek Wars fight, items, map, and AI-host stubs.
 
 /**
@@ -98,7 +98,7 @@ function getDamageReturn(integer entity = getEntity()) => integer;
  * @see EFFECT_MODIFIER_* constants
  * @see getWeaponEffects
  * @see getChipEffects
- * @set getWeaponPassiveEffects
+ * @see getWeaponPassiveEffects
  * @see getLaunchedEffects
  */
 function getEffects(integer entity = getEntity()) => Array<Array<integer|boolean>>;
