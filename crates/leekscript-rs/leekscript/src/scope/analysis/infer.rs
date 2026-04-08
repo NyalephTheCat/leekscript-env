@@ -448,6 +448,77 @@ pub(crate) fn infer_ternary_expr(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy 
     LeekTy::ternary_inference(&t, &e)
 }
 
+fn set_literal_element_exprs(node: &SyntaxNode) -> Vec<SyntaxNode> {
+    node.child_nodes()
+        .filter(|n| n.kind_as::<Node>() != Some(Node::Trivia))
+        .filter(|n| n.kind_as::<Node>() == Some(Node::Expr))
+        .collect()
+}
+
+/// `[]` that infers as `Array<?>` (not `[:]`, not an interval literal, no elements).
+pub(crate) fn is_untyped_empty_array_literal(node: &SyntaxNode) -> bool {
+    if node.kind_as::<Node>() != Some(Node::ArrayExpr) {
+        return false;
+    }
+    if !array_literal_element_exprs(node).is_empty() {
+        return false;
+    }
+    let kids: Vec<_> = node
+        .child_nodes()
+        .filter(|c| c.kind_as::<Node>() != Some(Node::Trivia))
+        .collect();
+    let is_bracket_map_shape = kids
+        .iter()
+        .any(|c| c.kind_as::<Node>() == Some(Node::BracketMapExpr))
+        || (kids.len() == 2
+            && kids[0].kind_as::<Node>() == Some(Node::Expr)
+            && kids[1].kind_as::<Node>() == Some(Node::BracketMapExpr));
+    if is_bracket_map_shape {
+        return false;
+    }
+    if node
+        .descendant_nodes()
+        .any(|n| n.kind_as::<Node>() == Some(Node::IntervalExpr))
+    {
+        return false;
+    }
+    let toks: Vec<_> = node
+        .descendant_tokens()
+        .into_iter()
+        .filter(|t| !t.is_trivia())
+        .collect();
+    !toks.windows(3).any(|w| {
+        w[0].kind_as::<Lex>() == Some(Lex::LBracket)
+            && w[1].kind_as::<Lex>() == Some(Lex::Colon)
+            && w[2].kind_as::<Lex>() == Some(Lex::RBracket)
+    })
+}
+
+/// `<>` — empty set literal.
+pub(crate) fn is_untyped_empty_set_literal(node: &SyntaxNode) -> bool {
+    node.kind_as::<Node>() == Some(Node::SetExpr) && set_literal_element_exprs(node).is_empty()
+}
+
+/// When a variable is annotated with `Array<T>` / `Set<T>` (or nullable thereof) and the RHS is an
+/// empty literal typed as `Array<?>` / `Set<?>`, refine hovers to the declared type.
+pub(crate) fn typed_empty_collection_refinement(declared: &LeekTy, rhs: &LeekTy) -> Option<LeekTy> {
+    match (declared, rhs) {
+        (LeekTy::Array(_), LeekTy::Array(v)) if **v == LeekTy::Unknown => Some(declared.clone()),
+        (LeekTy::Set(_), LeekTy::Set(v)) if **v == LeekTy::Unknown => Some(declared.clone()),
+        (LeekTy::Nullable(inner), LeekTy::Array(v))
+            if **v == LeekTy::Unknown && matches!(&**inner, LeekTy::Array(_)) =>
+        {
+            Some(declared.clone())
+        }
+        (LeekTy::Nullable(inner), LeekTy::Set(v))
+            if **v == LeekTy::Unknown && matches!(&**inner, LeekTy::Set(_)) =>
+        {
+            Some(declared.clone())
+        }
+        _ => None,
+    }
+}
+
 fn array_literal_element_exprs(node: &SyntaxNode) -> Vec<SyntaxNode> {
     let direct: Vec<_> = node
         .child_nodes()
@@ -544,6 +615,18 @@ pub(crate) fn infer_array_expr(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
     LeekTy::Array(Box::new(acc))
 }
 
+pub(crate) fn infer_set_expr(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
+    let exprs = set_literal_element_exprs(node);
+    if exprs.is_empty() {
+        return LeekTy::Set(Box::new(LeekTy::Unknown));
+    }
+    let mut acc = expr_span_ty(a, &exprs[0]);
+    for e in exprs.iter().skip(1) {
+        acc = LeekTy::unify_inference(&acc, &expr_span_ty(a, e));
+    }
+    LeekTy::Set(Box::new(acc))
+}
+
 pub(crate) fn infer_bracket_map_expr(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
     let exprs: Vec<_> = node
         .child_nodes()
@@ -600,7 +683,7 @@ pub(crate) fn infer_index_expr(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
         o => o,
     };
     let inner_ty = match base_ty {
-        LeekTy::Array(el) => (*el).clone(),
+        LeekTy::Array(el) | LeekTy::Set(el) => (*el).clone(),
         LeekTy::Map(_, v) => LeekTy::Nullable(Box::new((*v).clone())),
         _ => LeekTy::Unknown,
     };
@@ -628,6 +711,7 @@ pub(crate) fn expr_span_ty(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
         Some(Node::CallExpr) => infer_call_expr(a, node),
         Some(Node::TernaryExpr) => infer_ternary_expr(a, node),
         Some(Node::ArrayExpr) => infer_array_expr(a, node),
+        Some(Node::SetExpr) => infer_set_expr(a, node),
         Some(Node::BracketMapExpr) => infer_bracket_map_expr(a, node),
         Some(Node::CastExpr) => infer_cast_expr(a, node),
         Some(Node::Expr) => {

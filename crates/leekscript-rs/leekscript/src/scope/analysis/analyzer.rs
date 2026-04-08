@@ -23,14 +23,51 @@ use super::enter_leave::{sync_enter, sync_leave};
 use super::graph::ScopeGraph;
 use super::infer::{
     expr_span_ty, infer_array_expr, infer_binary, infer_bracket_map_expr, infer_call_expr,
-    infer_cast_expr, infer_index_expr, infer_interval_ty, infer_member_expr, infer_ternary_expr,
-    set_var_inferred_if_unannotated,
+    infer_cast_expr, infer_index_expr, infer_interval_ty, infer_member_expr, infer_set_expr,
+    infer_ternary_expr, is_untyped_empty_array_literal, is_untyped_empty_set_literal,
+    set_var_inferred_if_unannotated, typed_empty_collection_refinement,
 };
 use super::narrowing::{accumulated_narrowing_maps, should_track_narrowing};
 use super::narrowing_env::NarrowingEnv;
 use super::phase::AnalysisPhase;
 use super::spans::foreach_bind_spans;
 use crate::scope::extract::leek_ty_from_builtin_type_ident_text;
+
+fn refine_declared_empty_collection_literal_hover(
+    a: &mut Analyzer,
+    vd: &VarDecl,
+    declared: &LeekTy,
+    rhs: &LeekTy,
+) {
+    let Some(ty) = typed_empty_collection_refinement(declared, rhs) else {
+        return;
+    };
+    let Some(expr_root) = vd
+        .syntax()
+        .child_nodes()
+        .find(|n| n.kind_as::<Node>() == Some(Node::Expr))
+    else {
+        return;
+    };
+    let kids: Vec<_> = expr_root
+        .child_nodes()
+        .filter(|n| n.kind_as::<Node>() != Some(Node::Trivia))
+        .collect();
+    if kids.len() != 1 {
+        return;
+    }
+    let lit = &kids[0];
+    let shape_ok = match lit.kind_as::<Node>() {
+        Some(Node::ArrayExpr) => is_untyped_empty_array_literal(lit),
+        Some(Node::SetExpr) => is_untyped_empty_set_literal(lit),
+        _ => false,
+    };
+    if !shape_ok {
+        return;
+    }
+    let key = ExprTypeKey::from_span(lit.text_range());
+    a.expr_types.insert(key, ty);
+}
 
 pub(crate) struct Analyzer {
     pub phase: AnalysisPhase,
@@ -236,6 +273,7 @@ impl Analyzer {
             Some(Node::CallExpr) => infer_call_expr(self, node),
             Some(Node::TernaryExpr) => infer_ternary_expr(self, node),
             Some(Node::ArrayExpr) => infer_array_expr(self, node),
+            Some(Node::SetExpr) => infer_set_expr(self, node),
             Some(Node::CastExpr) => infer_cast_expr(self, node),
             Some(Node::Expr | Node::ParenExpr | Node::UnaryExpr) => expr_span_ty(self, node),
             _ => return,
@@ -266,15 +304,16 @@ impl Analyzer {
         let Some(rhs_ty) = rhs_ty else {
             return;
         };
-        let sym = &mut self.graph.symbols[sym_id.0 as usize];
         let type_annotation_span = vd
             .syntax()
             .child::<TypeExpr>()
             .map(|t| t.syntax().text_range());
-        if sym.declared_ty.is_none() {
+        let declared_ty = self.graph.symbols[sym_id.0 as usize].declared_ty.clone();
+        let sym = &mut self.graph.symbols[sym_id.0 as usize];
+        if declared_ty.is_none() {
             sym.inferred_ty = Some(rhs_ty);
-        } else if let Some(dt) = &sym.declared_ty {
-            if !LeekTy::is_assignable_to(&rhs_ty, dt) {
+        } else if let Some(dt) = declared_ty {
+            if !LeekTy::is_assignable_to(&rhs_ty, &dt) {
                 self.diagnostics.push(SemanticDiagnostic {
                     severity: SemanticSeverity::Error,
                     code: SemanticCode::IncompatibleInitializer,
@@ -286,6 +325,8 @@ impl Analyzer {
                     span: vd.syntax().text_range(),
                     related_span: type_annotation_span,
                 });
+            } else {
+                refine_declared_empty_collection_literal_hover(self, &vd, &dt, &rhs_ty);
             }
         }
     }
@@ -369,7 +410,7 @@ impl Analyzer {
         let iter_ty = expr_span_ty(self, iter_e.syntax());
         let binds = foreach_bind_spans(&fe);
         match (&binds[..], &iter_ty) {
-            ([(n, _)], LeekTy::Array(elem)) => {
+            ([(n, _)], LeekTy::Array(elem)) | ([(n, _)], LeekTy::Set(elem)) => {
                 if let Some(sid) = self.resolve_here(n) {
                     set_var_inferred_if_unannotated(self, sid, (**elem).clone());
                 }

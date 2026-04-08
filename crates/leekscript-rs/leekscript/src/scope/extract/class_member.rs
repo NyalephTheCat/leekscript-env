@@ -34,7 +34,7 @@ fn leek_ty_from_type_name_keyword(k: Lex) -> Option<LeekTy> {
         Lex::ClassTypeKw => LeekTy::Class("Class".to_string()),
         Lex::ObjectKw => LeekTy::Class("Object".to_string()),
         Lex::ArrayKw => LeekTy::Array(Box::new(LeekTy::Unknown)),
-        Lex::SetTypeKw => LeekTy::Array(Box::new(LeekTy::Unknown)),
+        Lex::SetTypeKw => LeekTy::Set(Box::new(LeekTy::Unknown)),
         Lex::MapKw => LeekTy::Map(Box::new(LeekTy::Unknown), Box::new(LeekTy::Unknown)),
         Lex::FunctionTypeKw => LeekTy::Function {
             params: vec![],

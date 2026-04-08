@@ -1092,3 +1092,69 @@ function f(Consequences? best, Consequences combo) {
         a.expr_types
     );
 }
+
+#[test]
+fn set_declared_type_is_set_not_array() {
+    let src = "function f() { Set<integer> s = <1>; }";
+    let doc = parse_doc(src, LanguageOptions::v4_experimental_all()).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let s = a.symbols.iter().find(|x| x.name == "s").expect("s");
+    assert_eq!(
+        s.declared_ty,
+        Some(LeekTy::Set(Box::new(LeekTy::Integer)))
+    );
+    assert_eq!(s.effective_ty().to_string(), "Set<integer>");
+}
+
+#[test]
+fn typed_empty_array_literal_expr_type_matches_annotation() {
+    use leekscript::syntax::kinds::Node;
+
+    let src = "function f() { Array<integer> a = []; }";
+    let doc = parse_doc(src, LanguageOptions::v4_experimental_all()).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let arr = doc
+        .root()
+        .descendant_nodes()
+        .find(|n| n.kind_as::<Node>() == Some(Node::ArrayExpr))
+        .expect("[]");
+    let key = ExprTypeKey::from_span(arr.text_range());
+    let ty = a.expr_types.get(&key).expect("literal type");
+    assert_eq!(ty, &LeekTy::Array(Box::new(LeekTy::Integer)));
+}
+
+#[test]
+fn typed_empty_array_with_template_param_literal_matches_declared_type() {
+    use leekscript::syntax::kinds::Node;
+
+    let doc = parse_with_templates!("function f<T>() { Array<T> a = []; }");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let arr = doc
+        .root()
+        .descendant_nodes()
+        .find(|n| n.kind_as::<Node>() == Some(Node::ArrayExpr))
+        .expect("[]");
+    let key = ExprTypeKey::from_span(arr.text_range());
+    let ty = a.expr_types.get(&key).expect("literal type");
+    assert_eq!(
+        ty,
+        &LeekTy::Array(Box::new(LeekTy::TypeParam("T".into())))
+    );
+}
+
+#[test]
+fn typed_empty_set_literal_expr_type_matches_annotation() {
+    use leekscript::syntax::kinds::Node;
+
+    let src = "function f() { Set<integer> s = <>; }";
+    let doc = parse_doc(src, LanguageOptions::v4_experimental_all()).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let set = doc
+        .root()
+        .descendant_nodes()
+        .find(|n| n.kind_as::<Node>() == Some(Node::SetExpr))
+        .expect("<>");
+    let key = ExprTypeKey::from_span(set.text_range());
+    let ty = a.expr_types.get(&key).expect("literal type");
+    assert_eq!(ty, &LeekTy::Set(Box::new(LeekTy::Integer)));
+}

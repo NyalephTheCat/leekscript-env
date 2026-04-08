@@ -20,8 +20,10 @@ pub enum LeekTy {
     ClassObject(String),
     /// Template type parameter (`T` from `function f<T>(…)` / `class C<T>`).
     TypeParam(String),
-    /// `Array<T>` / `Set<T>` element type `T` (same representation for analysis).
+    /// `Array<T>` — ordered list type.
     Array(Box<LeekTy>),
+    /// `Set<T>` — set type (distinct from [`Self::Array`] for display and assignability).
+    Set(Box<LeekTy>),
     /// `Map<K, V>` (value type used for `m[k]`; key tracked separately when needed).
     Map(Box<LeekTy>, Box<LeekTy>),
     /// Interval bounds type (`Interval<integer>` / `Interval<real>`). Only `integer` and `real`
@@ -115,6 +117,9 @@ impl LeekTy {
             }
             // Signature stubs use `Array<U>` / `Map<T, U>`; treat unknown template args as compatible.
             (Self::Array(e), Self::Array(exp)) => {
+                matches!(**e, Self::TypeParam(_)) || Self::is_assignable_to(e, exp)
+            }
+            (Self::Set(e), Self::Set(exp)) => {
                 matches!(**e, Self::TypeParam(_)) || Self::is_assignable_to(e, exp)
             }
             (Self::Map(ek, ev), Self::Map(xk, xv)) => {
@@ -230,6 +235,7 @@ impl LeekTy {
                 o => Self::Nullable(Box::new(o)),
             },
             Self::Array(el) => Self::Array(Box::new((*el).clone().normalize_null_in_union())),
+            Self::Set(el) => Self::Set(Box::new((*el).clone().normalize_null_in_union())),
             Self::Map(k, v) => Self::Map(
                 Box::new((*k).clone().normalize_null_in_union()),
                 Box::new((*v).clone().normalize_null_in_union()),
@@ -334,6 +340,7 @@ impl fmt::Display for LeekTy {
             Self::ClassObject(name) => write!(f, "Class<{name}>"),
             Self::TypeParam(name) => f.write_str(name),
             Self::Array(el) => write!(f, "Array<{el}>"),
+            Self::Set(el) => write!(f, "Set<{el}>"),
             Self::Map(k, v) => write!(f, "Map<{k}, {v}>"),
             Self::Interval(inner) => write!(f, "Interval<{inner}>"),
             Self::Nullable(inner) => {
@@ -463,6 +470,10 @@ mod tests {
         assert_eq!(
             LeekTy::Array(Box::new(LeekTy::String)).to_string(),
             "Array<string>"
+        );
+        assert_eq!(
+            LeekTy::Set(Box::new(LeekTy::Integer)).to_string(),
+            "Set<integer>"
         );
         assert_eq!(
             LeekTy::Nullable(Box::new(LeekTy::Union(vec![

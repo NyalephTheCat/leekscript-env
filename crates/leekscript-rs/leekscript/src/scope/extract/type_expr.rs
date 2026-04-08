@@ -91,7 +91,7 @@ pub(super) fn leek_ty_from_primary(p: &TypePrimaryType, template_names: &[String
                     .first()
                     .map(|a| leek_ty_from_type_expr_with_templates(a, template_names))
                     .unwrap_or(LeekTy::Any);
-                return LeekTy::Array(Box::new(el));
+                return LeekTy::Set(Box::new(el));
             }
             Some(Lex::MapKw) => {
                 let args = p.generic_argument_roots();
