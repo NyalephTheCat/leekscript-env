@@ -25,6 +25,7 @@ use super::infer::{
     expr_span_ty, infer_array_expr, infer_binary, infer_bracket_map_expr, infer_call_expr,
     infer_cast_expr, infer_index_expr, infer_interval_ty, infer_member_expr, infer_set_expr,
     infer_ternary_expr, is_untyped_empty_array_literal, is_untyped_empty_set_literal,
+    lookup_class_member_symbol, member_expr_field_name, member_expr_receiver_ty,
     set_var_inferred_if_unannotated, typed_empty_collection_refinement,
 };
 use super::narrowing::{accumulated_narrowing_maps, should_track_narrowing};
@@ -91,6 +92,9 @@ pub(crate) struct Analyzer {
     pub narrowing: NarrowingEnv,
     pub syntax_node_stack: Vec<SyntaxNode>,
     pub(crate) version: Version,
+    /// `Some(class)` means `this` has type `LeekTy::Class(class)`; `None` means no lexical `this`
+    /// (module-level function, nested `function`, lambda, …).
+    pub(crate) implicit_this_receiver_stack: Vec<Option<String>>,
 }
 
 impl Analyzer {
@@ -116,9 +120,18 @@ impl Analyzer {
             narrowing: NarrowingEnv::default(),
             syntax_node_stack: Vec::new(),
             version,
+            implicit_this_receiver_stack: Vec::new(),
         };
         s.scope_stack.push(root);
         s
+    }
+
+    /// Type of `this` at the current lexical position, if any.
+    pub(crate) fn implicit_this_ty(&self) -> Option<LeekTy> {
+        match self.implicit_this_receiver_stack.last() {
+            Some(Some(cn)) => Some(LeekTy::Class(cn.clone())),
+            _ => None,
+        }
     }
 
     pub(crate) fn run_two_phase(root: &SyntaxNode, version: Version) -> Self {
@@ -131,6 +144,7 @@ impl Analyzer {
         a.pending_class_body = 0;
         a.skip_leave_block_span = None;
         a.graph.binding_spans = bindings;
+        a.implicit_this_receiver_stack.clear();
         let _ = root.walk(&mut a, &WalkOptions::default());
         a
     }
@@ -175,6 +189,54 @@ impl Analyzer {
         false
     }
 
+    /// `.field` / `.method` selector: resolve against the receiver’s class (static vs instance).
+    fn resolve_member_field_ident(&mut self, token: &SyntaxToken, mem: &SyntaxNode) {
+        let span = token.text_range();
+        let name = token.text().to_string();
+        let obj_ty = member_expr_receiver_ty(self, mem);
+        let obj_ty_inner = match obj_ty {
+            LeekTy::Nullable(inner) => (*inner).clone(),
+            o => o,
+        };
+        let resolved = match &obj_ty_inner {
+            LeekTy::ClassObject(cn) => {
+                if matches!(name.as_str(), "class" | "super") {
+                    None
+                } else {
+                    lookup_class_member_symbol(self, cn, &name, true)
+                }
+            }
+            LeekTy::Class(cn) => {
+                if matches!(name.as_str(), "class" | "super") {
+                    None
+                } else {
+                    lookup_class_member_symbol(self, cn, &name, false)
+                }
+            }
+            _ => None,
+        };
+        self.references.push(Reference {
+            name: name.clone(),
+            span,
+            resolved,
+        });
+        let class_known = matches!(obj_ty_inner, LeekTy::ClassObject(_) | LeekTy::Class(_));
+        let pseudo_member = matches!(name.as_str(), "class" | "super");
+        if self.phase == AnalysisPhase::ResolveAndInfer
+            && resolved.is_none()
+            && class_known
+            && !pseudo_member
+        {
+            self.diagnostics.push(SemanticDiagnostic {
+                severity: SemanticSeverity::Error,
+                code: SemanticCode::UndefinedName,
+                message: format!("undefined member `{name}`"),
+                span,
+                related_span: None,
+            });
+        }
+    }
+
     pub(crate) fn resolve_ident(&mut self, token: &SyntaxToken) {
         if token.kind_as::<Lex>() != Some(Lex::Ident) {
             return;
@@ -187,6 +249,16 @@ impl Analyzer {
         if self.phase == AnalysisPhase::ResolveAndInfer
             && matches!(self.node_stack.last(), Some(Some(Node::MemberExpr)))
         {
+            if let Some(mem) = self
+                .syntax_node_stack
+                .last()
+                .filter(|n| n.kind_as::<Node>() == Some(Node::MemberExpr))
+                .cloned()
+            {
+                if member_expr_field_name(&mem).as_deref() == Some(token.text()) {
+                    self.resolve_member_field_ident(token, &mem);
+                }
+            }
             return;
         }
         if self.phase == AnalysisPhase::ResolveAndInfer
@@ -282,7 +354,9 @@ impl Analyzer {
     }
 
     pub(crate) fn apply_var_inits(&mut self, node: &SyntaxNode) {
-        if self.phase != AnalysisPhase::ResolveAndInfer || node.kind_as::<Node>() != Some(Node::VarDecl) {
+        if self.phase != AnalysisPhase::ResolveAndInfer
+            || node.kind_as::<Node>() != Some(Node::VarDecl)
+        {
             return;
         }
         let vd = VarDecl::cast(node.clone()).expect("vd");

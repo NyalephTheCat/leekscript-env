@@ -71,6 +71,11 @@ impl Visitor for Analyzer {
                 Some(Lex::Infinity) => {
                     self.expr_types.insert(key, LeekTy::Real);
                 }
+                Some(Lex::ThisKw) => {
+                    if let Some(ty) = self.implicit_this_ty() {
+                        self.expr_types.insert(key, ty);
+                    }
+                }
                 _ => {}
             }
             self.resolve_ident(token);

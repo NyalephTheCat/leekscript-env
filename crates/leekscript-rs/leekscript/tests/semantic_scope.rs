@@ -306,6 +306,48 @@ fn coercion_integer_real_binary() {
     assert!(has_real, "expected real from int+real, {:?}", a.expr_types);
 }
 
+/// Hover on `+` uses the innermost spanning [`AnalysisResult::expr_types`] entry — must be the binary result, not `Unknown`.
+#[test]
+fn binary_expr_type_covers_operator_token() {
+    let doc = parse_doc("function f() { return 1 + 2.0; }", Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let src = doc.source_str();
+    let plus_off = src.find('+').expect("plus") as u32;
+    let mut hits: Vec<_> = a
+        .expr_types
+        .iter()
+        .filter(|(k, _)| k.start <= plus_off && plus_off < k.end)
+        .collect();
+    hits.sort_by_key(|(k, _)| k.end - k.start);
+    let (_, ty) = *hits.first().expect("expr_types entry covering '+'");
+    assert_eq!(
+        ty,
+        &LeekTy::Real,
+        "innermost type at '+' should be numeric result of 1 + 2.0, got {ty:?} all={:?}",
+        hits.iter().map(|(_, t)| (*t).clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn member_expr_type_covers_dot_token() {
+    let doc = parse_doc(
+        "class C { integer x; } function f(C c) { return c.x; }",
+        Version::V4,
+    )
+    .expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let src = doc.source_str();
+    let dot_off = src.find("c.x").expect("c.x") as u32 + 1;
+    let mut hits: Vec<_> = a
+        .expr_types
+        .iter()
+        .filter(|(k, _)| k.start <= dot_off && dot_off < k.end)
+        .collect();
+    hits.sort_by_key(|(k, _)| k.end - k.start);
+    let (_, ty) = *hits.first().expect("expr_types entry covering '.'");
+    assert_eq!(ty, &LeekTy::Integer);
+}
+
 #[test]
 fn incompatible_initializer_has_code_and_related_span() {
     let doc = parse_doc("function f() { integer x = true; }", Version::V4).expect("parse");
@@ -738,6 +780,47 @@ fn template_return_type_uses_type_param() {
 }
 
 #[test]
+fn call_substitutes_template_return_type_from_args() {
+    let doc = parse_with_templates!(
+        "function id<T>(T x) => T { return x; }\nfunction f() { var a = id(1); }"
+    );
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let src = doc.source_str();
+    let lparen_off = src.find("id(1)").expect("id(1)") as u32 + 2; // `id` is 2 chars
+    let mut hits: Vec<_> = a
+        .expr_types
+        .iter()
+        .filter(|(k, _)| k.start <= lparen_off && lparen_off < k.end)
+        .collect();
+    hits.sort_by_key(|(k, _)| k.end - k.start);
+    let (_, ty) = *hits.first().expect("expr_types entry covering '('");
+    assert_eq!(
+        ty,
+        &LeekTy::Integer,
+        "expected id(1) to return integer via T := integer, got {ty:?} all={:?}",
+        hits.iter().map(|(_, t)| (*t).clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn call_substitutes_template_return_type_through_containers() {
+    let doc = parse_with_templates!(
+        "function head<T>(Array<T> xs) => T { return xs[0]; }\nfunction f() { var a = head([1, 2, 3]); }"
+    );
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let src = doc.source_str();
+    let lparen_off = src.find("head([1").expect("head([1") as u32 + 4; // `head` is 4 chars
+    let mut hits: Vec<_> = a
+        .expr_types
+        .iter()
+        .filter(|(k, _)| k.start <= lparen_off && lparen_off < k.end)
+        .collect();
+    hits.sort_by_key(|(k, _)| k.end - k.start);
+    let (_, ty) = *hits.first().expect("expr_types entry covering '('");
+    assert_eq!(ty, &LeekTy::Integer, "expected head([1,2,3]) => integer, got {ty:?}");
+}
+
+#[test]
 fn generic_class_field_and_method_use_class_type_param() {
     let doc = parse_with_templates!("class Box<T> { T value; m(T x) { return x; } }");
     let a = run_semantic_analysis(doc.root(), Version::V4);
@@ -949,12 +1032,87 @@ fn static_field_accessible_on_class_name_receiver() {
             .filter(|s| s.name == "Z")
             .collect::<Vec<_>>()
     );
+    let z_id = z.expect("Z").id;
+    let z_use = a
+        .references
+        .iter()
+        .find(|r| r.name == "Z" && r.resolved == Some(z_id))
+        .expect("reference on static field use Z");
+    assert_eq!(z_use.resolved, Some(z_id));
     let bad: Vec<_> = a
         .diagnostics
         .iter()
         .filter(|d| d.code == SemanticCode::IncompatibleInitializer)
         .collect();
     assert!(bad.is_empty(), "{:?}", a.diagnostics);
+}
+
+#[test]
+fn static_method_member_reference_resolves() {
+    let src = "class C { static void m() {} } function f() { C.m(); }";
+    let doc = parse_doc(src, Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let m_decl = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "m" && s.kind == SymbolKind::Method && s.is_static)
+        .expect("static method m");
+    let m_use = a
+        .references
+        .iter()
+        .find(|r| r.name == "m" && r.resolved == Some(m_decl.id))
+        .expect("reference on C.m");
+    assert_eq!(m_use.resolved, Some(m_decl.id));
+    assert!(
+        !a.diagnostics
+            .iter()
+            .any(|d| d.message.contains("undefined member")),
+        "{:?}",
+        a.diagnostics
+    );
+}
+
+#[test]
+fn this_field_member_reference_resolves() {
+    let src = "class C { real x; void m() { var y = this.x; } }";
+    let doc = parse_doc(src, Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let x_field = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "x" && s.kind == SymbolKind::Field)
+        .expect("field x");
+    let x_use = a
+        .references
+        .iter()
+        .find(|r| r.name == "x" && r.resolved == Some(x_field.id))
+        .expect("reference on this.x");
+    assert_eq!(x_use.resolved, Some(x_field.id));
+    assert!(
+        !a.diagnostics
+            .iter()
+            .any(|d| d.message.contains("undefined member")),
+        "{:?}",
+        a.diagnostics
+    );
+}
+
+#[test]
+fn instance_method_member_reference_resolves() {
+    let src = "class C { void m() {} } function f(C c) { c.m(); }";
+    let doc = parse_doc(src, Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    let m_decl = a
+        .symbols
+        .iter()
+        .find(|s| s.name == "m" && s.kind == SymbolKind::Method && !s.is_static)
+        .expect("instance method m");
+    let m_use = a
+        .references
+        .iter()
+        .find(|r| r.name == "m" && r.resolved == Some(m_decl.id))
+        .expect("reference on c.m");
+    assert_eq!(m_use.resolved, Some(m_decl.id));
 }
 
 #[test]
@@ -1042,14 +1200,16 @@ fn logical_or_precedence_looser_than_relational_gt() {
         .descendant_nodes()
         .find(|n| {
             n.kind_as::<Node>() == Some(Node::BinaryExpr)
-                && n.child_tokens().any(|t| t.kind_as::<Lex>() == Some(Lex::OrOr))
+                && n.child_tokens()
+                    .any(|t| t.kind_as::<Lex>() == Some(Lex::OrOr))
         })
         .expect("|| BinaryExpr");
     let gt_only = cond
         .descendant_nodes()
         .find(|n| {
             n.kind_as::<Node>() == Some(Node::BinaryExpr)
-                && n.child_tokens().any(|t| t.kind_as::<Lex>() == Some(Lex::Gt))
+                && n.child_tokens()
+                    .any(|t| t.kind_as::<Lex>() == Some(Lex::Gt))
         })
         .expect("> BinaryExpr");
     let r_or = or_only.text_range();
@@ -1099,10 +1259,7 @@ fn set_declared_type_is_set_not_array() {
     let doc = parse_doc(src, LanguageOptions::v4_experimental_all()).expect("parse");
     let a = run_semantic_analysis(doc.root(), Version::V4);
     let s = a.symbols.iter().find(|x| x.name == "s").expect("s");
-    assert_eq!(
-        s.declared_ty,
-        Some(LeekTy::Set(Box::new(LeekTy::Integer)))
-    );
+    assert_eq!(s.declared_ty, Some(LeekTy::Set(Box::new(LeekTy::Integer))));
     assert_eq!(s.effective_ty().to_string(), "Set<integer>");
 }
 
@@ -1136,10 +1293,7 @@ fn typed_empty_array_with_template_param_literal_matches_declared_type() {
         .expect("[]");
     let key = ExprTypeKey::from_span(arr.text_range());
     let ty = a.expr_types.get(&key).expect("literal type");
-    assert_eq!(
-        ty,
-        &LeekTy::Array(Box::new(LeekTy::TypeParam("T".into())))
-    );
+    assert_eq!(ty, &LeekTy::Array(Box::new(LeekTy::TypeParam("T".into()))));
 }
 
 #[test]

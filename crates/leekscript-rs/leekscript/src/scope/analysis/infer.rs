@@ -1,5 +1,7 @@
 //! Expression type inference helpers (phase 2).
 
+use std::collections::HashMap;
+
 use sipha::tree::ast::AstNode;
 use sipha::tree::red::{SyntaxElement, SyntaxNode, SyntaxToken};
 
@@ -10,8 +12,9 @@ use crate::syntax::kinds::{Lex, Node};
 use crate::scope::extract::leek_ty_from_type_expr_with_templates;
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::{
-    ExprTypeKey, SemanticCode, SemanticDiagnostic, SemanticSeverity, SymbolId, SymbolKind,
+    ExprTypeKey, SemanticCode, SemanticDiagnostic, SemanticSeverity, Symbol, SymbolId, SymbolKind,
 };
+use crate::vm::host::java_ops;
 
 use super::analyzer::Analyzer;
 
@@ -52,19 +55,22 @@ pub(crate) fn binary_expr_is_instanceof(node: &SyntaxNode) -> bool {
 }
 
 pub(crate) fn infer_binary(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
-    let kids: Vec<_> = node.child_nodes().collect();
-    if kids.len() < 2 {
-        return LeekTy::Unknown;
-    }
-    let l = &kids[0];
-    let r = &kids[kids.len() - 1];
     if binary_expr_is_instanceof(node) {
         return LeekTy::Boolean;
     }
     if node.child_tokens().any(|t| {
         matches!(
             t.kind_as::<Lex>(),
-            Some(Lex::EqEq | Lex::NotEq | Lex::EqEqEq | Lex::NotEqEq | Lex::Lt | Lex::Lte | Lex::Gt | Lex::Gte)
+            Some(
+                Lex::EqEq
+                    | Lex::NotEq
+                    | Lex::EqEqEq
+                    | Lex::NotEqEq
+                    | Lex::Lt
+                    | Lex::Lte
+                    | Lex::Gt
+                    | Lex::Gte
+            )
         )
     }) {
         return LeekTy::Boolean;
@@ -75,9 +81,152 @@ pub(crate) fn infer_binary(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
     {
         return LeekTy::Boolean;
     }
-    let lk = expr_span_ty(a, l);
-    let rk = expr_span_ty(a, r);
+    if node
+        .child_tokens()
+        .any(|t| matches!(t.kind_as::<Lex>(), Some(Lex::IsKw | Lex::InKw | Lex::XorKw)))
+    {
+        return LeekTy::Boolean;
+    }
+
+    let kids: Vec<_> = node
+        .child_nodes()
+        .filter(|n| n.kind_as::<Node>() != Some(Node::Trivia))
+        .collect();
+    let (lk, rk) = if kids.len() >= 2 {
+        (
+            expr_span_ty(a, &kids[0]),
+            expr_span_ty(a, &kids[kids.len() - 1]),
+        )
+    } else {
+        let prefix = java_ops::prefix_before_first_binary_op(node);
+        let suffix = java_ops::suffix_after_first_binary_op(node);
+        let lk = if !prefix.is_empty() {
+            ty_from_binary_operand_elements(a, &prefix)
+        } else {
+            binary_infix_lhs_ty(a, node).unwrap_or(LeekTy::Unknown)
+        };
+        let rk = ty_from_binary_operand_elements(a, &suffix);
+        (lk, rk)
+    };
     LeekTy::coerce_binary_op(&lk, &rk)
+}
+
+/// Immediate CST parent of `target` under `root` (only follows [`SyntaxNode::child_nodes`], not tokens).
+fn syntax_immediate_parent(root: &SyntaxNode, target: &SyntaxNode) -> Option<SyntaxNode> {
+    for c in root.child_nodes() {
+        if c.offset() == target.offset()
+            && c.kind() == target.kind()
+            && c.text_len() == target.text_len()
+        {
+            return Some(root.clone());
+        }
+        if let Some(p) = syntax_immediate_parent(&c, target) {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Left operand of a [`Node::BinaryExpr`] from sipha’s left-assoc infix shape: `[lhs, BinaryExpr(op rhs), …]`.
+fn binary_infix_lhs_ty(a: &mut Analyzer, bin: &SyntaxNode) -> Option<LeekTy> {
+    let root = a.syntax_node_stack.first()?;
+    let parent = syntax_immediate_parent(root, bin)?;
+    let ch: Vec<_> = parent
+        .children()
+        .filter(|el| !crate::syntax::syntax_el_is_trivia(el))
+        .collect();
+    let idx = ch.iter().position(|el| {
+        matches!(
+            el,
+            SyntaxElement::Node(n) if n.offset() == bin.offset() && n.kind() == bin.kind()
+        )
+    })?;
+    if idx == 0 {
+        return None;
+    }
+    match &ch[idx - 1] {
+        SyntaxElement::Node(n) => Some(expr_span_ty(a, n)),
+        // Under [`Node::Expr`], the LHS is often a literal token (`1 + 2`) rather than a subtree node.
+        SyntaxElement::Token(t) => {
+            let ty = ty_from_binary_token_operand(a, t);
+            (ty != LeekTy::Unknown).then_some(ty)
+        }
+    }
+}
+
+fn ty_from_binary_token_operand(a: &mut Analyzer, t: &SyntaxToken) -> LeekTy {
+    if t.kind_as::<Lex>() == Some(Lex::Number) {
+        let key = ExprTypeKey::from_span(t.text_range());
+        if let Some(ty) = a.expr_types.get(&key).cloned() {
+            if ty != LeekTy::Unknown {
+                return ty;
+            }
+        }
+        return LeekTy::from_number_literal_text(t.text());
+    }
+    if t.kind_as::<Lex>() == Some(Lex::Ident) {
+        let key = ExprTypeKey::from_span(t.text_range());
+        if let Some(sid) = a.resolve_here(t.text()) {
+            if let Some(ty) = a.expr_types.get(&key).cloned() {
+                if ty != LeekTy::Unknown {
+                    return a.narrowing.with_narrowing(sid, ty);
+                }
+            }
+            let sym = &a.graph.symbols[sid.0 as usize];
+            let base = sym.effective_ty();
+            return a.narrowing.with_narrowing(sid, base);
+        }
+    }
+    let key = ExprTypeKey::from_span(t.text_range());
+    a.expr_types.get(&key).cloned().unwrap_or(LeekTy::Unknown)
+}
+
+/// Operand slice before/after the operator inside a [`Node::BinaryExpr`], or a one-node RHS suffix.
+fn ty_from_binary_operand_elements(a: &mut Analyzer, parts: &[SyntaxElement]) -> LeekTy {
+    let parts: Vec<_> = parts
+        .iter()
+        .filter(|el| !crate::syntax::syntax_el_is_trivia(el))
+        .collect();
+    if parts.is_empty() {
+        return LeekTy::Unknown;
+    }
+    if parts.len() == 1 {
+        return match parts[0] {
+            SyntaxElement::Node(n) => {
+                let t = expr_span_ty(a, n);
+                if t != LeekTy::Unknown {
+                    return t;
+                }
+                // Primary / mult subtree may share the literal token’s span key; a parent insert can
+                // overwrite [`ExprTypeKey`] with [`LeekTy::Unknown`]. Recover from the number token.
+                n.descendant_semantic_tokens()
+                    .into_iter()
+                    .filter(|t| t.kind_as::<Lex>() == Some(Lex::Number))
+                    .last()
+                    .map(|t| ty_from_binary_token_operand(a, &t))
+                    .unwrap_or(LeekTy::Unknown)
+            }
+            SyntaxElement::Token(t) => ty_from_binary_token_operand(a, t),
+        };
+    }
+    if let SyntaxElement::Node(n) = parts[0] {
+        let t = expr_span_ty(a, n);
+        if t != LeekTy::Unknown {
+            return t;
+        }
+    }
+    for el in &parts {
+        if let SyntaxElement::Node(n) = *el {
+            let t = expr_span_ty(a, n);
+            if t != LeekTy::Unknown {
+                return t;
+            }
+        }
+    }
+    if let SyntaxElement::Token(t) = *parts.last().expect("non_empty") {
+        return ty_from_binary_token_operand(a, t);
+    }
+    LeekTy::Unknown
 }
 
 pub(crate) fn infer_interval_ty(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
@@ -156,11 +305,16 @@ fn receiver_ty_from_simple_name(a: &Analyzer, recv: &SyntaxNode) -> Option<LeekT
 }
 
 /// Right-hand name token of a `.field` / `.class` / `.super` member access (postfix chain).
-fn member_expr_field_name(node: &SyntaxNode) -> Option<String> {
+pub(crate) fn member_expr_field_name(node: &SyntaxNode) -> Option<String> {
     node.descendant_tokens()
         .into_iter()
         .filter(|t| !t.is_trivia())
-        .filter(|t| matches!(t.kind_as::<Lex>(), Some(Lex::Ident | Lex::ClassKw | Lex::SuperKw)))
+        .filter(|t| {
+            matches!(
+                t.kind_as::<Lex>(),
+                Some(Lex::Ident | Lex::ClassKw | Lex::SuperKw)
+            )
+        })
         .max_by_key(|t| t.text_range().start)
         .and_then(|t| match t.kind_as::<Lex>() {
             Some(Lex::Ident) => Some(t.text().to_string()),
@@ -174,9 +328,41 @@ fn member_expr_field_span(node: &SyntaxNode) -> Option<Span> {
     node.descendant_tokens()
         .into_iter()
         .filter(|t| !t.is_trivia())
-        .filter(|t| matches!(t.kind_as::<Lex>(), Some(Lex::Ident | Lex::ClassKw | Lex::SuperKw)))
+        .filter(|t| {
+            matches!(
+                t.kind_as::<Lex>(),
+                Some(Lex::Ident | Lex::ClassKw | Lex::SuperKw)
+            )
+        })
         .max_by_key(|t| t.text_range().start)
         .map(|t| t.text_range())
+}
+
+fn class_member_matches_access(sym: &Symbol, want_static: bool) -> bool {
+    if want_static {
+        match sym.kind {
+            SymbolKind::Constructor => true,
+            SymbolKind::Field | SymbolKind::Method => sym.is_static,
+            _ => false,
+        }
+    } else {
+        !sym.is_static && matches!(sym.kind, SymbolKind::Field | SymbolKind::Method)
+    }
+}
+
+/// [`SymbolId`] for `field` on `class_name` when it matches static vs instance access (same rules as
+/// [`lookup_class_member_ty`]).
+pub(crate) fn lookup_class_member_symbol(
+    a: &Analyzer,
+    class_name: &str,
+    field: &str,
+    want_static: bool,
+) -> Option<SymbolId> {
+    let &class_sc = a.graph.class_body_scope_by_name.get(class_name)?;
+    let sc = a.graph.scopes.get(class_sc.0 as usize)?;
+    let &sid = sc.symbols.get(field)?;
+    let sym = &a.graph.symbols[sid.0 as usize];
+    class_member_matches_access(sym, want_static).then_some(sid)
 }
 
 fn lookup_class_member_ty(
@@ -185,29 +371,25 @@ fn lookup_class_member_ty(
     field: &str,
     want_static: bool,
 ) -> LeekTy {
-    let Some(&class_sc) = a.graph.class_body_scope_by_name.get(class_name) else {
+    let Some(sid) = lookup_class_member_symbol(a, class_name, field, want_static) else {
         return LeekTy::Unknown;
     };
-    let Some(sc) = a.graph.scopes.get(class_sc.0 as usize) else {
-        return LeekTy::Unknown;
-    };
-    let Some(&sid) = sc.symbols.get(field) else {
-        return LeekTy::Unknown;
-    };
-    let sym = &a.graph.symbols[sid.0 as usize];
-    let ok = if want_static {
-        match sym.kind {
-            SymbolKind::Constructor => true,
-            SymbolKind::Field | SymbolKind::Method => sym.is_static,
-            _ => false,
+    a.graph.symbols[sid.0 as usize].effective_ty()
+}
+
+/// Receiver type for `.field` (postfix operand before this [`Node::MemberExpr`]).
+pub(crate) fn member_expr_receiver_ty(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
+    if let Some(obj) = node.child_nodes().next() {
+        let mut t = expr_span_ty(a, &obj);
+        if matches!(t, LeekTy::Unknown) {
+            if let Some(r) = receiver_ty_from_simple_name(a, &obj) {
+                t = r;
+            }
         }
+        t
     } else {
-        !sym.is_static && matches!(sym.kind, SymbolKind::Field | SymbolKind::Method)
-    };
-    if !ok {
-        return LeekTy::Unknown;
+        postfix_suffix_operand_ty(a, node).unwrap_or(LeekTy::Unknown)
     }
-    sym.effective_ty()
 }
 
 /// Operand for a postfix suffix node (e.g. [`Node::MemberExpr`], postfix [`Node::UnaryExpr`] `!`) whose
@@ -241,6 +423,9 @@ fn postfix_suffix_operand_ty(a: &mut Analyzer, suffix: &SyntaxNode) -> Option<Le
             let base = sym.effective_ty();
             Some(a.narrowing.with_narrowing(sid, base))
         }
+        SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::ThisKw) => {
+            a.implicit_this_ty()
+        }
         _ => None,
     }
 }
@@ -259,17 +444,7 @@ pub(crate) fn unary_expr_leading_bang_token(node: &SyntaxNode) -> bool {
 /// `x.class` → [`LeekTy::ClassObject`] for the runtime class of `x`; `x.super` → parent class object
 /// when `class` … `extends` is present.
 pub(crate) fn infer_member_expr(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
-    let obj_ty = if let Some(obj) = node.child_nodes().next() {
-        let mut t = expr_span_ty(a, &obj);
-        if matches!(t, LeekTy::Unknown) {
-            if let Some(r) = receiver_ty_from_simple_name(a, &obj) {
-                t = r;
-            }
-        }
-        t
-    } else {
-        postfix_suffix_operand_ty(a, node).unwrap_or(LeekTy::Unknown)
-    };
+    let obj_ty = member_expr_receiver_ty(a, node);
     let receiver_nullable = matches!(obj_ty, LeekTy::Nullable(_));
     let obj_ty_inner = match obj_ty {
         LeekTy::Nullable(inner) => (*inner).clone(),
@@ -352,6 +527,114 @@ fn callee_ty_from_tokens_before_call(a: &Analyzer, call: &SyntaxNode) -> LeekTy 
     LeekTy::Unknown
 }
 
+fn call_expr_arg_types(a: &mut Analyzer, call: &SyntaxNode) -> Vec<LeekTy> {
+    call.child_nodes()
+        .filter(|n| n.kind_as::<Node>() != Some(Node::Trivia))
+        .filter(|n| n.kind_as::<Node>() == Some(Node::Expr))
+        .map(|n| expr_span_ty(a, &n))
+        .collect()
+}
+
+fn ty_apply_type_param_subst(ty: &LeekTy, subst: &HashMap<String, LeekTy>) -> LeekTy {
+    match ty {
+        LeekTy::TypeParam(name) => subst.get(name).cloned().unwrap_or(LeekTy::TypeParam(name.clone())),
+        LeekTy::Array(el) => LeekTy::Array(Box::new(ty_apply_type_param_subst(el, subst))),
+        LeekTy::Set(el) => LeekTy::Set(Box::new(ty_apply_type_param_subst(el, subst))),
+        LeekTy::Map(k, v) => LeekTy::Map(
+            Box::new(ty_apply_type_param_subst(k, subst)),
+            Box::new(ty_apply_type_param_subst(v, subst)),
+        ),
+        LeekTy::Interval(inner) => {
+            LeekTy::Interval(Box::new(ty_apply_type_param_subst(inner, subst)))
+        }
+        LeekTy::Nullable(inner) => {
+            LeekTy::Nullable(Box::new(ty_apply_type_param_subst(inner, subst)))
+        }
+        LeekTy::Union(parts) => LeekTy::Union(parts.iter().map(|p| ty_apply_type_param_subst(p, subst)).collect()),
+        LeekTy::Function { params, ret } => LeekTy::Function {
+            params: params.iter().map(|p| ty_apply_type_param_subst(p, subst)).collect(),
+            ret: Box::new(ty_apply_type_param_subst(ret, subst)),
+        },
+        other => other.clone(),
+    }
+}
+
+fn infer_call_type_param_subst_from_arg(
+    expected: &LeekTy,
+    actual: &LeekTy,
+    out: &mut HashMap<String, LeekTy>,
+) {
+    match expected {
+        LeekTy::TypeParam(name) => {
+            match out.get(name) {
+                None => {
+                    out.insert(name.clone(), actual.clone());
+                }
+                Some(prev) => {
+                    let joined = LeekTy::unify_inference(prev, actual);
+                    out.insert(name.clone(), joined);
+                }
+            }
+        }
+        LeekTy::Nullable(inner) => {
+            if matches!(actual, LeekTy::Null) {
+                return;
+            }
+            if let LeekTy::Nullable(a_inner) = actual {
+                infer_call_type_param_subst_from_arg(inner, a_inner, out);
+            } else {
+                infer_call_type_param_subst_from_arg(inner, actual, out);
+            }
+        }
+        LeekTy::Array(e_el) => {
+            if let LeekTy::Array(a_el) = actual {
+                infer_call_type_param_subst_from_arg(e_el, a_el, out);
+            }
+        }
+        LeekTy::Set(e_el) => {
+            if let LeekTy::Set(a_el) = actual {
+                infer_call_type_param_subst_from_arg(e_el, a_el, out);
+            }
+        }
+        LeekTy::Map(e_k, e_v) => {
+            if let LeekTy::Map(a_k, a_v) = actual {
+                infer_call_type_param_subst_from_arg(e_k, a_k, out);
+                infer_call_type_param_subst_from_arg(e_v, a_v, out);
+            }
+        }
+        LeekTy::Interval(e_inner) => {
+            if let LeekTy::Interval(a_inner) = actual {
+                infer_call_type_param_subst_from_arg(e_inner, a_inner, out);
+            }
+        }
+        LeekTy::Union(parts) => {
+            // Best-effort: pick the first branch the actual can flow to.
+            for p in parts {
+                if LeekTy::is_assignable_to(actual, p) {
+                    infer_call_type_param_subst_from_arg(p, actual, out);
+                    break;
+                }
+            }
+        }
+        LeekTy::Function {
+            params: e_params,
+            ret: e_ret,
+        } => {
+            if let LeekTy::Function {
+                params: a_params,
+                ret: a_ret,
+            } = actual
+            {
+                for (ep, ap) in e_params.iter().zip(a_params.iter()) {
+                    infer_call_type_param_subst_from_arg(ep, ap, out);
+                }
+                infer_call_type_param_subst_from_arg(e_ret, a_ret, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Callee is usually the element before this [`Node::CallExpr`]; if the call is the first child of
 /// [`Node::Expr`], recover the function name from the last identifier before `(`.
 pub(crate) fn infer_call_expr(a: &mut Analyzer, call: &SyntaxNode) -> LeekTy {
@@ -399,8 +682,13 @@ pub(crate) fn infer_call_expr(a: &mut Analyzer, call: &SyntaxNode) -> LeekTy {
         o => o,
     };
     match callee_inner {
-        LeekTy::Function { ret, .. } => {
-            let ret_ty = (*ret).clone();
+        LeekTy::Function { params, ret } => {
+            let arg_tys = call_expr_arg_types(a, call);
+            let mut subst: HashMap<String, LeekTy> = HashMap::new();
+            for (expected, actual) in params.iter().zip(arg_tys.iter()) {
+                infer_call_type_param_subst_from_arg(expected, actual, &mut subst);
+            }
+            let ret_ty = ty_apply_type_param_subst(ret.as_ref(), &subst);
             let out = propagate_nullable_optional_chain(callee_nullable, ret_ty.clone());
             if callee_nullable && ret_ty != LeekTy::Unknown {
                 push_nullable_chain_warning(
@@ -410,6 +698,27 @@ pub(crate) fn infer_call_expr(a: &mut Analyzer, call: &SyntaxNode) -> LeekTy {
                 );
             }
             out
+        }
+        LeekTy::Union(parts) => {
+            // If the callee is a union of function types, join possible return types.
+            let mut outs: Vec<LeekTy> = Vec::new();
+            for p in parts {
+                if let LeekTy::Function { params, ret } = p {
+                    let arg_tys = call_expr_arg_types(a, call);
+                    let mut subst: HashMap<String, LeekTy> = HashMap::new();
+                    for (expected, actual) in params.iter().zip(arg_tys.iter()) {
+                        infer_call_type_param_subst_from_arg(expected, actual, &mut subst);
+                    }
+                    outs.push(ty_apply_type_param_subst(ret.as_ref(), &subst));
+                }
+            }
+            if outs.is_empty() {
+                LeekTy::Unknown
+            } else if outs.len() == 1 {
+                propagate_nullable_optional_chain(callee_nullable, outs[0].clone())
+            } else {
+                propagate_nullable_optional_chain(callee_nullable, LeekTy::Union(outs))
+            }
         }
         LeekTy::ClassObject(cn) => {
             if let Some(n) = &callee_node {

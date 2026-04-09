@@ -42,12 +42,17 @@ pub(crate) fn sync_leave(a: &mut Analyzer, node: &SyntaxNode) {
     match node.kind_as::<Node>() {
         Some(Node::Block) => leave_block(a, node),
         Some(Node::FunctionDecl) => {
+            let _ = a.implicit_this_receiver_stack.pop();
             a.fn_template_stack.pop();
             a.scope_stack.pop();
         }
         Some(Node::ClassMember) => {
             let cn = a.class_name_stack.last().cloned().unwrap_or_default();
             if try_extract_class_method(node, &cn).is_some() {
+                let cm = ClassMember::cast(node.clone()).expect("class member");
+                if !cm.is_static() && cm.has_method_body() {
+                    let _ = a.implicit_this_receiver_stack.pop();
+                }
                 a.scope_stack.pop();
             }
         }
@@ -56,10 +61,15 @@ pub(crate) fn sync_leave(a: &mut Analyzer, node: &SyntaxNode) {
             a.class_template_stack.pop();
             a.scope_stack.pop();
         }
-        Some(Node::ForStmt) | Some(Node::LambdaExpr) => {
+        Some(Node::ForStmt) => {
+            a.scope_stack.pop();
+        }
+        Some(Node::LambdaExpr) => {
+            let _ = a.implicit_this_receiver_stack.pop();
             a.scope_stack.pop();
         }
         Some(Node::AnonFunctionExpr) => {
+            let _ = a.implicit_this_receiver_stack.pop();
             a.fn_template_stack.pop();
             a.scope_stack.pop();
         }
@@ -68,6 +78,7 @@ pub(crate) fn sync_leave(a: &mut Analyzer, node: &SyntaxNode) {
 }
 
 fn enter_function_decl(a: &mut Analyzer, node: &SyntaxNode) {
+    a.implicit_this_receiver_stack.push(None);
     let outer = a.current_scope();
     let fd = FunctionDecl::cast(node.clone()).expect("fd");
     let name = fd.name().unwrap_or_default();
@@ -197,8 +208,8 @@ fn enter_class_member(a: &mut Analyzer, node: &SyntaxNode) {
     let class_templates: Vec<String> = a.class_template_stack.last().cloned().unwrap_or_default();
     if let Some(m) = try_extract_class_method(node, &cn) {
         let class_sc = a.current_scope();
+        let cm = ClassMember::cast(node.clone()).expect("class member");
         if a.phase.is_build_scopes() {
-            let cm = ClassMember::cast(node.clone()).expect("class member");
             let is_static = cm.is_static() && !m.is_constructor;
             let sk = if m.is_constructor {
                 SymbolKind::Constructor
@@ -240,6 +251,9 @@ fn enter_class_member(a: &mut Analyzer, node: &SyntaxNode) {
             );
         }
         let msc = a.push_child_scope(Some(class_sc), ScopeKind::Method);
+        if !cm.is_static() && cm.has_method_body() {
+            a.implicit_this_receiver_stack.push(Some(cn.clone()));
+        }
         if a.phase.is_build_scopes() {
             for (ty, pname, pspan) in m.params {
                 let dt = ty
@@ -335,6 +349,7 @@ fn enter_for_stmt(a: &mut Analyzer, node: &SyntaxNode) {
 
 /// `function (T x, …) => R { … }` in expression position (object/map entries, calls, etc.).
 fn enter_anon_function_expr(a: &mut Analyzer, node: &SyntaxNode) {
+    a.implicit_this_receiver_stack.push(None);
     let outer = a.current_scope();
     let af = AnonFunctionExpr::cast(node.clone()).expect("anon fn");
     let opt_tpl = af.template_params();
@@ -376,6 +391,7 @@ fn enter_anon_function_expr(a: &mut Analyzer, node: &SyntaxNode) {
 }
 
 fn enter_lambda_expr(a: &mut Analyzer, node: &SyntaxNode) {
+    a.implicit_this_receiver_stack.push(None);
     let p = a.current_scope();
     let lam_sc = a.push_child_scope(Some(p), ScopeKind::Block);
     if !a.phase.is_build_scopes() {
