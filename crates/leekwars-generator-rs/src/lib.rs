@@ -16,17 +16,19 @@ pub mod batch;
 pub mod snapshot;
 
 pub use analyze::{AnalyzeDiagnostic, analyze_ai_source, analyze_ai_source_with_path};
-pub use report::{
-    find_game_data_dir, format_outcome_human, format_outcome_human_for_path, format_outcome_human_with_game,
-    GameNames,
+pub use batch::{
+    BatchJob, BatchResult, BatchRunner, EntityCartesianBlock, SweepCartesian, format_batch_human,
 };
 pub use generator::Generator;
-pub use vm::{LeekWarsContext, LeekWarsEntity, LeekWarsState};
 pub use outcome::Outcome;
 pub use persistence::{
-    DirRegisterManager, FileRegisterManager, InMemoryRegisterManager, RegisterManager, RegisterManagerRc, Registers,
+    DirRegisterManager, FileRegisterManager, InMemoryRegisterManager, RegisterManager,
+    RegisterManagerRc, Registers,
+};
+pub use report::{
+    GameNames, find_game_data_dir, format_outcome_human, format_outcome_human_for_path,
+    format_outcome_human_with_game,
 };
 pub use scenario::Scenario;
 pub use snapshot::{FightSnapshot, snapshot_at_action_index};
-pub use batch::{format_batch_human, BatchJob, BatchResult, BatchRunner, EntityCartesianBlock, SweepCartesian};
-
+pub use vm::{LeekWarsContext, LeekWarsEntity, LeekWarsState};

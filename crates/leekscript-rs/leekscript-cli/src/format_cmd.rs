@@ -5,9 +5,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use leekscript::format::{
-    format_document, BraceStyle, FormatOptions, LineEnding, SemicolonStyle,
-};
+use leekscript::format::{BraceStyle, FormatOptions, LineEnding, SemicolonStyle, format_document};
 use leekscript::include::infer_include_project_root;
 use leekscript::{LanguageOptions, prepare_merged_check_unit};
 use serde::Deserialize;

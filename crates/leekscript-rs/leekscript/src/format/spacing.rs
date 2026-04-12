@@ -7,7 +7,14 @@ use crate::syntax::kinds::Lex;
 fn is_ident_or_literal(k: Lex) -> bool {
     matches!(
         k,
-        Lex::Ident | Lex::Number | Lex::String | Lex::Pi | Lex::Infinity | Lex::TrueKw | Lex::FalseKw | Lex::NullKw
+        Lex::Ident
+            | Lex::Number
+            | Lex::String
+            | Lex::Pi
+            | Lex::Infinity
+            | Lex::TrueKw
+            | Lex::FalseKw
+            | Lex::NullKw
     )
 }
 
@@ -294,7 +301,8 @@ pub fn needs_space_between(
     // Type / generic punctuation — not comparisons (`a < b`) or bitwise or (`x | y`), which are not
     // formatted under TypeExpr / BuiltinTypeNameExpr.
     if in_type_syntax
-        && (matches!(p, Lex::BitOr | Lex::Lt | Lex::Gt) || matches!(next, Lex::BitOr | Lex::Lt | Lex::Gt))
+        && (matches!(p, Lex::BitOr | Lex::Lt | Lex::Gt)
+            || matches!(next, Lex::BitOr | Lex::Lt | Lex::Gt))
     {
         return opts.space_around_type_operators;
     }
@@ -323,7 +331,10 @@ pub fn needs_space_between(
         if next == Lex::LBrace {
             return true;
         }
-        if matches!(next, Lex::ContinueKw | Lex::BreakKw | Lex::ReturnKw | Lex::ThrowKw) {
+        if matches!(
+            next,
+            Lex::ContinueKw | Lex::BreakKw | Lex::ReturnKw | Lex::ThrowKw
+        ) {
             return true;
         }
         if is_ident_or_literal(next) || matches!(next, Lex::ThisKw | Lex::SuperKw) {
@@ -351,7 +362,12 @@ pub fn needs_space_between(
         // above: without this, we fall through to `return false` before the generic keyword rule runs).
         if matches!(
             p,
-            Lex::ReturnKw | Lex::ThrowKw | Lex::TypeofKw | Lex::VoidKw | Lex::CaseKw | Lex::GlobalKw
+            Lex::ReturnKw
+                | Lex::ThrowKw
+                | Lex::TypeofKw
+                | Lex::VoidKw
+                | Lex::CaseKw
+                | Lex::GlobalKw
         ) {
             return true;
         }
@@ -417,7 +433,13 @@ pub fn needs_space_between(
     // `return` / `throw` / `typeof` / `void` / `new` style
     if matches!(
         p,
-        Lex::ReturnKw | Lex::ThrowKw | Lex::TypeofKw | Lex::VoidKw | Lex::NewKw | Lex::CaseKw | Lex::GlobalKw
+        Lex::ReturnKw
+            | Lex::ThrowKw
+            | Lex::TypeofKw
+            | Lex::VoidKw
+            | Lex::NewKw
+            | Lex::CaseKw
+            | Lex::GlobalKw
     ) {
         return next != Lex::Semi && next != Lex::RBrace;
     }
@@ -471,7 +493,12 @@ pub fn needs_space_between(
     // Keyword followed by wordish
     if matches!(
         p,
-        Lex::FunctionKw | Lex::ClassKw | Lex::ExtendsKw | Lex::ImplementsKw | Lex::PackageKw | Lex::ImportKw
+        Lex::FunctionKw
+            | Lex::ClassKw
+            | Lex::ExtendsKw
+            | Lex::ImplementsKw
+            | Lex::PackageKw
+            | Lex::ImportKw
     ) && (is_ident_or_literal(next) || next == Lex::LBrace)
     {
         return next != Lex::LParen;

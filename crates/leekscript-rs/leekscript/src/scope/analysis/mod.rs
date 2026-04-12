@@ -127,7 +127,9 @@ mod narrowing_smoke {
             Version::V4,
         )
         .unwrap();
-        let bins = doc.root().find_all_nodes(Node::BinaryExpr.into_syntax_kind());
+        let bins = doc
+            .root()
+            .find_all_nodes(Node::BinaryExpr.into_syntax_kind());
         let n = bins
             .iter()
             .find(|b| b.text_range().start == 25)
@@ -146,7 +148,7 @@ mod analysis_smoke {
     use super::run_semantic_analysis;
     use crate::Version;
     use crate::parse_doc;
-    use crate::scope::model::{SemanticCode, SemanticDiagnostic};
+    use crate::scope::model::{SemanticCode, SemanticDiagnostic, SemanticSeverity};
 
     #[test]
     fn undefined_diagnostic_snapshot() {
@@ -159,6 +161,45 @@ mod analysis_smoke {
             .collect();
         assert_eq!(d.len(), 1, "{:?}", a.diagnostics);
         assert!(d[0].message.contains("z"), "message={:?}", d[0].message);
+    }
+
+    #[test]
+    fn bare_return_without_semicolon_warns() {
+        let doc = parse_doc("function f() { return }", Version::V4).unwrap();
+        let a = run_semantic_analysis(doc.root(), Version::V4);
+        let d: Vec<&SemanticDiagnostic> = a
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == SemanticCode::BareReturnRequiresSemicolon)
+            .collect();
+        assert_eq!(d.len(), 1, "{:?}", a.diagnostics);
+        assert_eq!(d[0].severity, SemanticSeverity::Warning);
+    }
+
+    #[test]
+    fn bare_return_with_semicolon_ok() {
+        let doc = parse_doc("function f() { return; }", Version::V4).unwrap();
+        let a = run_semantic_analysis(doc.root(), Version::V4);
+        assert!(
+            !a.diagnostics
+                .iter()
+                .any(|d| d.code == SemanticCode::BareReturnRequiresSemicolon),
+            "{:?}",
+            a.diagnostics
+        );
+    }
+
+    #[test]
+    fn return_value_without_semicolon_ok() {
+        let doc = parse_doc("function f() { return 1 }", Version::V4).unwrap();
+        let a = run_semantic_analysis(doc.root(), Version::V4);
+        assert!(
+            !a.diagnostics
+                .iter()
+                .any(|d| d.code == SemanticCode::BareReturnRequiresSemicolon),
+            "{:?}",
+            a.diagnostics
+        );
     }
 
     #[test]

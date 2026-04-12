@@ -9,9 +9,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use sipha::tree::ast::{AstNode, AstNodeExt};
+use sipha::tree::red::SyntaxNode;
+use sipha::types::{IntoSyntaxKind, Span};
 
-use crate::ast::{Root, Stmt};
+use crate::ast::{ReturnStmt, Root, Stmt};
 use crate::parse::LanguageOptions;
+use crate::syntax::kinds::{Lex, Node};
 
 use super::{
     IncludeLoadError, LoadedProject, LoadedSourceFile, ResolveError, load_project_with_includes,
@@ -271,6 +274,125 @@ fn build_file_index(
     Ok(map)
 }
 
+/// Byte offsets in the source file where a bare `return` (no value, no `;`) ends — insert `;` here.
+fn collect_bare_return_insert_offsets(root: &SyntaxNode) -> Vec<u32> {
+    let mut inserts = Vec::new();
+    for n in root.find_all_nodes(Node::ReturnStmt.into_syntax_kind()) {
+        let Some(r) = ReturnStmt::cast(n.clone()) else {
+            continue;
+        };
+        if r.expr().is_some() {
+            continue;
+        }
+        if n.non_trivia_tokens()
+            .any(|t| t.kind_as::<Lex>() == Some(Lex::Semi))
+        {
+            continue;
+        }
+        inserts.push(n.text_range().end);
+    }
+    inserts.sort_unstable();
+    inserts.dedup();
+    inserts
+}
+
+fn push_mapped_segment(
+    out: &mut String,
+    mapping: &mut MergedSourceMapping,
+    path: &Path,
+    src: &[u8],
+    file_seg_start: u32,
+    file_seg_end: u32,
+) {
+    let start = file_seg_start as usize;
+    let end = (file_seg_end as usize).min(src.len());
+    if start >= end {
+        return;
+    }
+    let merged_start = out.len() as u32;
+    out.push_str(std::str::from_utf8(&src[start..end]).unwrap_or(""));
+    let merged_end = out.len() as u32;
+    if merged_end > merged_start {
+        mapping.spans.push(MergedSpanMap {
+            merged_start,
+            merged_end,
+            path: path.to_path_buf(),
+            file_offset: file_seg_start,
+        });
+    }
+}
+
+fn push_mapped_semicolon(
+    out: &mut String,
+    mapping: &mut MergedSourceMapping,
+    path: &Path,
+    file_offset_at_insert: u32,
+) {
+    let merged_start = out.len() as u32;
+    out.push(';');
+    let merged_end = out.len() as u32;
+    mapping.spans.push(MergedSpanMap {
+        merged_start,
+        merged_end,
+        path: path.to_path_buf(),
+        file_offset: file_offset_at_insert,
+    });
+}
+
+/// Copy `src[range]` into `out`, inserting `;` after each bare `return` in `subtree` (see
+/// [`collect_bare_return_insert_offsets`]).
+fn emit_source_range_with_bare_return_fixes(
+    out: &mut String,
+    path: &Path,
+    src: &[u8],
+    range: Span,
+    subtree: &SyntaxNode,
+    mapping: &mut MergedSourceMapping,
+) {
+    let range_end = range.end.min(src.len() as u32);
+    if range.start > range_end {
+        return;
+    }
+
+    let mut inserts = collect_bare_return_insert_offsets(subtree);
+    inserts.retain(|&p| p >= range.start && p <= range.end && p <= range_end);
+    inserts.sort_unstable();
+    inserts.dedup();
+
+    let start = range.start as usize;
+    let end = range_end as usize;
+
+    if inserts.is_empty() {
+        if start <= src.len() && start < end {
+            push_mapped_segment(out, mapping, path, src, range.start, range_end);
+        } else {
+            let merged_start = out.len() as u32;
+            out.push_str(&subtree.collect_text());
+            let merged_end = out.len() as u32;
+            if merged_end > merged_start {
+                mapping.spans.push(MergedSpanMap {
+                    merged_start,
+                    merged_end,
+                    path: path.to_path_buf(),
+                    file_offset: range.start,
+                });
+            }
+        }
+        return;
+    }
+
+    let mut cursor = range.start;
+    for &ins in &inserts {
+        if ins < cursor || ins > range_end {
+            continue;
+        }
+        push_mapped_segment(out, mapping, path, src, cursor, ins);
+        push_mapped_semicolon(out, mapping, path, ins);
+        cursor = ins;
+    }
+    push_mapped_segment(out, mapping, path, src, cursor, range_end);
+}
+
 fn emit_stmt_text(
     out: &mut String,
     file: &LoadedSourceFile,
@@ -279,25 +401,14 @@ fn emit_stmt_text(
 ) {
     let src = file.parsed.source();
     let range = stmt.syntax().text_range();
-    let start = range.start as usize;
-    let end = (range.end as usize).min(src.len());
-    let merged_start = out.len() as u32;
-    let file_offset = range.start;
-    if start <= src.len() && start < end {
-        let slice = &src[start..end];
-        out.push_str(std::str::from_utf8(slice).unwrap_or(""));
-    } else {
-        out.push_str(&stmt.syntax().collect_text());
-    }
-    let merged_end = out.len() as u32;
-    if merged_end > merged_start {
-        mapping.spans.push(MergedSpanMap {
-            merged_start,
-            merged_end,
-            path: file.path.clone(),
-            file_offset,
-        });
-    }
+    emit_source_range_with_bare_return_fixes(
+        out,
+        &file.path,
+        src,
+        range,
+        stmt.syntax(),
+        mapping,
+    );
 }
 
 /// Expand top-level includes and concatenate into one UTF-8 string.
@@ -308,6 +419,8 @@ fn emit_stmt_text(
 /// - Each time a file’s body is inlined for the first time, a `// leekscript-include: begin …`
 ///   line is written immediately before its top-level statements (nested `include` statements are
 ///   handled the same way).
+/// - **Bare `return`** (no value and no `;`) is rewritten to `return;` everywhere in emitted
+///   source, including inside function bodies, so merged output matches the `return;` style rule.
 ///
 /// `project_root` must be the same directory passed to [`super::load_project_with_includes`] (it is
 /// canonicalized the same way for resolution).
@@ -373,17 +486,16 @@ fn emit_top_level(
     open_overlay: Option<&HashMap<PathBuf, String>>,
 ) -> Result<(), MergeIncludesError> {
     let Some(root_node) = Root::cast(file.parsed.root().clone()) else {
-        let merged_start = out.len() as u32;
-        out.push_str(file.parsed.source_str());
-        let merged_end = out.len() as u32;
-        if merged_end > merged_start {
-            mapping.spans.push(MergedSpanMap {
-                merged_start,
-                merged_end,
-                path: file.path.clone(),
-                file_offset: 0,
-            });
-        }
+        let src = file.parsed.source();
+        let n = src.len() as u32;
+        emit_source_range_with_bare_return_fixes(
+            out,
+            &file.path,
+            src,
+            Span::new(0, n),
+            file.parsed.root(),
+            mapping,
+        );
         return Ok(());
     };
 

@@ -60,4 +60,3 @@ pub struct Scenario {
     #[serde(flatten)]
     pub extra: std::collections::BTreeMap<String, Value>,
 }
-

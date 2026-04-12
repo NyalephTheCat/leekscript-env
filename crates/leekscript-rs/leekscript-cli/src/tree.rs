@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use leekscript::syntax::kinds::K;
-use leekscript::{is_signature_stub_path, parse_doc, parse_signature_doc, LanguageOptions};
-use sipha::tree::tree_display::{format_syntax_tree, TreeDisplayOptions};
+use leekscript::{LanguageOptions, is_signature_stub_path, parse_doc, parse_signature_doc};
+use sipha::tree::tree_display::{TreeDisplayOptions, format_syntax_tree};
 use sipha::types::{FromSyntaxKind, SyntaxKind};
 
 use crate::report;

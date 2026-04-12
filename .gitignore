@@ -1,6 +1,8 @@
+.env
 target/
 Cargo.lock
-ai/
 out
 *.pyc
 tools/.leek_encyclopedia_cache.json
+leekwars-batch-log.jsonl
+leekwars-batch-stats.json

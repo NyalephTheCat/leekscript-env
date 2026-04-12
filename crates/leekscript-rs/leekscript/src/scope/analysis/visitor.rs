@@ -28,6 +28,7 @@ impl Visitor for Analyzer {
 
     fn leave_node(&mut self, node: &SyntaxNode) -> WalkResult {
         if self.phase == AnalysisPhase::ResolveAndInfer {
+            self.check_bare_return_semicolon(node);
             self.infer_expr_node(node);
             self.apply_var_inits(node);
             self.apply_foreach_var_inference(node);

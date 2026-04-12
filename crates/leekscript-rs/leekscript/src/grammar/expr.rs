@@ -1,7 +1,7 @@
 //! Expressions: precedence levels, primaries, lambdas, and literals.
-use super::cfg_flags;
 use super::GRule;
-use crate::parse::version::FLAG_IN_SET_LITERAL;
+use super::cfg_flags;
+use crate::parse::version::{FLAG_IN_CALL_ARG_LIST, FLAG_IN_SET_LITERAL};
 use crate::syntax::kinds::Node;
 use sipha::parse::expr as sipha_expr;
 use sipha::prelude::parse::GrammarChoiceFn;
@@ -181,7 +181,11 @@ pub fn define(g: &mut GrammarBuilder) {
         &sipha_expr::LeftAssocInfixLevel {
             level_name: GRule::OrCoalesce.as_str(),
             lower_level_name: GRule::LogicalXor.as_str(),
-            ops: &[GRule::OpOrOr.as_str(), GRule::OpOrWord.as_str(), GRule::OpCoalesce.as_str()],
+            ops: &[
+                GRule::OpOrOr.as_str(),
+                GRule::OpOrWord.as_str(),
+                GRule::OpCoalesce.as_str(),
+            ],
             node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
@@ -320,12 +324,22 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     // equality = is_compare ( (===|!==|==|!=) is_compare )*
+    //
+    // Use Sipha's [`left_assoc_infix_level`](sipha::parse::expr::left_assoc_infix_level) only — do
+    // **not** encode equality with a left-recursive `Equality → … Equality …` rule: that can make
+    // the parse engine/graph build diverge or thrash. The CST uses sibling `BinaryExpr` nodes (op +
+    // rhs); the VM lowers that shape in [`CompileCtx::try_compile_infix_chain_on_parts`].
     sipha_expr::left_assoc_infix_level(
         g,
         &sipha_expr::LeftAssocInfixLevel {
             level_name: GRule::Equality.as_str(),
             lower_level_name: GRule::IsCompare.as_str(),
-            ops: &[GRule::OpEqeqeq.as_str(), GRule::OpNoteqeq.as_str(), GRule::OpEqeq.as_str(), GRule::OpNoteq.as_str()],
+            ops: &[
+                GRule::OpEqeqeq.as_str(),
+                GRule::OpNoteqeq.as_str(),
+                GRule::OpEqeq.as_str(),
+                GRule::OpNoteq.as_str(),
+            ],
             node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
@@ -339,7 +353,12 @@ pub fn define(g: &mut GrammarBuilder) {
         &sipha_expr::LeftAssocInfixLevel {
             level_name: GRule::Shift.as_str(),
             lower_level_name: GRule::Additive.as_str(),
-            ops: &[GRule::OpTripleShl.as_str(), GRule::OpShl.as_str(), GRule::OpShr.as_str(), GRule::OpUshr.as_str()],
+            ops: &[
+                GRule::OpTripleShl.as_str(),
+                GRule::OpShl.as_str(),
+                GRule::OpShr.as_str(),
+                GRule::OpUshr.as_str(),
+            ],
             node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
@@ -367,7 +386,12 @@ pub fn define(g: &mut GrammarBuilder) {
         &sipha_expr::LeftAssocInfixLevel {
             level_name: GRule::Multiplicative.as_str(),
             lower_level_name: GRule::Power.as_str(),
-            ops: &[GRule::OpStar.as_str(), GRule::OpSlash.as_str(), GRule::OpPercent.as_str(), GRule::OpBackslash.as_str()],
+            ops: &[
+                GRule::OpStar.as_str(),
+                GRule::OpSlash.as_str(),
+                GRule::OpPercent.as_str(),
+                GRule::OpBackslash.as_str(),
+            ],
             node_kind: &Node::BinaryExpr,
             wrapper_kind: None,
             rhs_field: None,
@@ -375,7 +399,11 @@ pub fn define(g: &mut GrammarBuilder) {
         },
     );
 
-    sipha_expr::right_assoc_infix_level(g, GRule::Power.as_str(), GRule::Unary.as_str(), GRule::OpStarStar.as_str(),
+    sipha_expr::right_assoc_infix_level(
+        g,
+        GRule::Power.as_str(),
+        GRule::Unary.as_str(),
+        GRule::OpStarStar.as_str(),
         &Node::BinaryExpr,
         None,
         None,
@@ -473,7 +501,12 @@ pub fn define(g: &mut GrammarBuilder) {
     });
 
     // postfix := primary postfix_suffix*
-    sipha_expr::postfix_chain(g, GRule::Postfix.as_str(), GRule::Primary.as_str(), GRule::PostfixSuffix.as_str());
+    sipha_expr::postfix_chain(
+        g,
+        GRule::Postfix.as_str(),
+        GRule::Primary.as_str(),
+        GRule::PostfixSuffix.as_str(),
+    );
 
     // Postfix chain, then `as Type` casts (Java `AS` precedence).
     g.parser_rule(GRule::PostfixWithAs.as_str(), |g| {
@@ -612,13 +645,15 @@ pub fn define(g: &mut GrammarBuilder) {
     // arg_list := expr ("," expr)* ","?
     g.parser_rule(GRule::ArgList.as_str(), |g| {
         g.with_flags(&[], &[FLAG_IN_SET_LITERAL], |g| {
-            g.call_rule(GRule::Expr);
-            g.zero_or_more(|g| {
-                g.call_rule(GRule::Comma);
+            g.with_flags(&[FLAG_IN_CALL_ARG_LIST], &[], |g| {
                 g.call_rule(GRule::Expr);
-            });
-            g.optional(|g| {
-                g.call_rule(GRule::Comma);
+                g.zero_or_more(|g| {
+                    g.call_rule(GRule::Comma);
+                    g.call_rule(GRule::Expr);
+                });
+                g.optional(|g| {
+                    g.call_rule(GRule::Comma);
+                });
             });
         });
     });
@@ -657,7 +692,9 @@ pub fn define(g: &mut GrammarBuilder) {
         sipha::choices!(
             g,
             |g| {
-                // Java suite allows `x, y -> ...` without parentheses.
+                // Java suite allows `x, y -> ...` without parentheses; disabled in call arg lists so
+                // `f(a, x -> y)` is two arguments (see [`FLAG_IN_CALL_ARG_LIST`]).
+                g.if_not_flag(FLAG_IN_CALL_ARG_LIST);
                 g.lookahead(|g| {
                     g.call_rule(GRule::LambdaParam);
                     g.call_rule(GRule::Comma);

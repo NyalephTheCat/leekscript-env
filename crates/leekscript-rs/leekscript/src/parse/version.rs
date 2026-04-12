@@ -27,6 +27,10 @@ pub const FLAG_EXP_LOOP_LEVELS: FlagId = 14;
 pub const FLAG_EXP_TEMPLATES: FlagId = 15;
 /// While set, bare `>` is not parsed as relational greater-than (it closes `<…>` set literals).
 pub const FLAG_IN_SET_LITERAL: FlagId = 16;
+/// While set, a call argument list (`f(…)`) is being parsed: do not treat `ident ,` as the start of
+/// an unparenthesized multi-parameter arrow lambda (`a, b -> …`), so `f(a, x -> y)` is two arguments
+/// (`a` and `x -> y`) instead of one (`a, x -> y`).
+pub const FLAG_IN_CALL_ARG_LIST: FlagId = 17;
 
 /// Optional parse features layered on top of a base [`Version`] (typically [`Version::V4`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

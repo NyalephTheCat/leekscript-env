@@ -1,4 +1,4 @@
-use leekscript::parse::{parse_doc, ExperimentalFeatures, LanguageOptions, Version};
+use leekscript::parse::{ExperimentalFeatures, LanguageOptions, Version, parse_doc};
 
 #[test]
 fn parse_smoke_global_decl_v4() {
@@ -25,6 +25,34 @@ fn parse_smoke_array_of_function_calls_v4() {
         },
     );
     let src = "var f = function(obj) { return obj.a } return [f({a: 'foo'}), f({a: 'bar'})]";
+    let _doc = parse_doc(src, lang).expect("parse_doc");
+}
+
+#[test]
+fn parse_smoke_unparen_multi_param_lambda_outside_call_args_v4() {
+    let lang = LanguageOptions::new(
+        Version::V4,
+        ExperimentalFeatures {
+            lexical_const: true,
+            exceptions: true,
+            ..ExperimentalFeatures::NONE
+        },
+    );
+    let src = "var f = a, b -> a + b return f(1, 2)";
+    let _doc = parse_doc(src, lang).expect("parse_doc");
+}
+
+#[test]
+fn parse_smoke_call_arg_list_does_not_absorb_comma_lambda_v4() {
+    let lang = LanguageOptions::new(
+        Version::V4,
+        ExperimentalFeatures {
+            lexical_const: true,
+            exceptions: true,
+            ..ExperimentalFeatures::NONE
+        },
+    );
+    let src = "function transform(arr, depth) { if (depth == 0) { return arr } return transform(arrayMap(arr, x -> x * 2), depth - 1) } return transform([1, 2, 3, 4], 3)";
     let _doc = parse_doc(src, lang).expect("parse_doc");
 }
 
@@ -73,6 +101,8 @@ fn parse_smoke_return_f_call_has_call_expr_v4() {
             }
         }
     }
-    assert!(saw_call_expr, "expected `return f()` to include CallExpr node");
+    assert!(
+        saw_call_expr,
+        "expected `return f()` to include CallExpr node"
+    );
 }
-

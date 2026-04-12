@@ -6,6 +6,8 @@ members = [
   "crates/leekscript-rs/leekscript-cli",
   "crates/leekscript-rs/leekscript-lsp",
   "crates/leekwars-generator-rs",
+  "crates/leekwars-api",
+  "crates/leekwars-cli",
 ]
 
 [workspace.lints]

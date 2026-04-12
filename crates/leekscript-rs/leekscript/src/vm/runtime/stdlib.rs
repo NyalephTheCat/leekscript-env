@@ -12,7 +12,7 @@
 use std::cell::Cell;
 
 use crate::vm::host::json;
-use crate::vm::value::{set_value_from_elements, IntervalValue, NumberBits, PreludeClass, Value};
+use crate::vm::value::{IntervalValue, NumberBits, PreludeClass, Value, set_value_from_elements};
 
 use super::error::VmError;
 use super::interpreter::{NativeFn, Vm};
@@ -102,6 +102,25 @@ fn f64_as_i64_trunc(n: f64) -> i64 {
     n as i64
 }
 
+/// Exact `i64` for bit / hex helpers: [`Value::Number::Int`] stays exact (avoids `f64` mantissa loss).
+fn i64_from_numish_arg(v: &Value) -> Result<i64, VmError> {
+    match v {
+        Value::Null => Ok(0),
+        Value::Number(NumberBits::Int(i)) => Ok(*i),
+        Value::Number(NumberBits::Real(x)) => Ok(f64_as_i64_trunc(*x)),
+        _ => Err(VmError::ExpectedNumber),
+    }
+}
+
+/// Java `long` / `double` raw bits for bitwise natives (no precision loss for large integers).
+fn u64_bits_from_value(v: &Value) -> Result<u64, VmError> {
+    match v {
+        Value::Number(NumberBits::Int(i)) => Ok(*i as u64),
+        Value::Number(NumberBits::Real(x)) => Ok(f64::to_bits(*x)),
+        _ => Err(VmError::ExpectedNumber),
+    }
+}
+
 fn one_num(args: &[Value]) -> Result<f64, VmError> {
     if args.len() != 1 {
         return Err(bad_argc(1, args.len()));
@@ -143,10 +162,6 @@ fn two_strings(args: &[Value]) -> Result<(&str, &str), VmError> {
     Ok((a, b))
 }
 
-fn u64_bits(n: f64) -> u64 {
-    f64_as_i64_trunc(n) as u64
-}
-
 fn digit_hist(mut n: i64) -> [u8; 10] {
     let mut c = [0u8; 10];
     if n == 0 {
@@ -167,6 +182,12 @@ fn digit_hist(mut n: i64) -> [u8; 10] {
 
 fn nf_abs(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    if matches!(args[0], Value::Null) {
+        return Ok(Value::num_int(0));
+    }
     let a = one_num(args)?;
     Ok(num_unary_preserve(a.abs(), &args[0]))
 }
@@ -198,19 +219,19 @@ fn nf_atan2(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 fn nf_ceil(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let a = one_num(args)?;
-    Ok(num_unary_preserve(a.ceil(), &args[0]))
+    Ok(Value::Number(NumberBits::coerce_integerish_f64(a.ceil())))
 }
 
 fn nf_floor(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let a = one_num(args)?;
-    Ok(num_unary_preserve(a.floor(), &args[0]))
+    Ok(Value::Number(NumberBits::coerce_integerish_f64(a.floor())))
 }
 
 fn nf_round(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 2)?;
     let a = one_num(args)?;
-    Ok(num_unary_preserve(a.round(), &args[0]))
+    Ok(Value::Number(NumberBits::coerce_integerish_f64(a.round())))
 }
 
 fn nf_sqrt(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -266,14 +287,14 @@ fn nf_pow(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     if args.len() != 2 {
         return Err(bad_argc(2, args.len()));
     }
-    // Java keeps integer-ness for simple integer powers when representable.
+    // `Math.pow` / Leek `pow()` returns a real (e.g. `125.0`); `**` uses [`Opcode::Pow`] instead.
     if let (Value::Number(NumberBits::Int(bi)), Value::Number(NumberBits::Int(ei))) =
         (&args[0], &args[1])
     {
         if *ei >= 0 {
             if let Ok(exp) = u32::try_from(*ei) {
                 if let Some(r) = bi.checked_pow(exp) {
-                    return Ok(Value::num_int(r));
+                    return Ok(Value::num_real(r as f64));
                 }
             }
         }
@@ -316,19 +337,20 @@ fn nf_sign(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     } else {
         0.0
     };
-    Ok(num_unary_preserve(s, &args[0]))
+    Ok(Value::Number(NumberBits::coerce_integerish_f64(s)))
 }
 
 fn nf_to_degrees(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 5)?;
     let a = one_num(args)?;
-    Ok(num_unary_preserve(a.to_degrees(), &args[0]))
+    // Java `Math.toDegrees` returns `double` (export `0.0`, not integer `0`).
+    Ok(Value::num_real(a.to_degrees()))
 }
 
 fn nf_to_radians(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 5)?;
     let a = one_num(args)?;
-    Ok(num_unary_preserve(a.to_radians(), &args[0]))
+    Ok(Value::num_real(a.to_radians()))
 }
 
 fn nf_is_nan(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -415,25 +437,37 @@ fn nf_rand_int(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 
 fn nf_bit_count(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let x = u64_bits(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let x = u64_bits_from_value(&args[0])?;
     Ok(Value::num_int(i64::from(x.count_ones())))
 }
 
 fn nf_bit_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let x = u64_bits(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let x = u64_bits_from_value(&args[0])?;
     Ok(Value::num_int(x.reverse_bits() as i64))
 }
 
 fn nf_bits_to_real(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let bits = u64_bits(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let bits = u64_bits_from_value(&args[0])?;
     Ok(Value::num_real(f64::from_bits(bits)))
 }
 
 fn nf_byte_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let x = u64_bits(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let x = u64_bits_from_value(&args[0])?;
     let b = x.to_le_bytes();
     let r = u64::from_le_bytes([b[7], b[6], b[5], b[4], b[3], b[2], b[1], b[0]]);
     Ok(Value::num_int(r as i64))
@@ -441,47 +475,66 @@ fn nf_byte_reverse(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 
 fn nf_leading_zeros(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let x = u64_bits(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let x = u64_bits_from_value(&args[0])?;
     Ok(Value::num_int(i64::from(x.leading_zeros())))
 }
 
 fn nf_trailing_zeros(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let x = u64_bits(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let x = u64_bits_from_value(&args[0])?;
     Ok(Value::num_int(i64::from(x.trailing_zeros())))
 }
 
 fn nf_rotate_left(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let (a, b) = two_nums(args)?;
-    let x = u64_bits(a);
+    let (_a, b) = two_nums(args)?;
+    let x = u64_bits_from_value(&args[0])?;
     let r = (f64_as_i64_trunc(b).rem_euclid(64)) as u32;
     Ok(Value::num_int(x.rotate_left(r) as i64))
 }
 
 fn nf_rotate_right(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 1)?;
-    let (a, b) = two_nums(args)?;
-    let x = u64_bits(a);
+    let (_a, b) = two_nums(args)?;
+    let x = u64_bits_from_value(&args[0])?;
     let r = (f64_as_i64_trunc(b).rem_euclid(64)) as u32;
     Ok(Value::num_int(x.rotate_right(r) as i64))
 }
 
 fn nf_raw_bits(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
-    ch(vm, 1)?; // Java `realBits`
-    let a = one_num(args)?;
-    Ok(Value::num_int(f64::to_bits(a) as i64))
+    ch(vm, 1)?; // Java `realBits` / `Double.doubleToRawLongBits`
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let bits = match &args[0] {
+        Value::Number(NumberBits::Int(i)) => f64::to_bits(*i as f64),
+        Value::Number(NumberBits::Real(x)) => f64::to_bits(*x),
+        _ => return Err(VmError::ExpectedNumber),
+    };
+    Ok(Value::num_int(bits as i64))
 }
 
 fn nf_binary(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 10)?; // Java `binString`
-    let n = f64_as_i64_trunc(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let n = i64_from_numish_arg(&args[0])?;
     Ok(Value::String(format!("{n:b}")))
 }
 
 fn nf_hex_string(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 10)?;
-    let n = f64_as_i64_trunc(one_num(args)?);
+    if args.len() != 1 {
+        return Err(bad_argc(1, args.len()));
+    }
+    let n = i64_from_numish_arg(&args[0])?;
     Ok(Value::String(format!("{n:x}")))
 }
 
@@ -522,14 +575,29 @@ fn nf_char_at(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 
 fn nf_code_point_at(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     ch(vm, 5)?;
-    if args.len() != 2 {
-        return Err(bad_argc(2, args.len()));
-    }
-    let s = match &args[0] {
-        Value::String(s) => s.as_str(),
-        _ => return Err(VmError::ExpectedString),
+    let (s, i) = match args.len() {
+        0 => return Err(bad_argc(1, 0)),
+        1 => {
+            let s = match &args[0] {
+                Value::String(s) => s.as_str(),
+                _ => return Err(VmError::ExpectedString),
+            };
+            // Java `StringClass.codePointAt(AI, String)` uses index 0; empty string returns 0.
+            if s.is_empty() {
+                return Ok(Value::num_int(0));
+            }
+            (s, 0i64)
+        }
+        2 => {
+            let s = match &args[0] {
+                Value::String(s) => s.as_str(),
+                _ => return Err(VmError::ExpectedString),
+            };
+            let i = f64_as_i64_trunc(args[1].as_number().ok_or(VmError::ExpectedNumber)?);
+            (s, i)
+        }
+        n => return Err(bad_argc(2, n)),
     };
-    let i = f64_as_i64_trunc(args[1].as_number().ok_or(VmError::ExpectedNumber)?);
     if i < 0 {
         return Ok(Value::num_int(-1));
     }
@@ -693,7 +761,9 @@ fn nf_split(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
             } else {
                 s.split(sep).map(|p| Value::String(p.to_string())).collect()
             };
-            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(parts))))
+            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                parts,
+            ))))
         }
         3 => {
             let s = match &args[0] {
@@ -710,7 +780,9 @@ fn nf_split(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
                 .into_iter()
                 .map(Value::String)
                 .collect();
-            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(parts))))
+            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                parts,
+            ))))
         }
         _ => Err(VmError::BadNativeArgs),
     }
@@ -1049,7 +1121,9 @@ fn nf_map_contains(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     match &args[0] {
         Value::Map(p) | Value::Object(p) => {
             let b = p.borrow();
-            Ok(Value::Bool(b.iter().any(|(_, v)| v.equals_equals_v4(needle))))
+            Ok(Value::Bool(
+                b.iter().any(|(_, v)| v.equals_equals_v4(needle)),
+            ))
         }
         _ => Err(VmError::ExpectedArray),
     }
@@ -1149,7 +1223,9 @@ fn nf_map_keys(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::Map(p) | Value::Object(p) => {
             let b = p.borrow();
             let keys: Vec<Value> = b.iter().map(|(k, _)| k.clone()).collect();
-            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(keys))))
+            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                keys,
+            ))))
         }
         _ => Err(VmError::ExpectedArray),
     }
@@ -1164,7 +1240,9 @@ fn nf_map_values(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         Value::Map(p) | Value::Object(p) => {
             let b = p.borrow();
             let vals: Vec<Value> = b.iter().map(|(_, v)| v.clone()).collect();
-            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(vals))))
+            Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                vals,
+            ))))
         }
         _ => Err(VmError::ExpectedArray),
     }
@@ -1212,7 +1290,11 @@ fn nf_map_map(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     }
 
     let rc = std::rc::Rc::new(std::cell::RefCell::new(out));
-    Ok(if is_obj { Value::Object(rc) } else { Value::Map(rc) })
+    Ok(if is_obj {
+        Value::Object(rc)
+    } else {
+        Value::Map(rc)
+    })
 }
 
 fn nf_map_some(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -1407,7 +1489,11 @@ fn nf_map_filter(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         }
     }
     let rc = std::rc::Rc::new(std::cell::RefCell::new(out));
-    Ok(if is_obj { Value::Object(rc) } else { Value::Map(rc) })
+    Ok(if is_obj {
+        Value::Object(rc)
+    } else {
+        Value::Map(rc)
+    })
 }
 
 fn nf_map_merge(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -1432,7 +1518,11 @@ fn nf_map_merge(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         }
     }
     let rc = std::rc::Rc::new(std::cell::RefCell::new(out));
-    Ok(if a_is_obj { Value::Object(rc) } else { Value::Map(rc) })
+    Ok(if a_is_obj {
+        Value::Object(rc)
+    } else {
+        Value::Map(rc)
+    })
 }
 fn nf_join(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     if args.len() != 2 {
@@ -1763,10 +1853,16 @@ fn nf_interval_average(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
 }
 
 fn interval_cmp_left(iv: &IntervalValue) -> (f64, bool) {
-    (iv.left.map(|n| n.as_f64()).unwrap_or(f64::NEG_INFINITY), iv.left_closed)
+    (
+        iv.left.map(|n| n.as_f64()).unwrap_or(f64::NEG_INFINITY),
+        iv.left_closed,
+    )
 }
 fn interval_cmp_right(iv: &IntervalValue) -> (f64, bool) {
-    (iv.right.map(|n| n.as_f64()).unwrap_or(f64::INFINITY), iv.right_closed)
+    (
+        iv.right.map(|n| n.as_f64()).unwrap_or(f64::INFINITY),
+        iv.right_closed,
+    )
 }
 
 fn nf_interval_intersection(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -1894,9 +1990,12 @@ fn nf_interval_to_array(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         1.0
     };
     if step == 0.0 {
-        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))));
+        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+            Vec::new(),
+        ))));
     }
-    let is_real = interval_force_real(iv) || (args.len() == 2 && !step.is_finite())
+    let is_real = interval_force_real(iv)
+        || (args.len() == 2 && !step.is_finite())
         || (args.len() == 2 && (step - step.round()).abs() > 1e-9);
     let mut out: Vec<Value> = Vec::new();
     let lf = iv.left.unwrap().as_f64();
@@ -2054,7 +2153,9 @@ fn nf_interval_range(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         return Err(VmError::ExpectedInterval);
     };
     if !(iv.left.is_some() && iv.right.is_some()) {
-        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))));
+        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+            Vec::new(),
+        ))));
     }
     // Java `range` always yields real numbers.
     let step = match &args[3] {
@@ -2078,7 +2179,12 @@ fn nf_interval_range(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         _ => args[2].as_number().ok_or(VmError::ExpectedNumber)? as i64,
     };
 
-    let min_idx = (if start_i < 0 { max_size + start_i } else { start_i }).clamp(0, max_size);
+    let min_idx = (if start_i < 0 {
+        max_size + start_i
+    } else {
+        start_i
+    })
+    .clamp(0, max_size);
     let max_idx = (if end_i < 0 { max_size + end_i } else { end_i }).clamp(0, max_size);
 
     let mut out: Vec<Value> = Vec::new();
@@ -2224,7 +2330,9 @@ fn nf_set_to_array(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let Value::Set(s) = &args[0] else {
         return Err(VmError::BadNativeArgs);
     };
-    Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(s.clone()))))
+    Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+        s.clone(),
+    ))))
 }
 
 fn nf_get_blue(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -2541,7 +2649,9 @@ fn nf_array_chunk(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     while i < ab.len() {
         let end = (i + size).min(ab.len());
         let chunk = ab[i..end].to_vec();
-        out.push(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(chunk))));
+        out.push(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+            chunk,
+        ))));
         i = end;
     }
     Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(out))))
@@ -2598,13 +2708,17 @@ fn nf_array_slice(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     };
     if step == 0 {
         ch(vm, 2)?;
-        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))));
+        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+            Vec::new(),
+        ))));
     }
     let mut out: Vec<Value> = Vec::new();
     if step > 0 {
         if e <= s {
             ch(vm, 2)?;
-            return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))));
+            return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                Vec::new(),
+            ))));
         }
         let step_u = step as usize;
         let mut i = s;
@@ -2640,7 +2754,9 @@ fn nf_array_slice(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
         }
         if si < 0 {
             ch(vm, 2)?;
-            return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))));
+            return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                Vec::new(),
+            ))));
         }
         let step_i = step; // negative
         let mut i = si;
@@ -2664,8 +2780,7 @@ fn nf_fill(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let fill = args[1].clone();
     let mut ab = a.borrow_mut();
     let target = if args.len() == 3 {
-        f64_as_i64_trunc(args[2].as_number().ok_or(VmError::ExpectedNumber)?)
-            .max(0) as usize
+        f64_as_i64_trunc(args[2].as_number().ok_or(VmError::ExpectedNumber)?).max(0) as usize
     } else {
         ab.len()
     };
@@ -3205,10 +3320,12 @@ fn nf_array_partition(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
             f.push(v.clone());
         }
     }
-    Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(vec![
-        Value::Array(std::rc::Rc::new(std::cell::RefCell::new(t))),
-        Value::Array(std::rc::Rc::new(std::cell::RefCell::new(f))),
-    ]))))
+    Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+        vec![
+            Value::Array(std::rc::Rc::new(std::cell::RefCell::new(t))),
+            Value::Array(std::rc::Rc::new(std::cell::RefCell::new(f))),
+        ],
+    ))))
 }
 
 fn nf_array_random(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
@@ -3222,7 +3339,9 @@ fn nf_array_random(vm: &mut Vm, args: &[Value]) -> Result<Value, VmError> {
     let ab = a.borrow();
     if n <= 0 || ab.is_empty() {
         ch(vm, 2)?;
-        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))));
+        return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+            Vec::new(),
+        ))));
     }
     let take = (n as usize).min(ab.len());
     ch(vm, 10 + take as u64)?;
@@ -3256,10 +3375,7 @@ pub fn stdlib_global_constant_init() -> impl Iterator<Item = (&'static str, Valu
         (
             "Real",
             Value::Object(std::rc::Rc::new(std::cell::RefCell::new(vec![
-                (
-                    Value::String("MAX_VALUE".into()),
-                    Value::num_real(f64::MAX),
-                ),
+                (Value::String("MAX_VALUE".into()), Value::num_real(f64::MAX)),
                 (
                     Value::String("MIN_VALUE".into()),
                     Value::num_real(f64::from_bits(1)),
@@ -3333,6 +3449,7 @@ static STDLIB_NATIVES: &[(&str, NativeFn)] = &[
     ("min", nf_min),
     ("max", nf_max),
     ("sign", nf_sign),
+    ("signum", nf_sign),
     ("toDegrees", nf_to_degrees),
     ("toRadians", nf_to_radians),
     ("isNaN", nf_is_nan),
@@ -3352,7 +3469,9 @@ static STDLIB_NATIVES: &[(&str, NativeFn)] = &[
     ("rotateLeft", nf_rotate_left),
     ("rotateRight", nf_rotate_right),
     ("rawBits", nf_raw_bits),
+    ("realBits", nf_raw_bits),
     ("binary", nf_binary),
+    ("binString", nf_binary),
     ("hexString", nf_hex_string),
     ("isPermutation", nf_is_permutation),
     ("length", nf_length_str),

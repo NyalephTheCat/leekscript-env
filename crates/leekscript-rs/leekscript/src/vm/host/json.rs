@@ -278,7 +278,9 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         if self.peek() == Some(b']') {
             self.i += 1;
-            return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(items))));
+            return Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+                items,
+            ))));
         }
         loop {
             items.push(self.parse_value()?);
@@ -289,7 +291,9 @@ impl<'a> Parser<'a> {
                 _ => return Err(()),
             }
         }
-        Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(items))))
+        Ok(Value::Array(std::rc::Rc::new(std::cell::RefCell::new(
+            items,
+        ))))
     }
 
     fn parse_object(&mut self) -> Result<Value, ()> {
@@ -298,7 +302,9 @@ impl<'a> Parser<'a> {
         let mut pairs: Vec<(Value, Value)> = Vec::new();
         if self.peek() == Some(b'}') {
             self.i += 1;
-            return Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(pairs))));
+            return Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(
+                pairs,
+            ))));
         }
         loop {
             self.skip_ws();
@@ -316,7 +322,9 @@ impl<'a> Parser<'a> {
                 _ => return Err(()),
             }
         }
-        Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(pairs))))
+        Ok(Value::Object(std::rc::Rc::new(std::cell::RefCell::new(
+            pairs,
+        ))))
     }
 
     fn parse_number(&mut self) -> Result<Value, ()> {

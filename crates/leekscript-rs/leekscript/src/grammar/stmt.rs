@@ -1,6 +1,6 @@
 //! Statements, the start rule, blocks, class members, and control flow.
-use super::cfg_flags;
 use super::GRule;
+use super::cfg_flags;
 use crate::parse::version::{FLAG_PARSE_RECOVERY, FLAG_SIGNATURE_MODE};
 use crate::syntax::kinds::Node;
 use sipha::prelude::*;

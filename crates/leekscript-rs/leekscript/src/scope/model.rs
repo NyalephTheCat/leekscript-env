@@ -119,6 +119,8 @@ pub enum SemanticCode {
     DeprecatedCallable,
     /// Member access, indexing, or call on a value that may be null (`T?`).
     NullableChainAccess,
+    /// `return` with no value must be written as `return;`, not a bare `return` without `;`.
+    BareReturnRequiresSemicolon,
 }
 
 /// Whether a diagnostic should fail `leekscript check` or only warn.

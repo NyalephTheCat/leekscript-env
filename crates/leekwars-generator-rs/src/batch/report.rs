@@ -27,7 +27,10 @@ pub fn format_batch_human(job: &BatchJob, result: &BatchResult) -> String {
         pw_line
     );
     if let Some(base) = job.seed_schedule_base {
-        let _ = writeln!(s, "  seed_schedule_base: {base} (run i uses seed {base} + i)");
+        let _ = writeln!(
+            s,
+            "  seed_schedule_base: {base} (run i uses seed {base} + i)"
+        );
     }
     let _ = writeln!(s, "{sep}");
     let _ = writeln!(s);
@@ -56,7 +59,10 @@ pub fn format_batch_human(job: &BatchJob, result: &BatchResult) -> String {
                     cartesian.as_ref().map(|c| c.blocks.len()).unwrap_or(0)
                 );
             } else if !variants.is_empty() {
-                let _ = writeln!(s, "One row per hand-written variant (same base scenario, different overrides).");
+                let _ = writeln!(
+                    s,
+                    "One row per hand-written variant (same base scenario, different overrides)."
+                );
             } else {
                 let _ = writeln!(s, "Sweep configuration (see batch job file).");
             }

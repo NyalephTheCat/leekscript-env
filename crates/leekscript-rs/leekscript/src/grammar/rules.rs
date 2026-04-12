@@ -537,4 +537,3 @@ impl GrammarRuleName for GRule {
         self.as_str()
     }
 }
-

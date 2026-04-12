@@ -16,3 +16,6 @@
 [submodule "Leekwars-Tools"]
 	path = Leekwars-Tools
 	url = git@github.com:Bux42/Leekwars-Tools.git
+[submodule "ai"]
+	path = ai
+	url = git@github.com:NyalephTheCat/leekwars-ai.git

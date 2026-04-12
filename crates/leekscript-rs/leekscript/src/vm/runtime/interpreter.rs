@@ -20,6 +20,55 @@ pub const DEFAULT_MAX_OPERATIONS: u64 = 20_000_000;
 /// Default RAM budget in **quads** (matches Java `AI.MAX_RAM`; multiply by 8 for bytes like `System.getUsedRAM`).
 pub const DEFAULT_MAX_RAM_QUADS: u64 = 12_500_000;
 
+/// Pad missing parameters with [`Value::Null`] for [`Opcode::CallValue`] (first-class calls). Java
+/// parity: `return [f][0]()` passes 0 stack args while `f` has arity 1 → `x` is null.
+fn finalize_user_function_call_value_args(
+    meta: &FunctionEntry,
+    passed: u8,
+    mut args: Vec<Value>,
+) -> Result<Vec<Value>, VmError> {
+    if args.len() != usize::from(passed) {
+        return Err(VmError::UnexpectedEof);
+    }
+    if passed > meta.argc {
+        return Err(VmError::BadFunctionArity {
+            expected: meta.argc,
+            got: passed,
+        });
+    }
+    while args.len() < usize::from(meta.argc) {
+        args.push(Value::Null);
+    }
+    Ok(args)
+}
+
+/// [`Opcode::CallFunction`] — aligned with compile-time checks: too few / too many args error.
+fn finalize_op_call_function_args(
+    meta: &FunctionEntry,
+    passed: u8,
+    mut args: Vec<Value>,
+) -> Result<Vec<Value>, VmError> {
+    if args.len() != usize::from(passed) {
+        return Err(VmError::UnexpectedEof);
+    }
+    if passed > meta.argc {
+        return Err(VmError::BadFunctionArity {
+            expected: meta.argc,
+            got: passed,
+        });
+    }
+    if passed < meta.required_argc {
+        return Err(VmError::BadFunctionArity {
+            expected: meta.required_argc,
+            got: passed,
+        });
+    }
+    while args.len() < usize::from(meta.argc) {
+        args.push(Value::Null);
+    }
+    Ok(args)
+}
+
 /// Host-provided native (`System.debug`, fight APIs, …). Receives arguments in call order (first
 /// parameter is `args[0]`). Charge work with [`Vm::add_operations`](Vm::add_operations) to mirror
 /// Java `LeekFunctions.getOperations()` and runtime `ai.ops(...)` in `*Class` / `ArrayLeekValue`.
@@ -88,6 +137,7 @@ pub static DISPATCH: [OpHandler; 256] = {
     table[Opcode::Shl as usize] = op_shl;
     table[Opcode::Shr as usize] = op_shr;
     table[Opcode::UShr as usize] = op_ushr;
+    table[Opcode::Pow as usize] = op_pow;
     table
 };
 
@@ -95,7 +145,6 @@ pub static DISPATCH: [OpHandler; 256] = {
 struct CallFrame {
     base: u16,
     saved_frame: Vec<Value>,
-    saved_captures: Vec<(u16, Value)>,
 }
 
 /// LeekScript bytecode interpreter (stack machine).
@@ -256,13 +305,8 @@ impl Vm {
                     .get(fid as usize)
                     .cloned()
                     .ok_or(VmError::BadFunctionIndex(fid))?;
-                let argc = u8::try_from(args.len()).map_err(|_| VmError::UnexpectedEof)?;
-                if argc != meta.argc {
-                    return Err(VmError::BadFunctionArity {
-                        expected: meta.argc,
-                        got: argc,
-                    });
-                }
+                let passed = u8::try_from(args.len()).map_err(|_| VmError::UnexpectedEof)?;
+                let args = finalize_user_function_call_value_args(&meta, passed, args)?;
                 let base = usize::from(meta.slot_base);
                 let total = usize::from(meta.slot_count);
                 if base.saturating_add(total) > self.locals.len() {
@@ -276,7 +320,6 @@ impl Vm {
                 self.call_frames.push(CallFrame {
                     base: meta.slot_base,
                     saved_frame: saved,
-                    saved_captures: Vec::new(),
                 });
                 self.return_pcs.push(self.pc);
                 for (i, v) in args.into_iter().enumerate() {
@@ -295,13 +338,8 @@ impl Vm {
                     .get(fid as usize)
                     .cloned()
                     .ok_or(VmError::BadFunctionIndex(fid))?;
-                let argc = u8::try_from(args.len()).map_err(|_| VmError::UnexpectedEof)?;
-                if argc != meta.argc {
-                    return Err(VmError::BadFunctionArity {
-                        expected: meta.argc,
-                        got: argc,
-                    });
-                }
+                let passed = u8::try_from(args.len()).map_err(|_| VmError::UnexpectedEof)?;
+                let args = finalize_user_function_call_value_args(&meta, passed, args)?;
                 let base = usize::from(meta.slot_base);
                 let total = usize::from(meta.slot_count);
                 if base.saturating_add(total) > self.locals.len() {
@@ -311,21 +349,16 @@ impl Vm {
                             .saturating_sub(1),
                     ));
                 }
-                let mut saved_captures: Vec<(u16, Value)> = Vec::with_capacity(captures.len());
+                // Re-apply captured values at call time: outer stack frames may have been restored
+                // after the closure was created (e.g. returned nested functions). Do not restore
+                // these slots on return — that would undo assignments to shared bindings.
                 for (slot, v) in &captures {
-                    let cur = self
-                        .locals
-                        .get(usize::from(*slot))
-                        .cloned()
-                        .ok_or(VmError::BadLocal(*slot))?;
-                    saved_captures.push((*slot, cur));
                     store_local(self, *slot, v.clone())?;
                 }
                 let saved = self.locals[base..base.saturating_add(total)].to_vec();
                 self.call_frames.push(CallFrame {
                     base: meta.slot_base,
                     saved_frame: saved,
-                    saved_captures,
                 });
                 self.return_pcs.push(self.pc);
                 for (i, v) in args.into_iter().enumerate() {
@@ -603,6 +636,29 @@ fn op_mul(vm: &mut Vm) -> Result<(), VmError> {
     Ok(())
 }
 
+/// `a ** b` — Java keeps integer results for small integer bases/exponents; native `pow()` stays `double`.
+fn op_pow(vm: &mut Vm) -> Result<(), VmError> {
+    vm.charge_ops(140)?;
+    let b = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let a = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
+    let out = match (a, b) {
+        (NumberBits::Int(bi), NumberBits::Int(ei)) if ei >= 0 => {
+            if let Ok(exp) = u32::try_from(ei) {
+                if let Some(r) = bi.checked_pow(exp) {
+                    Value::Number(NumberBits::Int(r))
+                } else {
+                    Value::num_real((bi as f64).powf(ei as f64))
+                }
+            } else {
+                Value::num_real((bi as f64).powf(ei as f64))
+            }
+        }
+        _ => Value::num_real(a.as_f64().powf(b.as_f64())),
+    };
+    vm.push_stack(out)?;
+    Ok(())
+}
+
 fn op_div(vm: &mut Vm) -> Result<(), VmError> {
     let b = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
     let a = number_bits_or_coerce(vm.pop_stack()?).ok_or(VmError::ExpectedNumber)?;
@@ -636,10 +692,12 @@ fn op_mod(vm: &mut Vm) -> Result<(), VmError> {
 }
 
 fn op_neg(vm: &mut Vm) -> Result<(), VmError> {
-    let x = vm
-        .pop_stack()?
-        .number_bits()
-        .ok_or(VmError::ExpectedNumber)?;
+    let v = vm.pop_stack()?;
+    if matches!(v, Value::Null) {
+        vm.push_stack(Value::num_int(0))?;
+        return Ok(());
+    }
+    let x = v.number_bits().ok_or(VmError::ExpectedNumber)?;
     vm.push_stack(Value::Number(x.neg()))?;
     Ok(())
 }
@@ -749,9 +807,6 @@ fn op_return(vm: &mut Vm) -> Result<(), VmError> {
     let ret = vm.pop_stack()?;
     if let Some(ret_pc) = vm.return_pcs.pop() {
         let frame = vm.call_frames.pop().ok_or(VmError::StackUnderflow)?;
-        for (slot, v) in frame.saved_captures {
-            store_local(vm, slot, v)?;
-        }
         for (i, v) in frame.saved_frame.into_iter().enumerate() {
             let li = frame.base.saturating_add(i as u16);
             store_local(vm, li, v)?;
@@ -1408,18 +1463,12 @@ fn op_map_entry_at(vm: &mut Vm) -> Result<(), VmError> {
 
 fn op_call_function(vm: &mut Vm) -> Result<(), VmError> {
     let fid = vm.read_u16()?;
-    let argc = vm.read_u8()?;
+    let passed = vm.read_u8()?;
     let meta = vm
         .functions
         .get(fid as usize)
         .cloned()
         .ok_or(VmError::BadFunctionIndex(fid))?;
-    if argc != meta.argc {
-        return Err(VmError::BadFunctionArity {
-            expected: meta.argc,
-            got: argc,
-        });
-    }
     let base = usize::from(meta.slot_base);
     let total = usize::from(meta.slot_count);
     if base.saturating_add(total) > vm.locals.len() {
@@ -1429,22 +1478,22 @@ fn op_call_function(vm: &mut Vm) -> Result<(), VmError> {
                 .saturating_sub(1),
         ));
     }
-    let mut args = vec![Value::Null; argc as usize];
-    for slot in (0..argc as usize).rev() {
+    let mut args = vec![Value::Null; passed as usize];
+    for slot in (0..passed as usize).rev() {
         args[slot] = vm.pop_stack()?;
     }
+    let args = finalize_op_call_function_args(&meta, passed, args)?;
     let saved = vm.locals[base..base.saturating_add(total)].to_vec();
     vm.call_frames.push(CallFrame {
         base: meta.slot_base,
         saved_frame: saved,
-        saved_captures: Vec::new(),
     });
     vm.return_pcs.push(vm.pc);
     for (i, v) in args.into_iter().enumerate() {
         let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
         store_local(vm, li, v)?;
     }
-    for i in (argc as usize)..total {
+    for i in (meta.argc as usize)..total {
         let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
         store_local(vm, li, Value::Null)?;
     }
@@ -1453,9 +1502,9 @@ fn op_call_function(vm: &mut Vm) -> Result<(), VmError> {
 }
 
 fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
-    let argc = vm.read_u8()?;
-    let mut args = vec![Value::Null; argc as usize];
-    for slot in (0..argc as usize).rev() {
+    let passed = vm.read_u8()?;
+    let mut args = vec![Value::Null; passed as usize];
+    for slot in (0..passed as usize).rev() {
         args[slot] = vm.pop_stack()?;
     }
     let callee = vm.pop_stack()?;
@@ -1467,12 +1516,7 @@ fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
                 .get(fid as usize)
                 .cloned()
                 .ok_or(VmError::BadFunctionIndex(fid))?;
-            if argc != meta.argc {
-                return Err(VmError::BadFunctionArity {
-                    expected: meta.argc,
-                    got: argc,
-                });
-            }
+            let args = finalize_user_function_call_value_args(&meta, passed, args)?;
             let base = usize::from(meta.slot_base);
             let total = usize::from(meta.slot_count);
             if base.saturating_add(total) > vm.locals.len() {
@@ -1486,14 +1530,13 @@ fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
             vm.call_frames.push(CallFrame {
                 base: meta.slot_base,
                 saved_frame: saved,
-                saved_captures: Vec::new(),
             });
             vm.return_pcs.push(vm.pc);
             for (i, v) in args.into_iter().enumerate() {
                 let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
                 store_local(vm, li, v)?;
             }
-            for i in (argc as usize)..total {
+            for i in (meta.argc as usize)..total {
                 let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
                 store_local(vm, li, Value::Null)?;
             }
@@ -1506,12 +1549,7 @@ fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
                 .get(fid as usize)
                 .cloned()
                 .ok_or(VmError::BadFunctionIndex(fid))?;
-            if argc != meta.argc {
-                return Err(VmError::BadFunctionArity {
-                    expected: meta.argc,
-                    got: argc,
-                });
-            }
+            let args = finalize_user_function_call_value_args(&meta, passed, args)?;
             let base = usize::from(meta.slot_base);
             let total = usize::from(meta.slot_count);
             if base.saturating_add(total) > vm.locals.len() {
@@ -1521,28 +1559,20 @@ fn op_call_value(vm: &mut Vm) -> Result<(), VmError> {
                         .saturating_sub(1),
                 ));
             }
-            let mut saved_captures: Vec<(u16, Value)> = Vec::with_capacity(captures.len());
             for (slot, v) in &captures {
-                let cur = vm
-                    .locals
-                    .get(usize::from(*slot))
-                    .cloned()
-                    .ok_or(VmError::BadLocal(*slot))?;
-                saved_captures.push((*slot, cur));
                 store_local(vm, *slot, v.clone())?;
             }
             let saved = vm.locals[base..base.saturating_add(total)].to_vec();
             vm.call_frames.push(CallFrame {
                 base: meta.slot_base,
                 saved_frame: saved,
-                saved_captures,
             });
             vm.return_pcs.push(vm.pc);
             for (i, v) in args.into_iter().enumerate() {
                 let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
                 store_local(vm, li, v)?;
             }
-            for i in (argc as usize)..total {
+            for i in (meta.argc as usize)..total {
                 let li = u16::try_from(base + i).map_err(|_| VmError::UnexpectedEof)?;
                 store_local(vm, li, Value::Null)?;
             }

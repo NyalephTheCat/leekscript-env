@@ -41,4 +41,3 @@ k = "v"
         assert_eq!(j["tbl"]["k"], "v");
     }
 }
-

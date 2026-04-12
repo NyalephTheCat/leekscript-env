@@ -9,7 +9,8 @@
 //! Top-level [`include`] paths are resolved like the reference compiler’s `Folder.resolve`; use
 //! [`load_project_with_includes`] to parse an entry file and all transitively included sources.
 //! [`merge_included_sources_to_single_file`] expands those includes into one source string with
-//! per-file metadata comments and skips duplicate includes (diamond graphs).
+//! per-file metadata comments and skips duplicate includes (diamond graphs); it also rewrites bare
+//! `return` (no `;`) to `return;` in the merged text.
 //! Inclusion depth is capped by [`IncludeLimits`] in [`include`] (default matches the reference implementation).
 //!
 //! ## Scope extents
@@ -56,7 +57,7 @@ pub mod visit;
 pub mod vm;
 
 pub use document::{DocEditError, LeekDoc};
-pub use grammar::{COMPILE_TIME_GRAMMAR, GRule, GRAMMAR_SOURCE_FINGERPRINT};
+pub use grammar::{COMPILE_TIME_GRAMMAR, GRAMMAR_SOURCE_FINGERPRINT, GRule};
 pub use include::{
     IncludeLimits, IncludeLoadError, LoadedProject, LoadedSourceFile, MergeIncludesError,
     MergedCheckPrepError, MergedCheckUnit, MergedSourceMapping, MergedSpanMap, PreludeBuildError,

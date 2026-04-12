@@ -36,8 +36,8 @@
 //! op_shl << (custom)   op_bit*   eq =   || && === !== == != <= >= < >  (and word or/and)
 //! += -= *= /= %= ++ -- + - * / % !  (custom minus/bang)
 //! ```
-use super::cfg_flags;
 use super::GRule;
+use super::cfg_flags;
 use super::lexer_keyword_batch;
 use super::lexer_rules;
 use crate::parse::version::{

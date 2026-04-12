@@ -39,7 +39,10 @@ pub struct FightSnapshot {
 }
 
 /// Replay `fight.actions` up to `action_index` (inclusive) and return a reconstructed state.
-pub fn snapshot_at_action_index(outcome_fight: &Value, action_index: usize) -> miette::Result<FightSnapshot> {
+pub fn snapshot_at_action_index(
+    outcome_fight: &Value,
+    action_index: usize,
+) -> miette::Result<FightSnapshot> {
     let leeks = outcome_fight
         .get("leeks")
         .and_then(|v| v.as_array())
@@ -53,7 +56,9 @@ pub fn snapshot_at_action_index(outcome_fight: &Value, action_index: usize) -> m
     for l in leeks {
         let Some(o) = l.as_object() else { continue };
         let id = o.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
-        if id == 0 { continue; }
+        if id == 0 {
+            continue;
+        }
         let team = o.get("team").and_then(|v| v.as_i64()).unwrap_or(0);
         let cell = o.get("cellPos").and_then(|v| v.as_i64()).unwrap_or(0);
         let life = o.get("life").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -86,7 +91,9 @@ pub fn snapshot_at_action_index(outcome_fight: &Value, action_index: usize) -> m
     for i in 0..=max_i {
         let a = &actions[i];
         let Some(arr) = a.as_array() else { continue };
-        let Some(op) = arr.get(0).and_then(|v| v.as_i64()) else { continue };
+        let Some(op) = arr.get(0).and_then(|v| v.as_i64()) else {
+            continue;
+        };
         match op {
             6 => {
                 // NEW_TURN [6, turn]
@@ -249,7 +256,11 @@ pub fn snapshot_at_action_index(outcome_fight: &Value, action_index: usize) -> m
                 let value = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0);
                 if instance_id != 0 {
                     for e in snap.entities.values_mut() {
-                        if let Some(ef) = e.effects.iter_mut().find(|ef| ef.instance_id == instance_id) {
+                        if let Some(ef) = e
+                            .effects
+                            .iter_mut()
+                            .find(|ef| ef.instance_id == instance_id)
+                        {
                             ef.value = value;
                         }
                     }
@@ -261,7 +272,11 @@ pub fn snapshot_at_action_index(outcome_fight: &Value, action_index: usize) -> m
                 let delta = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0);
                 if instance_id != 0 && delta != 0 {
                     for e in snap.entities.values_mut() {
-                        if let Some(ef) = e.effects.iter_mut().find(|ef| ef.instance_id == instance_id) {
+                        if let Some(ef) = e
+                            .effects
+                            .iter_mut()
+                            .find(|ef| ef.instance_id == instance_id)
+                        {
                             ef.value = ef.value.saturating_add(delta);
                         }
                     }
@@ -328,4 +343,3 @@ mod tests {
         assert!(!snap.dead.contains(&1));
     }
 }
-

@@ -24,7 +24,12 @@ fn collect_raw_doxygen_body(node: &SyntaxNode) -> Option<String> {
     let mut toks: Vec<SyntaxToken> = node
         .descendant_tokens()
         .into_iter()
-        .filter(|t| matches!(t.kind_as::<Lex>(), Some(Lex::LineComment | Lex::BlockComment)))
+        .filter(|t| {
+            matches!(
+                t.kind_as::<Lex>(),
+                Some(Lex::LineComment | Lex::BlockComment)
+            )
+        })
         .filter(|t| {
             let r = t.text_range();
             r.start >= node_start && r.end <= cutoff

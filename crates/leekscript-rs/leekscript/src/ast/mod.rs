@@ -13,8 +13,8 @@ pub mod types;
 pub use expr::{
     AnonFunctionExpr, ArrayExpr, BinaryExpr, BracketMapExpr, BuiltinStringifyExpr,
     BuiltinTypeNameExpr, CallExpr, CastExpr, ClassRefExpr, Expr, ExprRoot, IfExpr, IndexExpr,
-    IntervalExpr, LambdaExpr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, SetExpr, SuperExpr,
-    TernaryExpr, UnaryExpr, RefExpr,
+    IntervalExpr, LambdaExpr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, RefExpr, SetExpr,
+    SuperExpr, TernaryExpr, UnaryExpr,
 };
 pub use literal::LitStr;
 pub use root::Root;

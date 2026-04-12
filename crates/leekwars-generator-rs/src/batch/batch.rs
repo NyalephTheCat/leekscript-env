@@ -215,8 +215,8 @@ impl BatchRunner {
         if ext == "toml" {
             #[cfg(feature = "toml")]
             {
-                let tv: toml::Value =
-                    toml::from_str(&src).map_err(|e| miette::miette!("failed to parse batch job toml: {e}"))?;
+                let tv: toml::Value = toml::from_str(&src)
+                    .map_err(|e| miette::miette!("failed to parse batch job toml: {e}"))?;
                 let jv = crate::util::toml_bridge::toml_to_json(&tv);
                 return serde_json::from_value::<BatchJob>(jv)
                     .map_err(|e| miette::miette!("failed to decode batch job from toml: {e}"));
@@ -249,16 +249,18 @@ impl BatchRunner {
 
     pub fn run_to_jsonl(&self, job: &BatchJob, out: impl AsRef<Path>) -> miette::Result<()> {
         let out = out.as_ref();
-        let f = std::fs::File::create(out).map_err(|e| miette::miette!("failed to create `{}`: {e}", out.display()))?;
+        let f = std::fs::File::create(out)
+            .map_err(|e| miette::miette!("failed to create `{}`: {e}", out.display()))?;
         let mut w = std::io::BufWriter::new(f);
-        let write_outcome = |w: &mut std::io::BufWriter<std::fs::File>, o: &Outcome| -> miette::Result<()> {
-            let line = serde_json::to_string(o).unwrap_or_else(|_| "{}".into());
-            w.write_all(line.as_bytes())
-                .map_err(|e| miette::miette!("failed to write `{}`: {e}", out.display()))?;
-            w.write_all(b"\n")
-                .map_err(|e| miette::miette!("failed to write `{}`: {e}", out.display()))?;
-            Ok(())
-        };
+        let write_outcome =
+            |w: &mut std::io::BufWriter<std::fs::File>, o: &Outcome| -> miette::Result<()> {
+                let line = serde_json::to_string(o).unwrap_or_else(|_| "{}".into());
+                w.write_all(line.as_bytes())
+                    .map_err(|e| miette::miette!("failed to write `{}`: {e}", out.display()))?;
+                w.write_all(b"\n")
+                    .map_err(|e| miette::miette!("failed to write `{}`: {e}", out.display()))?;
+                Ok(())
+            };
 
         let plans = expand_job(job)?;
         let outcomes = run_plans_for_job(&self.generator, job, &plans, self.show_progress)?;
@@ -354,7 +356,12 @@ fn expand_entity_cartesian_block_count(block: &EntityCartesianBlock) -> miette::
         .and_then(|x| x.checked_mul(c_n))
         .and_then(|x| x.checked_mul(lv_n))
         .and_then(|x| x.checked_mul(cell_n))
-        .ok_or_else(|| miette::miette!("cartesian combination count overflow for entity {}", block.entity_id))
+        .ok_or_else(|| {
+            miette::miette!(
+                "cartesian combination count overflow for entity {}",
+                block.entity_id
+            )
+        })
 }
 
 fn cartesian_extra_maps(axes: &BTreeMap<String, Vec<Value>>) -> Vec<BTreeMap<String, Value>> {
@@ -378,7 +385,9 @@ fn cartesian_extra_maps(axes: &BTreeMap<String, Vec<Value>>) -> Vec<BTreeMap<Str
     acc
 }
 
-fn expand_entity_cartesian_block(block: &EntityCartesianBlock) -> miette::Result<Vec<EntityOverride>> {
+fn expand_entity_cartesian_block(
+    block: &EntityCartesianBlock,
+) -> miette::Result<Vec<EntityOverride>> {
     for (k, vals) in &block.extra_axes {
         if vals.is_empty() {
             return Err(miette::miette!(
@@ -453,7 +462,9 @@ fn expand_entity_cartesian_block(block: &EntityCartesianBlock) -> miette::Result
     Ok(out)
 }
 
-fn cartesian_merge_override_rows(blocks: Vec<Vec<EntityOverride>>) -> miette::Result<Vec<Vec<EntityOverride>>> {
+fn cartesian_merge_override_rows(
+    blocks: Vec<Vec<EntityOverride>>,
+) -> miette::Result<Vec<Vec<EntityOverride>>> {
     let mut rows: Vec<Vec<EntityOverride>> = vec![vec![]];
     for choices in blocks {
         if choices.is_empty() {
@@ -530,9 +541,7 @@ fn expand_job(job: &BatchJob) -> miette::Result<Vec<RunPlan>> {
         } => {
             let (base, scenario_dir, generator_root) = load_scenario_from_file(base_scenario)?;
             let has_variants = !variants.is_empty();
-            let has_cart = cartesian
-                .as_ref()
-                .is_some_and(|c| !c.blocks.is_empty());
+            let has_cart = cartesian.as_ref().is_some_and(|c| !c.blocks.is_empty());
             if has_variants && has_cart {
                 return Err(miette::miette!(
                     "Sweep mode: set either `variants` or `cartesian`, not both (remove one)"
@@ -556,10 +565,7 @@ fn expand_job(job: &BatchJob) -> miette::Result<Vec<RunPlan>> {
                 for (idx, var) in variants.iter().enumerate() {
                     let mut scenario = base.clone();
                     apply_overrides(&mut scenario, &var.overrides);
-                    let label = var
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| format!("variant_{idx}"));
+                    let label = var.name.clone().unwrap_or_else(|| format!("variant_{idx}"));
                     out.push(RunPlan {
                         scenario,
                         scenario_dir: scenario_dir.clone(),
@@ -583,10 +589,7 @@ fn expand_job(job: &BatchJob) -> miette::Result<Vec<RunPlan>> {
                 let mut scenario = base.clone();
                 apply_overrides(&mut scenario, hero_overrides);
                 apply_overrides(&mut scenario, &enemy.overrides);
-                let label = enemy
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| format!("enemy_{idx}"));
+                let label = enemy.name.clone().unwrap_or_else(|| format!("enemy_{idx}"));
                 out.push(RunPlan {
                     scenario,
                     scenario_dir: scenario_dir.clone(),
@@ -617,14 +620,22 @@ fn expand_job(job: &BatchJob) -> miette::Result<Vec<RunPlan>> {
                         apply_overrides(
                             &mut scenario,
                             &[
-                                entity_override_ai_only(a_slot, competitors[i].ai.to_string_lossy().to_string()),
-                                entity_override_ai_only(b_slot, competitors[j].ai.to_string_lossy().to_string()),
+                                entity_override_ai_only(
+                                    a_slot,
+                                    competitors[i].ai.to_string_lossy().to_string(),
+                                ),
+                                entity_override_ai_only(
+                                    b_slot,
+                                    competitors[j].ai.to_string_lossy().to_string(),
+                                ),
                             ],
                         );
                         let mut label = if reps > 1 {
                             format!(
                                 "{} vs {} (#{})",
-                                competitors[i].name, competitors[j].name, r + 1
+                                competitors[i].name,
+                                competitors[j].name,
+                                r + 1
                             )
                         } else {
                             format!("{} vs {}", competitors[i].name, competitors[j].name)
@@ -641,17 +652,28 @@ fn expand_job(job: &BatchJob) -> miette::Result<Vec<RunPlan>> {
                             apply_overrides(
                                 &mut scenario,
                                 &[
-                                    entity_override_ai_only(a_slot, competitors[j].ai.to_string_lossy().to_string()),
-                                    entity_override_ai_only(b_slot, competitors[i].ai.to_string_lossy().to_string()),
+                                    entity_override_ai_only(
+                                        a_slot,
+                                        competitors[j].ai.to_string_lossy().to_string(),
+                                    ),
+                                    entity_override_ai_only(
+                                        b_slot,
+                                        competitors[i].ai.to_string_lossy().to_string(),
+                                    ),
                                 ],
                             );
                             label = if reps > 1 {
                                 format!(
                                     "{} vs {} (#{}, swap sides)",
-                                    competitors[i].name, competitors[j].name, r + 1
+                                    competitors[i].name,
+                                    competitors[j].name,
+                                    r + 1
                                 )
                             } else {
-                                format!("{} vs {} (swap sides)", competitors[i].name, competitors[j].name)
+                                format!(
+                                    "{} vs {} (swap sides)",
+                                    competitors[i].name, competitors[j].name
+                                )
                             };
                             out.push(RunPlan {
                                 scenario,
@@ -882,14 +904,16 @@ fn load_scenario_from_file(path: &Path) -> miette::Result<(Scenario, PathBuf, Pa
         .unwrap_or("")
         .to_ascii_lowercase();
     let scenario: Scenario = if ext == "json" || ext.is_empty() {
-        serde_json::from_str(&src).map_err(|e| miette::miette!("failed to parse scenario json: {e}"))?
+        serde_json::from_str(&src)
+            .map_err(|e| miette::miette!("failed to parse scenario json: {e}"))?
     } else if ext == "toml" {
         #[cfg(feature = "toml")]
         {
-            let tv: toml::Value =
-                toml::from_str(&src).map_err(|e| miette::miette!("failed to parse scenario toml: {e}"))?;
+            let tv: toml::Value = toml::from_str(&src)
+                .map_err(|e| miette::miette!("failed to parse scenario toml: {e}"))?;
             let jv = crate::util::toml_bridge::toml_to_json(&tv);
-            serde_json::from_value(jv).map_err(|e| miette::miette!("failed to decode scenario from toml: {e}"))?
+            serde_json::from_value(jv)
+                .map_err(|e| miette::miette!("failed to decode scenario from toml: {e}"))?
         }
         #[cfg(not(feature = "toml"))]
         {
@@ -935,7 +959,9 @@ mod sweep_cartesian_tests {
             blocks: vec![
                 EntityCartesianBlock {
                     entity_id: 1,
-                    extra_axes: [("life".into(), vec![json!(1), json!(2)])].into_iter().collect(),
+                    extra_axes: [("life".into(), vec![json!(1), json!(2)])]
+                        .into_iter()
+                        .collect(),
                     weapons_axis: vec![],
                     chips_axis: vec![],
                     level_axis: vec![],
@@ -943,7 +969,9 @@ mod sweep_cartesian_tests {
                 },
                 EntityCartesianBlock {
                     entity_id: 2,
-                    extra_axes: [("life".into(), vec![json!(9), json!(8), json!(7)])].into_iter().collect(),
+                    extra_axes: [("life".into(), vec![json!(9), json!(8), json!(7)])]
+                        .into_iter()
+                        .collect(),
                     weapons_axis: vec![],
                     chips_axis: vec![],
                     level_axis: vec![],
@@ -962,7 +990,9 @@ mod sweep_cartesian_tests {
             name_prefix: None,
             blocks: vec![EntityCartesianBlock {
                 entity_id: 12,
-                extra_axes: [("tp".into(), vec![json!(10), json!(20)])].into_iter().collect(),
+                extra_axes: [("tp".into(), vec![json!(10), json!(20)])]
+                    .into_iter()
+                    .collect(),
                 weapons_axis: vec![vec![37], vec![37, 47]],
                 chips_axis: vec![],
                 level_axis: vec![],

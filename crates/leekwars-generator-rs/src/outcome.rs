@@ -25,8 +25,10 @@ impl Outcome {
         }
     }
 
-    pub fn snapshot_at(&self, action_index: usize) -> miette::Result<crate::snapshot::FightSnapshot> {
+    pub fn snapshot_at(
+        &self,
+        action_index: usize,
+    ) -> miette::Result<crate::snapshot::FightSnapshot> {
         crate::snapshot::snapshot_at_action_index(&self.fight, action_index)
     }
 }
-

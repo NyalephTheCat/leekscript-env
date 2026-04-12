@@ -4,13 +4,20 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use leekscript::include::{infer_include_project_root, prepend_signatures_to_merged, MergedSourceMapping};
+use leekscript::include::{
+    MergedSourceMapping, infer_include_project_root, prepend_signatures_to_merged,
+};
 use leekscript::{
-    language_options_with_source_directives, parse_doc, parse_signature_doc, LanguageOptions,
-    SemanticSeverity, prepare_merged_check_unit,
+    LanguageOptions, SemanticCode, SemanticSeverity, language_options_with_source_directives,
+    parse_doc, parse_signature_doc, prepare_merged_check_unit,
 };
 
 use crate::report;
+
+#[inline]
+fn semantic_diagnostic_fails_check(d: &leekscript::SemanticDiagnostic) -> bool {
+    d.severity == SemanticSeverity::Error || d.code == SemanticCode::BareReturnRequiresSemicolon
+}
 
 pub(crate) fn cmd_check(
     lang: LanguageOptions,
@@ -50,7 +57,7 @@ pub(crate) fn cmd_check(
                         let analysis =
                             leekscript::run_semantic_analysis(doc.root(), resolved.version);
                         for d in &analysis.diagnostics {
-                            if d.severity == SemanticSeverity::Error {
+                            if semantic_diagnostic_fails_check(d) {
                                 ok = false;
                             }
                             report::emit(report::check_diagnostic(
@@ -83,10 +90,9 @@ pub(crate) fn cmd_check(
             Ok(doc) => {
                 if !parse_only {
                     let resolved = language_options_with_source_directives(&src, lang);
-                    let analysis =
-                        leekscript::run_semantic_analysis(doc.root(), resolved.version);
+                    let analysis = leekscript::run_semantic_analysis(doc.root(), resolved.version);
                     for d in &analysis.diagnostics {
-                        if d.severity == SemanticSeverity::Error {
+                        if semantic_diagnostic_fails_check(d) {
                             ok = false;
                         }
                         report::emit(report::check_diagnostic(
@@ -163,7 +169,7 @@ pub(crate) fn cmd_check(
                     let analysis =
                         leekscript::run_semantic_analysis(doc.root(), prep.resolved.version);
                     for d in &analysis.diagnostics {
-                        if d.severity == SemanticSeverity::Error {
+                        if semantic_diagnostic_fails_check(d) {
                             ok = false;
                         }
                         report::emit(report::check_diagnostic(

@@ -15,6 +15,31 @@ fn tmp_merge_root(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn merge_inserts_semicolon_after_bare_return() {
+    let root = tmp_merge_root("bare_return");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("main.leek"),
+        "function f() {\n  return\n}\nfunction g() {\n  return 1\n}\n",
+    )
+    .unwrap();
+
+    let p = load_project_with_includes(&root, Path::new("main.leek"), Version::V4).unwrap();
+    let s = merge_included_sources_to_single_file(&root, &p).unwrap();
+    assert!(
+        s.contains("return;") && s.contains("return 1"),
+        "bare return should become return;, value return unchanged: {s:?}"
+    );
+    assert_eq!(
+        s.matches("return;").count(),
+        1,
+        "only the bare return should get `;`: {s:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn merge_triple_include_same_file_once() {
     let root = tmp_merge_root("triple");
     let _ = std::fs::remove_dir_all(&root);

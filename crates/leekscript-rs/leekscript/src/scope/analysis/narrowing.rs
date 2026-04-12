@@ -79,7 +79,8 @@ fn stmt_is_direct_block_child_statement(node: &SyntaxNode, a: &Analyzer) -> bool
         let Some(parent) = a.syntax_parent_of(node) else {
             return false;
         };
-        parent.kind_as::<Node>() == Some(Node::Block) && !is_class_body_block_for_narrowing(a, &parent)
+        parent.kind_as::<Node>() == Some(Node::Block)
+            && !is_class_body_block_for_narrowing(a, &parent)
     })
 }
 
@@ -225,11 +226,9 @@ pub(crate) fn accumulated_narrowing_maps(
     node: &SyntaxNode,
 ) -> HashMap<SymbolId, LeekTy> {
     let mut acc = HashMap::new();
-    for anc in
-        a.syntax_node_stack.iter().rev().skip(1).filter(|n| {
-            n.kind_as::<Node>() == Some(Node::IfStmt) || n.kind_as::<Node>() == Some(Node::WhileStmt)
-        })
-    {
+    for anc in a.syntax_node_stack.iter().rev().skip(1).filter(|n| {
+        n.kind_as::<Node>() == Some(Node::IfStmt) || n.kind_as::<Node>() == Some(Node::WhileStmt)
+    }) {
         if anc.kind_as::<Node>() == Some(Node::IfStmt) {
             let Some(ifs) = IfStmt::cast(anc.clone()) else {
                 continue;

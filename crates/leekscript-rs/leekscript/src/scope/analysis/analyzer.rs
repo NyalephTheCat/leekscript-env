@@ -6,7 +6,7 @@ use sipha::tree::walk::WalkOptions;
 
 use crate::Span;
 use crate::ast::types::TypeExpr;
-use crate::ast::{ClassMember, ForeachStmt, VarDecl};
+use crate::ast::{ClassMember, ForeachStmt, ReturnStmt, VarDecl};
 use crate::parse::Version;
 use crate::scope::leek_ty::LeekTy;
 use crate::scope::model::{
@@ -226,6 +226,7 @@ impl Analyzer {
             && resolved.is_none()
             && class_known
             && !pseudo_member
+            && name.as_str() != "name"
         {
             self.diagnostics.push(SemanticDiagnostic {
                 severity: SemanticSeverity::Error,
@@ -326,6 +327,40 @@ impl Analyzer {
             None,
             false,
         ))
+    }
+
+    /// `return` without an expression must be `return;` — a bare `return` with no `;` is rejected.
+    pub(crate) fn check_bare_return_semicolon(&mut self, node: &SyntaxNode) {
+        if self.phase != AnalysisPhase::ResolveAndInfer {
+            return;
+        }
+        if node.kind_as::<Node>() != Some(Node::ReturnStmt) {
+            return;
+        }
+        let Some(rs) = ReturnStmt::cast(node.clone()) else {
+            return;
+        };
+        if rs.expr().is_some() {
+            return;
+        }
+        if node
+            .non_trivia_tokens()
+            .any(|t| t.kind_as::<Lex>() == Some(Lex::Semi))
+        {
+            return;
+        }
+        let span = node
+            .non_trivia_tokens()
+            .find(|t| t.kind_as::<Lex>() == Some(Lex::ReturnKw))
+            .map(|t| t.text_range())
+            .unwrap_or_else(|| node.text_range());
+        self.diagnostics.push(SemanticDiagnostic {
+            severity: SemanticSeverity::Warning,
+            code: SemanticCode::BareReturnRequiresSemicolon,
+            message: "`return` with no value must be written as `return;`".to_string(),
+            span,
+            related_span: None,
+        });
     }
 
     pub(crate) fn infer_expr_node(&mut self, node: &SyntaxNode) {

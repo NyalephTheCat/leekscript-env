@@ -1,0 +1,7 @@
+# Workspace rustflags (merged with ~/.cargo and RUSTFLAGS). Pair with ~/.cargo `linker = "gcc"` or
+# `export RUSTFLAGS='-C linker=gcc -C link-arg=-fuse-ld=bfd'` if the Nix gcc-wrapper is restored.
+[build]
+rustflags = ["-C", "link-arg=-fuse-ld=bfd"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=bfd"]

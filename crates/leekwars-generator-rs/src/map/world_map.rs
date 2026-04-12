@@ -363,7 +363,11 @@ impl WorldMap {
             }
             nb += 1;
         }
-        out.filter(|id| self.get_cell(*id).map(|c| c.available(occupied)).unwrap_or(false))
+        out.filter(|id| {
+            self.get_cell(*id)
+                .map(|c| c.available(occupied))
+                .unwrap_or(false)
+        })
     }
 
     #[must_use]
@@ -393,7 +397,11 @@ impl WorldMap {
             }
             nb += 1;
         }
-        out.filter(|id| self.get_cell(*id).map(|c| c.available(occupied)).unwrap_or(false))
+        out.filter(|id| {
+            self.get_cell(*id)
+                .map(|c| c.available(occupied))
+                .unwrap_or(false)
+        })
     }
 
     #[must_use]
@@ -651,4 +659,3 @@ mod tests {
         assert_eq!(placements.len(), 4);
     }
 }
-

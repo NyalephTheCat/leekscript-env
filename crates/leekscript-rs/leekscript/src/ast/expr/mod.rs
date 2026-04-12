@@ -6,8 +6,8 @@ mod root;
 pub use nodes::{
     AnonFunctionExpr, ArrayExpr, BinaryExpr, BracketMapExpr, BuiltinStringifyExpr,
     BuiltinTypeNameExpr, CallExpr, CastExpr, ClassRefExpr, IfExpr, IndexExpr, IntervalExpr,
-    LambdaExpr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, SetExpr, SuperExpr, TernaryExpr,
-    UnaryExpr, RefExpr,
+    LambdaExpr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, RefExpr, SetExpr, SuperExpr,
+    TernaryExpr, UnaryExpr,
 };
 pub use root::ExprRoot;
 

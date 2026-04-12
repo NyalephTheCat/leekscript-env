@@ -817,7 +817,11 @@ fn call_substitutes_template_return_type_through_containers() {
         .collect();
     hits.sort_by_key(|(k, _)| k.end - k.start);
     let (_, ty) = *hits.first().expect("expr_types entry covering '('");
-    assert_eq!(ty, &LeekTy::Integer, "expected head([1,2,3]) => integer, got {ty:?}");
+    assert_eq!(
+        ty,
+        &LeekTy::Integer,
+        "expected head([1,2,3]) => integer, got {ty:?}"
+    );
 }
 
 #[test]
@@ -998,6 +1002,25 @@ fn dot_class_member_infers_class_object_for_runtime_class() {
             .any(|t| *t == LeekTy::ClassObject("C".into())),
         "expected Class<C> metaclass value, got {:?}",
         a.expr_types
+    );
+}
+
+#[test]
+fn builtin_name_member_infers_string_on_instance_and_class_object() {
+    let src = "class C { integer n; } function g(C c) { var a = c.name; var b = C.name; }";
+    let doc = parse_doc(src, Version::V4).expect("parse");
+    let a = run_semantic_analysis(doc.root(), Version::V4);
+    assert!(
+        a.expr_types.values().filter(|t| **t == LeekTy::String).count() >= 2,
+        "expected string for built-in .name, got {:?}",
+        a.expr_types
+    );
+    assert!(
+        !a.diagnostics
+            .iter()
+            .any(|d| d.message.contains("undefined member")),
+        "{:?}",
+        a.diagnostics
     );
 }
 

@@ -28,10 +28,11 @@ use sipha::types::{FromSyntaxKind, IntoSyntaxKind};
 
 use crate::ast::types::TypeExpr;
 use crate::ast::{
-    AnonFunctionExpr, ArrayExpr, BinaryExpr, BracketMapExpr, CallExpr, CastExpr, CatchClause, ClassDecl, ClassMember,
-    ConstDecl, DoWhileStmt, Expr, ForStmt, ForeachStmt, FunctionDecl, GlobalDecl, IfStmt, LambdaExpr,
-    IndexExpr, IntervalExpr, LitStr, MemberExpr, NewExpr, ObjectExpr, ParenExpr, Root, SetExpr,
-    Stmt, StmtBlock, SwitchStmt, TernaryExpr, ThrowStmt, TryStmt, UnaryExpr, VarDecl, WhileStmt, RefExpr,
+    AnonFunctionExpr, ArrayExpr, BinaryExpr, BracketMapExpr, CallExpr, CastExpr, CatchClause,
+    ClassDecl, ClassMember, ConstDecl, DoWhileStmt, Expr, ForStmt, ForeachStmt,
+    FnParam, FunctionDecl, GlobalDecl, IfStmt, IndexExpr, IntervalExpr, LambdaExpr, LitStr,
+    MemberExpr, NewExpr, ObjectExpr, ParenExpr, RefExpr, Root, SetExpr, Stmt, StmtBlock,
+    SwitchStmt, TernaryExpr, ThrowStmt, TryStmt, UnaryExpr, VarDecl, WhileStmt,
 };
 use crate::include;
 use crate::parse::{
@@ -55,6 +56,11 @@ pub struct FunctionEntry {
     pub argc: u8,
     pub slot_base: u16,
     pub slot_count: u16,
+    /// Per-parameter `real` typing (`T name` with `real`), aligned with VM argument slots
+    /// (`[this, …]` for instance methods includes `false` for the synthetic `this` slot).
+    pub param_real: Vec<bool>,
+    /// Non-nullable typed `integer` parameters — call sites run [`Opcode::CoerceIntIfExact`] (truncation).
+    pub param_int: Vec<bool>,
 }
 
 /// Parse + bytecode + metadata needed to run on [`Vm`](crate::vm::runtime::interpreter::Vm).
@@ -143,8 +149,9 @@ pub fn compile_chunk_v4(source: &str) -> Result<CompiledChunk, CompileError> {
     let lang = vm_parse_options();
     let resolved = language_options_with_source_directives(source, lang);
     let doc = parse_doc(source, resolved)?;
-    let root = Root::cast(doc.root().clone())
-        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"))?;
+    let root = Root::cast(doc.root().clone()).ok_or(CompileError::Unsupported(
+        "parse tree root is not Node::Root",
+    ))?;
     compile_root(root, resolved.version)
 }
 
@@ -160,8 +167,9 @@ pub fn compile_chunk_v4_with_native_id_fn(
     let lang = vm_parse_options();
     let resolved = language_options_with_source_directives(source, lang);
     let doc = parse_doc(source, resolved)?;
-    let root = Root::cast(doc.root().clone())
-        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"))?;
+    let root = Root::cast(doc.root().clone()).ok_or(CompileError::Unsupported(
+        "parse tree root is not Node::Root",
+    ))?;
     compile_root_with_native_id_fn(root, resolved.version, native_id_fn)
 }
 
@@ -177,10 +185,10 @@ pub fn compile_chunk_v4_with_includes(
     let merged = include::merge_included_sources_to_single_file(project_root, &project)
         .map_err(CompileChunkError::Merge)?;
     let resolved = language_options_with_source_directives(&merged, lang);
-    let doc =
-        parse_doc(&merged, resolved).map_err(|e| CompileChunkError::Compile(e.into()))?;
-    let root = Root::cast(doc.root().clone())
-        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"));
+    let doc = parse_doc(&merged, resolved).map_err(|e| CompileChunkError::Compile(e.into()))?;
+    let root = Root::cast(doc.root().clone()).ok_or(CompileError::Unsupported(
+        "parse tree root is not Node::Root",
+    ));
     let root = root.map_err(CompileChunkError::Compile)?;
     compile_root(root, resolved.version).map_err(CompileChunkError::Compile)
 }
@@ -197,10 +205,10 @@ pub fn compile_chunk_v4_with_includes_and_native_id_fn(
     let merged = include::merge_included_sources_to_single_file(project_root, &project)
         .map_err(CompileChunkError::Merge)?;
     let resolved = language_options_with_source_directives(&merged, lang);
-    let doc =
-        parse_doc(&merged, resolved).map_err(|e| CompileChunkError::Compile(e.into()))?;
-    let root = Root::cast(doc.root().clone())
-        .ok_or(CompileError::Unsupported("parse tree root is not Node::Root"));
+    let doc = parse_doc(&merged, resolved).map_err(|e| CompileChunkError::Compile(e.into()))?;
+    let root = Root::cast(doc.root().clone()).ok_or(CompileError::Unsupported(
+        "parse tree root is not Node::Root",
+    ));
     let root = root.map_err(CompileChunkError::Compile)?;
     compile_root_with_native_id_fn(root, resolved.version, native_id_fn)
         .map_err(CompileChunkError::Compile)
@@ -218,13 +226,15 @@ mod tests {
         let doc = parse_doc(src, resolved).expect("parse");
         let root = Root::cast(doc.root().clone()).expect("root");
         let stmts: Vec<Stmt> = AstNodeExt::children::<Stmt>(root.syntax()).collect();
-        assert!(matches!(stmts.as_slice(), [Stmt::Global(_), Stmt::Global(_), Stmt::Expr(_)]));
+        assert!(matches!(
+            stmts.as_slice(),
+            [Stmt::Global(_), Stmt::Global(_), Stmt::Expr(_)]
+        ));
     }
 
     #[test]
     fn parser_splits_missing_semi_between_statements() {
-        let src =
-            "var e = 2 var f = 4 global x global y = [1:2] x = (y[e | f << 2] = [:])";
+        let src = "var e = 2 var f = 4 global x global y = [1:2] x = (y[e | f << 2] = [:])";
         let lang = vm_parse_options();
         let resolved = language_options_with_source_directives(src, lang);
         let doc = parse_doc(src, resolved).expect("parse");
@@ -236,7 +246,8 @@ mod tests {
 
     #[test]
     fn parse_global_typed_iife_then_expr() {
-        let src = "global Array<integer> CELL_X = function() => Array<integer> { return [] }() CELL_X";
+        let src =
+            "global Array<integer> CELL_X = function() => Array<integer> { return [] }() CELL_X";
         let lang = vm_parse_options();
         let resolved = language_options_with_source_directives(src, lang);
         parse_doc(src, resolved).unwrap_or_else(|e| panic!("parse failed: {e:?}\nsrc={src:?}"));
@@ -250,7 +261,10 @@ mod tests {
         let doc = parse_doc(src, resolved).expect("parse");
         let root = Root::cast(doc.root().clone()).expect("root");
         let stmts: Vec<Stmt> = AstNodeExt::children::<Stmt>(root.syntax()).collect();
-        assert!(matches!(stmts.as_slice(), [Stmt::If(_)]), "stmts={stmts:?} src={src:?}");
+        assert!(
+            matches!(stmts.as_slice(), [Stmt::If(_)]),
+            "stmts={stmts:?} src={src:?}"
+        );
     }
 
     #[test]
@@ -258,8 +272,8 @@ mod tests {
         let src = "var s = '' for (var v in [:]) { s += v } return s";
         let lang = vm_parse_options();
         let resolved = language_options_with_source_directives(src, lang);
-        let doc = parse_doc(src, resolved)
-            .unwrap_or_else(|e| panic!("parse failed: {e:?}\nsrc={src:?}"));
+        let doc =
+            parse_doc(src, resolved).unwrap_or_else(|e| panic!("parse failed: {e:?}\nsrc={src:?}"));
         let root = Root::cast(doc.root().clone()).expect("root");
         let stmts: Vec<Stmt> = AstNodeExt::children::<Stmt>(root.syntax()).collect();
         assert!(stmts.len() >= 3, "stmts={stmts:?} src={src:?}");
@@ -346,7 +360,9 @@ fn compile_root(root: Root, version: Version) -> Result<CompiledChunk, CompileEr
                         break;
                     }
                 }
-                let SyntaxElement::Token(name_t) = &elts[i] else { break };
+                let SyntaxElement::Token(name_t) = &elts[i] else {
+                    break;
+                };
                 if name_t.kind() != Lex::Ident.into_syntax_kind() {
                     break;
                 }
@@ -468,7 +484,9 @@ fn compile_root_with_native_id_fn(
                         break;
                     }
                 }
-                let SyntaxElement::Token(name_t) = &elts[i] else { break };
+                let SyntaxElement::Token(name_t) = &elts[i] else {
+                    break;
+                };
                 if name_t.kind() != Lex::Ident.into_syntax_kind() {
                     break;
                 }
@@ -562,17 +580,283 @@ fn java_split_pseudo_typed_field_decl(fake_ty: &str, field: &str) -> bool {
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_lowercase())
-        && field
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase())
+        && field.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+}
+
+/// `integer | null`, `integer?`, etc.: values may be `null` and must not be coerced with
+/// [`Opcode::CoerceIntIfExact`] on assignment (which would turn `null` into `0`).
+fn type_expr_nullable_integer(ty: &SyntaxNode) -> bool {
+    let mut has_int = false;
+    let mut nullable = false;
+    for t in ty.descendant_tokens() {
+        if t.kind_as::<Lex>() == Some(Lex::IntegerKw) {
+            has_int = true;
+        }
+        if matches!(
+            t.kind_as::<Lex>(),
+            Some(Lex::NullKw) | Some(Lex::Question)
+        ) {
+            nullable = true;
+        }
+    }
+    has_int && nullable
+}
+
+#[inline]
+fn fn_param_is_real(p: &FnParam) -> bool {
+    p.type_expr().is_some_and(|te| {
+        te.syntax()
+            .descendant_tokens()
+            .iter()
+            .any(|t| t.kind_as::<Lex>() == Some(Lex::RealKw))
+    })
+}
+
+/// Non-nullable `integer` parameter — callers coerce with [`Opcode::CoerceIntIfExact`] (like assignment).
+fn fn_param_needs_int_call_coerce(p: &FnParam) -> bool {
+    if fn_param_is_real(p) {
+        return false;
+    }
+    let Some(te) = p.type_expr() else {
+        return false;
+    };
+    let has_int = te
+        .syntax()
+        .descendant_tokens()
+        .iter()
+        .any(|t| t.kind_as::<Lex>() == Some(Lex::IntegerKw));
+    has_int && !type_expr_nullable_integer(te.syntax())
+}
+
+/// Leading type is plain `real` — not `Array<real>` / `Map<…>` (those mention `real` only in generics).
+fn type_syntax_node_is_scalar_real(ty: &SyntaxNode) -> bool {
+    let Some(te) = TypeExpr::cast(ty.clone()) else {
+        return false;
+    };
+    let Some(union_ty) = te.union_type() else {
+        return false;
+    };
+    let members = union_ty.nullable_members();
+    let Some(seg0) = members.first() else {
+        return false;
+    };
+    let Some(prim) = seg0.primary() else {
+        return false;
+    };
+    if !prim.generic_argument_roots().is_empty() {
+        return false;
+    }
+    prim.syntax()
+        .descendant_tokens()
+        .iter()
+        .any(|t| t.kind_as::<Lex>() == Some(Lex::RealKw))
+}
+
+/// Leading type is plain `integer` — not `Array<integer>` etc.
+fn type_syntax_node_is_scalar_integer(ty: &SyntaxNode) -> bool {
+    let Some(te) = TypeExpr::cast(ty.clone()) else {
+        return false;
+    };
+    let Some(union_ty) = te.union_type() else {
+        return false;
+    };
+    let members = union_ty.nullable_members();
+    let Some(seg0) = members.first() else {
+        return false;
+    };
+    let Some(prim) = seg0.primary() else {
+        return false;
+    };
+    if !prim.generic_argument_roots().is_empty() {
+        return false;
+    }
+    prim.syntax()
+        .descendant_tokens()
+        .iter()
+        .any(|t| t.kind_as::<Lex>() == Some(Lex::IntegerKw))
+}
+
+/// `integer | real` (order-independent): compound ops must not apply [`Opcode::CoerceIntIfExact`] after
+/// mixing with reals (Java suite: `x += 0.3`, `x *= 0.5`).
+fn type_syntax_node_is_integer_real_union(ty: &SyntaxNode) -> bool {
+    let Some(te) = TypeExpr::cast(ty.clone()) else {
+        return false;
+    };
+    let Some(union_ty) = te.union_type() else {
+        return false;
+    };
+    let mut has_int = false;
+    let mut has_real = false;
+    for m in union_ty.nullable_members() {
+        let Some(p) = m.primary() else {
+            continue;
+        };
+        for t in p.syntax().descendant_tokens() {
+            if t.kind_as::<Lex>() == Some(Lex::IntegerKw) {
+                has_int = true;
+            }
+            if t.kind_as::<Lex>() == Some(Lex::RealKw) {
+                has_real = true;
+            }
+        }
+    }
+    has_int && has_real
+}
+
+/// Parameter names for a `LambdaExpr` (shared with capture analysis and lowering).
+fn lambda_expr_param_names(l: &LambdaExpr) -> Vec<String> {
+    fn walk_tokens(node: &SyntaxNode, out: &mut Vec<SyntaxToken>) {
+        for el in node.children() {
+            match el {
+                SyntaxElement::Token(t) => {
+                    if !syntax_el_is_trivia(&SyntaxElement::Token(t.clone())) {
+                        out.push(t.clone());
+                    }
+                }
+                SyntaxElement::Node(n) => walk_tokens(&n, out),
+            }
+        }
+    }
+    let mut params: Vec<String> = Vec::new();
+    let mut toks: Vec<SyntaxToken> = Vec::new();
+    walk_tokens(l.syntax(), &mut toks);
+    for t in &toks {
+        if t.text() == "->"
+            || t.text() == "=>"
+            || Lex::from_syntax_kind(t.kind()) == Some(Lex::Arrow)
+        {
+            break;
+        }
+        if t.kind() == Lex::Ident.into_syntax_kind() {
+            params.push(t.text().to_string());
+        }
+    }
+    if params.is_empty() {
+        let txt = l.syntax().collect_text();
+        let arrow_at = txt.find("->").or_else(|| txt.find("=>"));
+        if let Some(ix) = arrow_at {
+            let head = &txt[..ix];
+            let mut cur = String::new();
+            for ch in head.chars() {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    cur.push(ch);
+                } else if !cur.is_empty() {
+                    params.push(core::mem::take(&mut cur));
+                }
+            }
+            if !cur.is_empty() {
+                params.push(cur);
+            }
+            params.retain(|s| !s.is_empty());
+        }
+    }
+    params
+}
+
+enum LambdaBodyForCapture {
+    Block(crate::ast::Block),
+    Expr(Expr),
+}
+
+fn lambda_body_for_capture(l: &LambdaExpr) -> Option<LambdaBodyForCapture> {
+    fn walk(n: &SyntaxNode, after_arrow: &mut bool) -> Option<LambdaBodyForCapture> {
+        for el in n.children() {
+            match el {
+                SyntaxElement::Token(t) => {
+                    if Lex::from_syntax_kind(t.kind()) == Some(Lex::Arrow) {
+                        *after_arrow = true;
+                    }
+                }
+                SyntaxElement::Node(ch) => {
+                    if *after_arrow {
+                        if let Some(b) = crate::ast::Block::cast(ch.clone()) {
+                            return Some(LambdaBodyForCapture::Block(b));
+                        }
+                        if let Some(ex) = Expr::cast(ch.clone()) {
+                            return Some(LambdaBodyForCapture::Expr(ex));
+                        }
+                    }
+                    if let Some(r) = walk(&ch, after_arrow) {
+                        return Some(r);
+                    }
+                }
+            }
+        }
+        None
+    }
+    walk(l.syntax(), &mut false)
+}
+
+/// Names introduced by `var` / `let` declarators (for sequential binding in closure capture walks).
+fn var_decl_introduced_names(v: &VarDecl) -> Vec<String> {
+    let elts: Vec<_> = v
+        .syntax()
+        .children()
+        .filter(|e| !syntax_el_is_trivia(e))
+        .collect();
+    let mut i = 0usize;
+    if let Some(SyntaxElement::Token(t)) = elts.get(i) {
+        if matches!(
+            Lex::from_syntax_kind(t.kind()),
+            Some(Lex::VarKw) | Some(Lex::LetKw)
+        ) {
+            i += 1;
+        }
+    }
+    if let Some(SyntaxElement::Node(n)) = elts.get(i) {
+        if TypeExpr::can_cast(n.kind()) {
+            i += 1;
+        }
+    }
+    let mut out = Vec::new();
+    while i < elts.len() {
+        if let SyntaxElement::Token(t) = &elts[i] {
+            if matches!(Lex::from_syntax_kind(t.kind()), Some(Lex::Semi)) {
+                break;
+            }
+        }
+        let SyntaxElement::Token(name_t) = &elts[i] else {
+            i += 1;
+            continue;
+        };
+        if name_t.kind() != Lex::Ident.into_syntax_kind() {
+            i += 1;
+            continue;
+        }
+        out.push(name_t.text().to_string());
+        i += 1;
+        if i < elts.len() {
+            if let SyntaxElement::Token(t) = &elts[i] {
+                if t.kind() == Lex::Eq.into_syntax_kind() {
+                    i += 1;
+                    if let Some(SyntaxElement::Node(_)) = elts.get(i) {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        if i < elts.len() {
+            if let SyntaxElement::Token(t) = &elts[i] {
+                if t.kind() == Lex::Comma.into_syntax_kind() {
+                    i += 1;
+                }
+            }
+        }
+    }
+    out
 }
 
 struct CompileCtx {
     builder: BytecodeBuilder,
     locals: HashMap<String, u16>,
+    /// Braced-block `var` bindings (e.g. `if (...) { var x }`) — shadow outer names for that branch only.
+    block_scope_stack: Vec<HashMap<String, u16>>,
     real_typed_slots: HashSet<u16>,
     int_typed_slots: HashSet<u16>,
+    /// Subset of [`Self::int_typed_slots`] for `integer | null` / `integer?` — stores real `null`.
+    nullable_int_slots: HashSet<u16>,
+    /// `integer | real` locals — numeric union; do not coerce to int after real-typed arithmetic.
+    int_real_union_slots: HashSet<u16>,
     /// Outer lexical scopes (for closure capture).
     outer_locals: Vec<HashMap<String, u16>>,
     classes: HashMap<String, ClassInfo>,
@@ -598,6 +882,8 @@ struct CompileCtx {
     switch_tmp_id: u32,
     functions: Vec<FunctionEntry>,
     function_by_name: HashMap<String, u16>,
+    /// Local slot holding a `function name() { … }` binding → function id (for `f(42)` value-calls).
+    function_slot_to_fid: HashMap<u16, u16>,
     native_id_fn: fn(&str) -> Option<u16>,
 }
 
@@ -606,8 +892,11 @@ impl Default for CompileCtx {
         Self {
             builder: BytecodeBuilder::default(),
             locals: HashMap::new(),
+            block_scope_stack: Vec::new(),
             real_typed_slots: HashSet::new(),
             int_typed_slots: HashSet::new(),
+            nullable_int_slots: HashSet::new(),
+            int_real_union_slots: HashSet::new(),
             outer_locals: Vec::new(),
             classes: HashMap::new(),
             method_field_scope: None,
@@ -628,6 +917,7 @@ impl Default for CompileCtx {
             switch_tmp_id: 0,
             functions: Vec::new(),
             function_by_name: HashMap::new(),
+            function_slot_to_fid: HashMap::new(),
             native_id_fn: crate::vm::runtime::stdlib::native_id,
         }
     }
@@ -644,7 +934,7 @@ struct ClassInfo {
     final_fields: Vec<String>,
     methods: Vec<(String, u16)>,
     instance_method_sigs: Vec<(String, usize, usize)>, // (name, required, total) excluding `this`
-    ctors: Vec<(usize, usize, u16)>, // (required_argc, total_argc, fid)
+    ctors: Vec<(usize, usize, u16)>,                   // (required_argc, total_argc, fid)
     static_members: Vec<String>,
     static_real_fields: Vec<String>,
     static_methods: Vec<String>,
@@ -654,11 +944,323 @@ struct ClassInfo {
 }
 
 impl CompileCtx {
+    fn enter_block_scope(&mut self) {
+        self.block_scope_stack.push(HashMap::new());
+    }
+
+    fn exit_block_scope(&mut self) {
+        self.block_scope_stack.pop();
+    }
+
     fn lookup_local(&self, name: &str) -> Option<u16> {
-        self.locals
-            .get(name)
-            .copied()
-            .or_else(|| self.outer_locals.iter().rev().find_map(|m| m.get(name).copied()))
+        for m in self.block_scope_stack.iter().rev() {
+            if let Some(&s) = m.get(name) {
+                return Some(s);
+            }
+        }
+        self.locals.get(name).copied().or_else(|| {
+            self.outer_locals
+                .iter()
+                .rev()
+                .find_map(|m| m.get(name).copied())
+        })
+    }
+
+    /// Accumulate slots of outer bindings this anonymous function / lambda must capture.
+    fn collect_closure_capture_slots_for_block(
+        &self,
+        body: &crate::ast::Block,
+        param_names: &HashSet<String>,
+        slots: &mut HashSet<u16>,
+    ) -> Result<(), CompileError> {
+        let mut bound = param_names.clone();
+        for s in body.stmts() {
+            self.collect_closure_slots_stmt(&s, &bound, slots)?;
+            match &s {
+                Stmt::Function(f) => {
+                    if let Some(n) = f.name() {
+                        bound.insert(n);
+                    }
+                }
+                Stmt::VarDecl(v) => {
+                    for n in var_decl_introduced_names(v) {
+                        bound.insert(n);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_closure_slots_stmt(
+        &self,
+        stmt: &Stmt,
+        bound: &HashSet<String>,
+        slots: &mut HashSet<u16>,
+    ) -> Result<(), CompileError> {
+        match stmt {
+            Stmt::Return(r) => {
+                if let Some(e) = r.expr() {
+                    self.collect_closure_slots_expr(&e, bound, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::Expr(es) => {
+                if let Some(e) = es.expr() {
+                    self.collect_closure_slots_expr(&e, bound, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::Function(f) => {
+                let mut b = bound.clone();
+                if let Some(n) = f.name() {
+                    b.insert(n);
+                }
+                for p in f.fn_params() {
+                    if let Some(pn) = p.name() {
+                        b.insert(pn);
+                    }
+                }
+                if let Some(body) = f.body() {
+                    self.collect_closure_capture_slots_for_block(&body, &b, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::VarDecl(v) => {
+                for s in v.syntax().children() {
+                    let SyntaxElement::Node(n) = s else {
+                        continue;
+                    };
+                    if let Some(e) = Expr::cast(n.clone()) {
+                        self.collect_closure_slots_expr(&e, bound, slots)?;
+                    }
+                }
+                Ok(())
+            }
+            Stmt::If(i) => {
+                if let Some(c) = i.condition() {
+                    self.collect_closure_slots_expr(&c, bound, slots)?;
+                }
+                if let Some(tb) = i.then_branch() {
+                    self.collect_closure_slots_stmt_block(&tb, bound, slots)?;
+                }
+                if let Some(eb) = i.else_branch() {
+                    self.collect_closure_slots_stmt_block(&eb, bound, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::While(w) => {
+                if let Some(c) = w.condition() {
+                    self.collect_closure_slots_expr(&c, bound, slots)?;
+                }
+                if let Some(body) = w.body() {
+                    self.collect_closure_slots_stmt_block(&body, bound, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::DoWhile(d) => {
+                if let Some(body) = d.body() {
+                    self.collect_closure_slots_stmt_block(&body, bound, slots)?;
+                }
+                if let Some(c) = d.condition() {
+                    self.collect_closure_slots_expr(&c, bound, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::For(fo) => {
+                if let Some(init) = fo.init_expr() {
+                    self.collect_closure_slots_expr(&init, bound, slots)?;
+                }
+                if let Some(c) = fo.condition_expr() {
+                    self.collect_closure_slots_expr(&c, bound, slots)?;
+                }
+                if let Some(step) = fo.step_expr() {
+                    self.collect_closure_slots_expr(&step, bound, slots)?;
+                }
+                if let Some(body) = fo.body() {
+                    self.collect_closure_slots_stmt_block(&body, bound, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::Foreach(fe) => {
+                if let Some(e) = fe.iterable() {
+                    self.collect_closure_slots_expr(&e, bound, slots)?;
+                }
+                if let Some(body) = fe.body() {
+                    self.collect_closure_slots_stmt_block(&body, bound, slots)?;
+                }
+                Ok(())
+            }
+            Stmt::Switch(sw) => {
+                if let Some(e) = sw.expr() {
+                    self.collect_closure_slots_expr(&e, bound, slots)?;
+                }
+                for arm in sw.arms() {
+                    for ce in arm.case_exprs() {
+                        self.collect_closure_slots_expr(&ce, bound, slots)?;
+                    }
+                    for st in arm.stmts() {
+                        self.collect_closure_slots_stmt(&st, bound, slots)?;
+                    }
+                }
+                Ok(())
+            }
+            Stmt::Try(t) => {
+                if let Some(tb) = t.try_block() {
+                    self.collect_closure_capture_slots_for_block(&tb, bound, slots)?;
+                }
+                for c in t.catch_clauses() {
+                    let mut cb = bound.clone();
+                    if let Some(pn) = c.param_name() {
+                        cb.insert(pn);
+                    }
+                    if let Some(blk) = c.block() {
+                        self.collect_closure_capture_slots_for_block(&blk, &cb, slots)?;
+                    }
+                }
+                Ok(())
+            }
+            Stmt::Throw(th) => {
+                if let Some(e) = th.expr() {
+                    self.collect_closure_slots_expr(&e, bound, slots)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn collect_closure_slots_stmt_block(
+        &self,
+        sb: &StmtBlock,
+        bound: &HashSet<String>,
+        slots: &mut HashSet<u16>,
+    ) -> Result<(), CompileError> {
+        match sb {
+            StmtBlock::Block(b) => {
+                let mut inner = bound.clone();
+                for s in b.stmts() {
+                    self.collect_closure_slots_stmt(&s, &inner, slots)?;
+                    match &s {
+                        Stmt::Function(f) => {
+                            if let Some(n) = f.name() {
+                                inner.insert(n);
+                            }
+                        }
+                        Stmt::VarDecl(v) => {
+                            for n in var_decl_introduced_names(v) {
+                                inner.insert(n);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            }
+            StmtBlock::Wrapped(st) => self.collect_closure_slots_stmt(st, bound, slots),
+        }
+    }
+
+    fn collect_closure_slots_expr(
+        &self,
+        e: &Expr,
+        bound: &HashSet<String>,
+        slots: &mut HashSet<u16>,
+    ) -> Result<(), CompileError> {
+        match e {
+            Expr::Ref(r) => {
+                if let Some(name) = closure_capture_plain_name_from_ref_expr(r) {
+                    if !bound.contains(&name) {
+                        if let Some(s) = self.lookup_local(&name) {
+                            slots.insert(s);
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Expr::Root(root) => {
+                // `Node::Expr` often uses a flat token/binary chain (`x + y` uses bare `Ident` tokens,
+                // not `RefExpr` nodes). Operands can live under `BinaryExpr` children, so walk all
+                // semantic tokens (not only direct children).
+                for t in root.syntax().descendant_semantic_tokens() {
+                    let Some(name) = token_as_plain_local_name(&t) else {
+                        continue;
+                    };
+                    if bound.contains(&name) {
+                        continue;
+                    }
+                    if let Some(s) = self.lookup_local(&name) {
+                        slots.insert(s);
+                    }
+                }
+                Ok(())
+            }
+            Expr::AnonFunction(af) => {
+                let params: Vec<_> = crate::ast::fn_param_children(af.syntax()).collect();
+                let mut inner_b = bound.clone();
+                for p in &params {
+                    if let Some(n) = p.name() {
+                        inner_b.insert(n);
+                    }
+                }
+                if let Some(body) = af.syntax().child::<crate::ast::Block>() {
+                    self.collect_closure_capture_slots_for_block(&body, &inner_b, slots)?;
+                }
+                Ok(())
+            }
+            Expr::Lambda(l) => {
+                let pnames = lambda_expr_param_names(l);
+                let mut inner_b = bound.clone();
+                for n in pnames {
+                    inner_b.insert(n);
+                }
+                match lambda_body_for_capture(l) {
+                    Some(LambdaBodyForCapture::Block(b)) => {
+                        self.collect_closure_capture_slots_for_block(&b, &inner_b, slots)?;
+                    }
+                    Some(LambdaBodyForCapture::Expr(ex)) => {
+                        self.collect_closure_slots_expr(&ex, &inner_b, slots)?;
+                    }
+                    None => {}
+                }
+                Ok(())
+            }
+            _ => {
+                for ch in AstNodeExt::children::<Expr>(e.syntax()) {
+                    self.collect_closure_slots_expr(&ch, bound, slots)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Emit call arguments with typed-parameter coercions (`real` / non-nullable `integer`).
+    /// `first_param_slot` is `1` when the callee is an instance method (slot 0 is `this`), else `0`.
+    fn emit_call_arg_exprs_with_typed_param_coerce(
+        &mut self,
+        fid: u16,
+        args: &[Expr],
+        first_param_slot: usize,
+    ) -> Result<(), CompileError> {
+        let (real_flags, int_flags): (Vec<bool>, Vec<bool>) = self
+            .functions
+            .get(fid as usize)
+            .map(|m| (m.param_real.clone(), m.param_int.clone()))
+            .ok_or(CompileError::Unsupported("call to bad function index"))?;
+        for (i, a) in args.iter().enumerate() {
+            let pi = first_param_slot.saturating_add(i);
+            let coerce_real = real_flags.get(pi).copied().unwrap_or(false);
+            let coerce_int = int_flags.get(pi).copied().unwrap_or(false);
+            self.compile_expr(a.clone())?;
+            if coerce_real {
+                self.builder.emit_push_const(Value::num_real(0.0));
+                self.builder.emit_opcode(Opcode::Add);
+            } else if coerce_int {
+                self.builder.emit_opcode(Opcode::CoerceIntIfExact);
+            }
+        }
+        Ok(())
     }
 
     /// For `this.m(...)` arity checks: `classes` is only inserted after the whole class is
@@ -729,9 +1331,7 @@ impl CompileCtx {
         self.builder.emit_opcode(Opcode::GetElem);
         self.builder.emit_opcode(Opcode::GetLocal);
         self.builder.emit_u16_operand(this_slot);
-        for a in args {
-            self.compile_expr(a.clone())?;
-        }
+        self.emit_call_arg_exprs_with_typed_param_coerce(fid, args, 1)?;
         let argc_user = args.len();
         let max_user = (call_argc as usize).saturating_sub(1);
         if argc_user > max_user {
@@ -754,7 +1354,8 @@ impl CompileCtx {
     }
 
     fn emit_method_field_writeback(&mut self) -> Result<(), CompileError> {
-        if let (Some(this_slot), Some(scope)) = (self.method_this_slot, self.method_field_scope.clone())
+        if let (Some(this_slot), Some(scope)) =
+            (self.method_this_slot, self.method_field_scope.clone())
         {
             for fname in scope {
                 let Some(&fslot) = self.locals.get(&fname) else {
@@ -971,6 +1572,34 @@ fn expr_plain_ident_from_expr(e: &Expr) -> Option<String> {
     }
 }
 
+/// Local name for closure capture (`RefExpr`), aligned with [`CompileCtx::compile_expr_from_syntax`]:
+/// `@[…]` / `@(…)` shapes are ignored here (inner expressions are still walked via [`Expr::Root`]).
+fn closure_capture_plain_name_from_ref_expr(r: &RefExpr) -> Option<String> {
+    if r
+        .syntax()
+        .descendant_nodes()
+        .into_iter()
+        .find_map(ArrayExpr::cast)
+        .is_some()
+    {
+        return None;
+    }
+    if r
+        .syntax()
+        .descendant_nodes()
+        .into_iter()
+        .find_map(ParenExpr::cast)
+        .is_some()
+    {
+        return None;
+    }
+    r.syntax()
+        .descendant_tokens()
+        .into_iter()
+        .find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
+        .map(|t| t.text().to_string())
+}
+
 /// `new Foo` / `new Foo()` — simple type name only (for `new Foo().m()` instance call lowering).
 fn expr_element_new_simple_class_name(el: &SyntaxElement) -> Option<String> {
     let SyntaxElement::Node(n) = el else {
@@ -1120,7 +1749,9 @@ fn try_index_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, 
     Some((name, key_expr, rhs))
 }
 
-fn try_nested_index_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, Vec<Expr>, Expr)> {
+fn try_nested_index_assign_from_expr_parts(
+    parts: &[SyntaxElement],
+) -> Option<(String, Vec<Expr>, Expr)> {
     if parts.len() < 3 {
         return None;
     }
@@ -1153,7 +1784,9 @@ fn try_nested_index_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(S
     Some((name, keys, rhs))
 }
 
-fn try_index_coalesce_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, Expr, Expr)> {
+fn try_index_coalesce_assign_from_expr_parts(
+    parts: &[SyntaxElement],
+) -> Option<(String, Expr, Expr)> {
     if parts.len() < 3 {
         return None;
     }
@@ -1358,7 +1991,9 @@ fn try_member_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String,
     Some((name, field, rhs))
 }
 
-fn try_member_coalesce_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, String, Expr)> {
+fn try_member_coalesce_assign_from_expr_parts(
+    parts: &[SyntaxElement],
+) -> Option<(String, String, Expr)> {
     if parts.len() < 4 {
         return None;
     }
@@ -1492,9 +2127,9 @@ fn try_cast_from_expr_parts(parts: &[SyntaxElement]) -> Option<(Vec<SyntaxElemen
     if parts.len() < 3 {
         return None;
     }
-    let as_pos = parts.iter().position(|el| {
-        matches!(el, SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::AsKw))
-    })?;
+    let as_pos = parts.iter().position(
+        |el| matches!(el, SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::AsKw)),
+    )?;
     if as_pos == 0 || as_pos + 1 >= parts.len() {
         return None;
     }
@@ -1512,7 +2147,9 @@ fn try_cast_from_expr_parts(parts: &[SyntaxElement]) -> Option<(Vec<SyntaxElemen
     Some((parts[..as_pos].to_vec(), ty))
 }
 
-fn try_member_compound_assign_from_expr_parts(parts: &[SyntaxElement]) -> Option<(String, String, Lex, Expr)> {
+fn try_member_compound_assign_from_expr_parts(
+    parts: &[SyntaxElement],
+) -> Option<(String, String, Lex, Expr)> {
     if parts.len() < 3 {
         return None;
     }
@@ -1685,6 +2322,15 @@ impl CompileCtx {
     }
 
     fn alloc_local(&mut self, name: &str) -> u16 {
+        if let Some(top) = self.block_scope_stack.last_mut() {
+            if let Some(&i) = top.get(name) {
+                return i;
+            }
+            let i = self.next_local;
+            self.next_local = self.next_local.saturating_add(1);
+            top.insert(name.to_string(), i);
+            return i;
+        }
         if let Some(&i) = self.locals.get(name) {
             return i;
         }
@@ -1714,12 +2360,16 @@ impl CompileCtx {
                 return Err(CompileError::Unsupported("invalid number literal"));
             }
             let compact: String = text.chars().filter(|c| *c != '_').collect();
-            if let Some(hex) = compact.strip_prefix("0x").or_else(|| compact.strip_prefix("0X")) {
+            if let Some(hex) = compact
+                .strip_prefix("0x")
+                .or_else(|| compact.strip_prefix("0X"))
+            {
                 // Hex integer literal: `0xFF`
                 if !hex.contains(['p', 'P', '.']) {
                     let n = i64::from_str_radix(hex, 16)
                         .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
-                    self.builder.emit_push_const(Value::Number(NumberBits::int(n)));
+                    self.builder
+                        .emit_push_const(Value::Number(NumberBits::int(n)));
                     return Ok(true);
                 }
                 // Hex float literal: `0x1.p53`
@@ -1749,17 +2399,34 @@ impl CompileCtx {
                     .emit_push_const(Value::Number(NumberBits::from_literal(true, x)));
                 return Ok(true);
             }
-            if let Some(bin) = compact.strip_prefix("0b").or_else(|| compact.strip_prefix("0B")) {
+            if let Some(bin) = compact
+                .strip_prefix("0b")
+                .or_else(|| compact.strip_prefix("0B"))
+            {
                 let n = i64::from_str_radix(bin, 2)
                     .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
-                self.builder.emit_push_const(Value::Number(NumberBits::int(n)));
+                self.builder
+                    .emit_push_const(Value::Number(NumberBits::int(n)));
                 return Ok(true);
             }
-            if let Some(oct) = compact.strip_prefix("0o").or_else(|| compact.strip_prefix("0O")) {
+            if let Some(oct) = compact
+                .strip_prefix("0o")
+                .or_else(|| compact.strip_prefix("0O"))
+            {
                 let n = i64::from_str_radix(oct, 8)
                     .map_err(|_| CompileError::Unsupported("invalid number literal"))?;
-                self.builder.emit_push_const(Value::Number(NumberBits::int(n)));
+                self.builder
+                    .emit_push_const(Value::Number(NumberBits::int(n)));
                 return Ok(true);
+            }
+            // Parse integer-looking decimals as `i64` first — `f64` would round large integers
+            // (`bitsToReal(4614256656552045848)` must keep full mantissa bits).
+            if !compact.contains(['.', 'e', 'E']) {
+                if let Ok(n) = compact.parse::<i64>() {
+                    self.builder
+                        .emit_push_const(Value::Number(NumberBits::int(n)));
+                    return Ok(true);
+                }
             }
             let x = compact
                 .parse::<f64>()
@@ -1770,12 +2437,12 @@ impl CompileCtx {
             return Ok(true);
         }
         if kind == Lex::Infinity.into_syntax_kind() {
-            self.builder
-                .emit_push_const(Value::num_real(f64::INFINITY));
+            self.builder.emit_push_const(Value::num_real(f64::INFINITY));
             return Ok(true);
         }
         if kind == Lex::Pi.into_syntax_kind() {
-            self.builder.emit_push_const(Value::num_real(std::f64::consts::PI));
+            self.builder
+                .emit_push_const(Value::num_real(std::f64::consts::PI));
             return Ok(true);
         }
         if kind == Lex::TrueKw.into_syntax_kind() {
@@ -1801,26 +2468,61 @@ impl CompileCtx {
     fn compile_stmt(&mut self, stmt: Stmt) -> Result<(), CompileError> {
         match stmt {
             Stmt::Return(r) => {
-                if let Some(e) = r.expr() {
+                if r.is_optional() {
+                    let Some(e) = r.expr() else {
+                        return Err(CompileError::Unsupported("return? without expression"));
+                    };
+                    let o = java_ops::java_analyzed_ops(&e);
+                    if o > 0 {
+                        self.builder.emit_charge_ops(o);
+                    }
+                    self.compile_expr(e)?;
+                    self.builder.emit_opcode(Opcode::Dup);
+                    let jop = self.builder.emit_jump_if_false_placeholder();
+                    if self.method_this_slot.is_some() && self.method_field_scope.is_some() {
+                        let tmp_slot = self.alloc_local(&format!("__ret{}", self.switch_tmp_id));
+                        self.switch_tmp_id = self.switch_tmp_id.saturating_add(1);
+                        self.builder.emit_opcode(Opcode::SetLocal);
+                        self.builder.emit_u16_operand(tmp_slot);
+                        self.emit_method_field_writeback()?;
+                        self.builder.emit_opcode(Opcode::GetLocal);
+                        self.builder.emit_u16_operand(tmp_slot);
+                    }
+                    self.builder.emit_return();
+                    let pop_pc = self.builder.len();
+                    self.builder
+                        .patch_i32_operand_at(jop, pop_pc as i32 - (jop + 4) as i32);
+                    self.builder.emit_opcode(Opcode::Pop);
+                } else if let Some(e) = r.expr() {
                     // `LeekReturnInstruction`: `ops(getOperations());` before evaluating the value.
                     let o = java_ops::java_analyzed_ops(&e);
                     if o > 0 {
                         self.builder.emit_charge_ops(o);
                     }
                     self.compile_expr(e)?;
+                    if self.method_this_slot.is_some() && self.method_field_scope.is_some() {
+                        let tmp_slot = self.alloc_local(&format!("__ret{}", self.switch_tmp_id));
+                        self.switch_tmp_id = self.switch_tmp_id.saturating_add(1);
+                        self.builder.emit_opcode(Opcode::SetLocal);
+                        self.builder.emit_u16_operand(tmp_slot);
+                        self.emit_method_field_writeback()?;
+                        self.builder.emit_opcode(Opcode::GetLocal);
+                        self.builder.emit_u16_operand(tmp_slot);
+                    }
+                    self.builder.emit_return();
                 } else {
                     self.builder.emit_opcode(Opcode::PushNull);
+                    if self.method_this_slot.is_some() && self.method_field_scope.is_some() {
+                        let tmp_slot = self.alloc_local(&format!("__ret{}", self.switch_tmp_id));
+                        self.switch_tmp_id = self.switch_tmp_id.saturating_add(1);
+                        self.builder.emit_opcode(Opcode::SetLocal);
+                        self.builder.emit_u16_operand(tmp_slot);
+                        self.emit_method_field_writeback()?;
+                        self.builder.emit_opcode(Opcode::GetLocal);
+                        self.builder.emit_u16_operand(tmp_slot);
+                    }
+                    self.builder.emit_return();
                 }
-                if self.method_this_slot.is_some() && self.method_field_scope.is_some() {
-                    let tmp_slot = self.alloc_local(&format!("__ret{}", self.switch_tmp_id));
-                    self.switch_tmp_id = self.switch_tmp_id.saturating_add(1);
-                    self.builder.emit_opcode(Opcode::SetLocal);
-                    self.builder.emit_u16_operand(tmp_slot);
-                    self.emit_method_field_writeback()?;
-                    self.builder.emit_opcode(Opcode::GetLocal);
-                    self.builder.emit_u16_operand(tmp_slot);
-                }
-                self.builder.emit_return();
             }
             Stmt::Expr(es) => {
                 if let Some(e) = es.expr() {
@@ -1980,16 +2682,19 @@ impl CompileCtx {
                 .take_while(|p| p.default_expr().is_none())
                 .count();
             let total = params.len();
-            if method_sigs.iter().any(|(n, r, t, _)| {
-                n == &mname && required <= *t && *r <= total
-            }) {
+            if method_sigs
+                .iter()
+                .any(|(n, r, t, _)| n == &mname && required <= *t && *r <= total)
+            {
                 return Err(CompileError::Unsupported("DUPLICATED_METHOD"));
             }
             method_sigs.push((mname.clone(), required, total, is_static));
             if is_static {
-                info.static_method_sigs.push((mname.clone(), required, total));
+                info.static_method_sigs
+                    .push((mname.clone(), required, total));
             } else {
-                info.instance_method_sigs.push((mname.clone(), required, total));
+                info.instance_method_sigs
+                    .push((mname.clone(), required, total));
             }
         }
         self.compiling_class_instance_sigs = Some(info.instance_method_sigs.clone());
@@ -2018,10 +2723,12 @@ impl CompileCtx {
                 // "final field `a` exists" plus method `m(...)`.
                 if let Some(te) = m.leading_type_expr() {
                     let toks = te.syntax().descendant_tokens();
-                    if toks.iter().any(|t| t.kind_as::<Lex>() == Some(Lex::FinalKw)) {
-                        if let Some(tid) = toks
-                            .iter()
-                            .find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
+                    if toks
+                        .iter()
+                        .any(|t| t.kind_as::<Lex>() == Some(Lex::FinalKw))
+                    {
+                        if let Some(tid) =
+                            toks.iter().find(|t| t.kind_as::<Lex>() == Some(Lex::Ident))
                         {
                             let fname = tid.text().to_string();
                             if !info.final_fields.iter().any(|f| f == &fname) {
@@ -2219,8 +2926,21 @@ impl CompileCtx {
                     .iter()
                     .take_while(|p| p.default_expr().is_none())
                     .count();
-                let required_argc = u8::try_from(required.saturating_add(if is_static { 0 } else { 1 }))
-                    .map_err(|_| CompileError::Unsupported("too many parameters"))?;
+                let required_argc =
+                    u8::try_from(required.saturating_add(if is_static { 0 } else { 1 }))
+                        .map_err(|_| CompileError::Unsupported("too many parameters"))?;
+                let mut param_real: Vec<bool> = Vec::with_capacity(argc as usize);
+                let mut param_int: Vec<bool> = Vec::with_capacity(argc as usize);
+                if !is_static {
+                    param_real.push(false);
+                    param_int.push(false);
+                }
+                for p in &params {
+                    param_real.push(fn_param_is_real(p));
+                    param_int.push(fn_param_needs_int_call_coerce(p));
+                }
+                debug_assert_eq!(param_real.len(), usize::from(argc));
+                debug_assert_eq!(param_int.len(), usize::from(argc));
                 self.functions.push(FunctionEntry {
                     name: format!("{name}::{mname}"),
                     entry_pc,
@@ -2228,6 +2948,8 @@ impl CompileCtx {
                     argc,
                     slot_base,
                     slot_count,
+                    param_real,
+                    param_int,
                 });
 
                 self.locals = saved_locals;
@@ -2271,11 +2993,12 @@ impl CompileCtx {
                     .collect();
                 let mut idents: Vec<String> = Vec::new();
                 let mut eq_idx: Option<usize> = None;
-                let is_real_typed = m
-                    .leading_type_expr()
-                    .is_some_and(|te| te.syntax().descendant_tokens().iter().any(|t| {
-                        t.kind_as::<Lex>() == Some(Lex::RealKw)
-                    }));
+                let is_real_typed = m.leading_type_expr().is_some_and(|te| {
+                    te.syntax()
+                        .descendant_tokens()
+                        .iter()
+                        .any(|t| t.kind_as::<Lex>() == Some(Lex::RealKw))
+                });
                 let is_private = m
                     .syntax()
                     .descendant_tokens()
@@ -2322,10 +3045,8 @@ impl CompileCtx {
                         .and_then(type_expr_single_bare_ident_name)
                     {
                         if java_split_pseudo_typed_field_decl(&ty_name, &idents[0]) {
-                            field_specs = vec![
-                                (ty_name, None),
-                                (idents[0].clone(), init_expr.clone()),
-                            ];
+                            field_specs =
+                                vec![(ty_name, None), (idents[0].clone(), init_expr.clone())];
                         }
                     }
                 }
@@ -2368,10 +3089,22 @@ impl CompileCtx {
         if !info.static_members.iter().any(|s| s == "fields") {
             info.static_members.push("fields".to_string());
         }
+        if !info.static_members.iter().any(|s| s == "name") {
+            info.static_members.push("name".to_string());
+        }
         info.static_real_fields = static_real_fields;
         info.static_methods = static_methods.iter().map(|(n, _)| n.clone()).collect();
         info.private_static_members = private_static_members;
         info.static_final_members = static_final_members;
+        for extra in ["fields", "name"] {
+            if !info
+                .static_final_members
+                .iter()
+                .any(|s| s.as_str() == extra)
+            {
+                info.static_final_members.push(extra.to_string());
+            }
+        }
         // Build the class object incrementally so later static initializers can refer to earlier ones.
         self.builder.emit_object_build(0);
         self.builder.emit_opcode(Opcode::SetLocal);
@@ -2381,8 +3114,7 @@ impl CompileCtx {
         let saved_static_members = self.class_ref_static_members.take();
         self.class_ref_static_members = Some(info.static_members.clone());
         for (fname, expr_n) in &static_fields {
-            self.builder
-                .emit_push_const(Value::String(fname.clone()));
+            self.builder.emit_push_const(Value::String(fname.clone()));
             if let Some(expr_n) = expr_n {
                 if let Some(id) = syntax_single_ident_expr(expr_n) {
                     if static_fields.iter().any(|(n, _)| n == &id) {
@@ -2404,8 +3136,7 @@ impl CompileCtx {
             self.builder.emit_opcode(Opcode::Pop);
         }
         for (mname, fid) in &static_methods {
-            self.builder
-                .emit_push_const(Value::String(mname.clone()));
+            self.builder.emit_push_const(Value::String(mname.clone()));
             self.builder.emit_make_closure(*fid, &[]);
             self.builder.emit_opcode(Opcode::SetElemLocal);
             self.builder.emit_u16_operand(class_slot);
@@ -2415,12 +3146,18 @@ impl CompileCtx {
         self.builder
             .emit_push_const(Value::String("fields".to_string()));
         for (fname, _) in &info.fields {
-            self.builder
-                .emit_push_const(Value::String(fname.clone()));
+            self.builder.emit_push_const(Value::String(fname.clone()));
         }
         let n_field_names = u16::try_from(info.fields.len())
             .map_err(|_| CompileError::Unsupported("too many class fields"))?;
         self.builder.emit_array_build(n_field_names);
+        self.builder.emit_opcode(Opcode::SetElemLocal);
+        self.builder.emit_u16_operand(class_slot);
+        self.builder.emit_opcode(Opcode::Pop);
+        self.builder
+            .emit_push_const(Value::String("name".to_string()));
+        self.builder
+            .emit_push_const(Value::String(name.clone()));
         self.builder.emit_opcode(Opcode::SetElemLocal);
         self.builder.emit_u16_operand(class_slot);
         self.builder.emit_opcode(Opcode::Pop);
@@ -2510,6 +3247,11 @@ impl CompileCtx {
         let required_argc =
             u8::try_from(required).map_err(|_| CompileError::Unsupported("too many parameters"))?;
 
+        let param_real: Vec<bool> = params.iter().map(fn_param_is_real).collect();
+        let param_int: Vec<bool> = params.iter().map(fn_param_needs_int_call_coerce).collect();
+        debug_assert_eq!(param_real.len(), usize::from(argc));
+        debug_assert_eq!(param_int.len(), usize::from(argc));
+
         let j_skip = self.builder.emit_jump_placeholder();
         let entry_pc = self.builder.len();
 
@@ -2531,6 +3273,8 @@ impl CompileCtx {
             argc,
             slot_base,
             slot_count: 0,
+            param_real,
+            param_int,
         });
         for p in &params {
             let pn = p
@@ -2573,6 +3317,7 @@ impl CompileCtx {
         self.builder
             .patch_i32_operand_at(j_skip, after_fn as i32 - (j_skip + 4) as i32);
         let slot = self.alloc_local(&name);
+        self.function_slot_to_fid.insert(slot, id);
         self.builder.emit_push_const(Value::Function { fid: id });
         self.builder.emit_opcode(Opcode::SetLocal);
         self.builder.emit_u16_operand(slot);
@@ -3058,7 +3803,10 @@ impl CompileCtx {
             self.builder.emit_push_const(Value::num_real(0.0));
             self.builder.emit_opcode(Opcode::Add);
         }
-        if self.int_typed_slots.contains(&slot) {
+        if self.int_typed_slots.contains(&slot)
+            && !self.nullable_int_slots.contains(&slot)
+            && !self.int_real_union_slots.contains(&slot)
+        {
             // Assigning to typed `integer`: coerce null/bool and integer-ish reals.
             self.builder.emit_opcode(Opcode::CoerceIntIfExact);
         }
@@ -3288,7 +4036,10 @@ impl CompileCtx {
             self.builder.emit_push_const(Value::num_real(0.0));
             self.builder.emit_opcode(Opcode::Add);
         }
-        if self.int_typed_slots.contains(&slot) {
+        if self.int_typed_slots.contains(&slot)
+            && !self.nullable_int_slots.contains(&slot)
+            && !self.int_real_union_slots.contains(&slot)
+        {
             self.builder.emit_opcode(Opcode::CoerceIntIfExact);
         }
         self.builder.emit_opcode(Opcode::Dup);
@@ -3624,7 +4375,8 @@ impl CompileCtx {
             self.compile_compound_assign_index_local(&name, key, op, rhs)?;
             return Ok(true);
         }
-        if let Some((name, keys, op, rhs)) = try_nested_index_compound_assign_from_expr_parts(parts) {
+        if let Some((name, keys, op, rhs)) = try_nested_index_compound_assign_from_expr_parts(parts)
+        {
             self.compile_compound_assign_nested_index_local(&name, &keys, op, rhs)?;
             return Ok(true);
         }
@@ -3790,7 +4542,8 @@ impl CompileCtx {
         for el in syn.children().filter(|e| !syntax_el_is_trivia(e)) {
             if matches!(&el, SyntaxElement::Token(t) if t.kind() == Lex::Colon.into_syntax_kind()) {
                 segs.push(std::mem::take(&mut seg));
-            } else if matches!(&el, SyntaxElement::Token(t) if t.kind() == Lex::LBracket.into_syntax_kind() || t.kind() == Lex::RBracket.into_syntax_kind()) {
+            } else if matches!(&el, SyntaxElement::Token(t) if t.kind() == Lex::LBracket.into_syntax_kind() || t.kind() == Lex::RBracket.into_syntax_kind())
+            {
                 continue;
             } else {
                 seg.push(el);
@@ -3805,17 +4558,22 @@ impl CompileCtx {
             segs.push(Vec::new());
         }
         let to_expr_opt = |v: &[SyntaxElement]| -> Result<Option<Expr>, CompileError> {
-            let nodes: Vec<_> = v.iter().filter_map(|el| match el {
-                SyntaxElement::Node(n) => Some(n.clone()),
-                _ => None,
-            }).collect();
+            let nodes: Vec<_> = v
+                .iter()
+                .filter_map(|el| match el {
+                    SyntaxElement::Node(n) => Some(n.clone()),
+                    _ => None,
+                })
+                .collect();
             if nodes.is_empty() {
                 return Ok(None);
             }
             if nodes.len() != 1 {
                 return Err(CompileError::Unsupported("slice index"));
             }
-            Ok(Some(Expr::cast(nodes[0].clone()).ok_or(CompileError::Unsupported("slice index"))?))
+            Ok(Some(
+                Expr::cast(nodes[0].clone()).ok_or(CompileError::Unsupported("slice index"))?,
+            ))
         };
         let start = to_expr_opt(&segs[0])?;
         let end = to_expr_opt(&segs[1])?;
@@ -3941,8 +4699,7 @@ impl CompileCtx {
             let reals_m = self.merged_real_field_names(&ci);
             let finals_m = self.merged_final_field_names(&ci);
             for (fname, expr_n) in &fields_m {
-                self.builder
-                    .emit_push_const(Value::String(fname.clone()));
+                self.builder.emit_push_const(Value::String(fname.clone()));
                 if let Some(expr_n) = expr_n {
                     self.compile_expr_from_syntax(expr_n.clone())?;
                 } else {
@@ -3959,11 +4716,17 @@ impl CompileCtx {
             }
             let mut n_pairs = fields_m.len() + methods_m.len();
             if let Some(cls_slot) = self.lookup_local(&name) {
-                self.builder.emit_push_const(Value::String("class".to_string()));
+                self.builder
+                    .emit_push_const(Value::String("class".to_string()));
                 self.builder.emit_opcode(Opcode::GetLocal);
                 self.builder.emit_u16_operand(cls_slot);
                 n_pairs += 1;
             }
+            self.builder
+                .emit_push_const(Value::String("name".to_string()));
+            self.builder
+                .emit_push_const(Value::String(ci.name.clone()));
+            n_pairs += 1;
             let pair_count = u16::try_from(n_pairs)
                 .map_err(|_| CompileError::Unsupported("instance too large"))?;
             self.builder
@@ -4008,12 +4771,34 @@ impl CompileCtx {
         if let Some(slot) = self.lookup_local(&name) {
             self.builder.emit_opcode(Opcode::GetLocal);
             self.builder.emit_u16_operand(slot);
-            for a in &args {
-                self.compile_expr(a.clone())?;
+            if let Some(&fid) = self.function_slot_to_fid.get(&slot) {
+                let meta = self
+                    .functions
+                    .get(fid as usize)
+                    .cloned()
+                    .ok_or(CompileError::Unsupported("call to bad function index"))?;
+                let argc = u8::try_from(args.len())
+                    .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
+                if argc < meta.required_argc || argc > meta.argc {
+                    return Err(CompileError::Unsupported("INVALID_PARAMETER_COUNT"));
+                }
+                self.emit_call_arg_exprs_with_typed_param_coerce(fid, &args, 0)?;
+                for _ in argc..meta.argc {
+                    self.builder.emit_opcode(Opcode::PushNull);
+                }
+                let o = java_ops::java_analyzed_ops_syntax(call.syntax());
+                if o > 0 {
+                    self.builder.emit_charge_ops(o);
+                }
+                self.builder.emit_call_value(meta.argc);
+            } else {
+                for a in &args {
+                    self.compile_expr(a.clone())?;
+                }
+                let argc = u8::try_from(args.len())
+                    .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
+                self.builder.emit_call_value(argc);
             }
-            let argc = u8::try_from(args.len())
-                .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
-            self.builder.emit_call_value(argc);
             return Ok(true);
         }
         let argc = u8::try_from(args.len())
@@ -4056,15 +4841,8 @@ impl CompileCtx {
                 }
             }
         }
-        if self.try_emit_implicit_this_instance_method_call(
-            &name,
-            &args,
-            Some(call.syntax()),
-        )? {
+        if self.try_emit_implicit_this_instance_method_call(&name, &args, Some(call.syntax()))? {
             return Ok(true);
-        }
-        for a in &args {
-            self.compile_expr(a.clone())?;
         }
         if let Some(&fid) = self.function_by_name.get(&name) {
             let meta = self
@@ -4075,6 +4853,7 @@ impl CompileCtx {
             if argc < meta.required_argc || argc > meta.argc {
                 return Err(CompileError::Unsupported("INVALID_PARAMETER_COUNT"));
             }
+            self.emit_call_arg_exprs_with_typed_param_coerce(fid, &args, 0)?;
             for _ in argc..meta.argc {
                 self.builder.emit_opcode(Opcode::PushNull);
             }
@@ -4084,6 +4863,9 @@ impl CompileCtx {
             }
             self.builder.emit_call_function(fid, meta.argc);
             return Ok(true);
+        }
+        for a in &args {
+            self.compile_expr(a.clone())?;
         }
         if (self.native_id_fn)(&name).is_some() {
             let arg_o: u32 = args.iter().map(|a| java_ops::java_analyzed_ops(a)).sum();
@@ -4246,8 +5028,7 @@ impl CompileCtx {
             let finals_m = self.merged_final_field_names(&ci);
             // Build instance fields + methods (incl. inherited).
             for (fname, expr_n) in &fields_m {
-                self.builder
-                    .emit_push_const(Value::String(fname.clone()));
+                self.builder.emit_push_const(Value::String(fname.clone()));
                 if let Some(expr_n) = expr_n {
                     self.compile_expr_from_syntax(expr_n.clone())?;
                 } else {
@@ -4264,11 +5045,17 @@ impl CompileCtx {
             }
             let mut n_pairs = fields_m.len() + methods_m.len();
             if let Some(cls_slot) = self.lookup_local(&name) {
-                self.builder.emit_push_const(Value::String("class".to_string()));
+                self.builder
+                    .emit_push_const(Value::String("class".to_string()));
                 self.builder.emit_opcode(Opcode::GetLocal);
                 self.builder.emit_u16_operand(cls_slot);
                 n_pairs += 1;
             }
+            self.builder
+                .emit_push_const(Value::String("name".to_string()));
+            self.builder
+                .emit_push_const(Value::String(ci.name.clone()));
+            n_pairs += 1;
             let pair_count = u16::try_from(n_pairs)
                 .map_err(|_| CompileError::Unsupported("instance too large"))?;
             self.builder
@@ -4467,8 +5254,7 @@ impl CompileCtx {
                             if is_class_receiver {
                                 let args: Vec<Expr> =
                                     AstNodeExt::children::<Expr>(cx.syntax()).collect();
-                                self.builder
-                                    .emit_push_const(Value::String(field.clone()));
+                                self.builder.emit_push_const(Value::String(field.clone()));
                                 self.builder.emit_opcode(Opcode::GetElem);
                                 for a in &args {
                                     self.compile_expr(a.clone())?;
@@ -4584,9 +5370,10 @@ impl CompileCtx {
                             for a in &args {
                                 self.compile_expr(a.clone())?;
                             }
-                            let argc = u8::try_from(args.len().saturating_add(1)).map_err(|_| {
-                                CompileError::Unsupported("too many call arguments")
-                            })?;
+                            let argc =
+                                u8::try_from(args.len().saturating_add(1)).map_err(|_| {
+                                    CompileError::Unsupported("too many call arguments")
+                                })?;
                             self.builder.emit_call_value(argc);
                             i += 2;
                             continue;
@@ -4599,8 +5386,7 @@ impl CompileCtx {
                 self.compile_index_suffix(&ix)?;
             } else if let Some(mx) = MemberExpr::cast(n.clone()) {
                 let field = Self::member_expr_field_name(&mx)?;
-                self.builder
-                    .emit_push_const(Value::String(field.clone()));
+                self.builder.emit_push_const(Value::String(field.clone()));
                 self.builder.emit_opcode(Opcode::GetElem);
                 // Typed `static real x` should behave as Real when read (`titi.reel.class`).
                 if i == 1 {
@@ -4717,7 +5503,10 @@ impl CompileCtx {
         // Support `a[i][j]++` / `a[i][j]--` (and deeper) where `a` is a local array.
         // Only when **all** suffixes are index expressions.
         if chain.len() >= 3
-            && chain.iter().skip(1).all(|el| matches!(el, SyntaxElement::Node(n) if IndexExpr::can_cast(n.kind())))
+            && chain
+                .iter()
+                .skip(1)
+                .all(|el| matches!(el, SyntaxElement::Node(n) if IndexExpr::can_cast(n.kind())))
         {
             let Some(base_name) = expr_element_as_plain_ident(&chain[0]) else {
                 return Err(CompileError::Unsupported("postfix ++/-- chain"));
@@ -4732,9 +5521,8 @@ impl CompileCtx {
                 let SyntaxElement::Node(ix_n) = el else {
                     return Err(CompileError::Unsupported("postfix ++/-- chain"));
                 };
-                let ix = IndexExpr::cast(ix_n.clone()).ok_or(CompileError::Unsupported(
-                    "postfix ++/-- chain",
-                ))?;
+                let ix = IndexExpr::cast(ix_n.clone())
+                    .ok_or(CompileError::Unsupported("postfix ++/-- chain"))?;
                 keys.push(Self::index_expr_single_subscript(&ix)?);
             }
             if keys.len() < 2 {
@@ -4997,7 +5785,10 @@ impl CompileCtx {
         // Support `++a[i][j]` / `--a[i][j]` (and deeper) where `a` is a local array.
         // Only when **all** suffixes are index expressions.
         if chain.len() >= 3
-            && chain.iter().skip(1).all(|el| matches!(el, SyntaxElement::Node(n) if IndexExpr::can_cast(n.kind())))
+            && chain
+                .iter()
+                .skip(1)
+                .all(|el| matches!(el, SyntaxElement::Node(n) if IndexExpr::can_cast(n.kind())))
         {
             let Some(base_name) = expr_element_as_plain_ident(&chain[0]) else {
                 return Ok(false);
@@ -5229,13 +6020,13 @@ impl CompileCtx {
         let then_sb = i
             .then_branch()
             .ok_or(CompileError::Unsupported("if without body"))?;
-        self.compile_stmt_block(&then_sb)?;
+        self.compile_stmt_block_maybe_scoped(&then_sb)?;
         if let Some(else_sb) = i.else_branch() {
             let jmp_end = self.builder.emit_jump_placeholder();
             let else_start = self.builder.len();
             self.builder
                 .patch_i32_operand_at(jif_op, else_start as i32 - (jif_op + 4) as i32);
-            self.compile_stmt_block(&else_sb)?;
+            self.compile_stmt_block_maybe_scoped(&else_sb)?;
             let merge = self.builder.len();
             self.builder
                 .patch_i32_operand_at(jmp_end, merge as i32 - (jmp_end + 4) as i32);
@@ -5245,6 +6036,19 @@ impl CompileCtx {
                 .patch_i32_operand_at(jif_op, merge as i32 - (jif_op + 4) as i32);
         }
         Ok(())
+    }
+
+    /// Braced `{ … }` branches get a lexical scope for `var` (Java parity: sibling `else` still sees
+    /// globals). Single-statement `if (c) stmt` does not push a scope (JS-style `var` hoisting).
+    fn compile_stmt_block_maybe_scoped(&mut self, sb: &StmtBlock) -> Result<(), CompileError> {
+        if matches!(sb, StmtBlock::Block(_)) {
+            self.enter_block_scope();
+            let r = self.compile_stmt_block(sb);
+            self.exit_block_scope();
+            r
+        } else {
+            self.compile_stmt_block(sb)
+        }
     }
 
     fn compile_var_decl(&mut self, v: VarDecl) -> Result<(), CompileError> {
@@ -5264,16 +6068,14 @@ impl CompileCtx {
         }
         let mut force_real = false;
         let mut force_int = false;
+        let mut nullable_int = false;
+        let mut int_real_union = false;
         if let Some(SyntaxElement::Node(n)) = elts.get(i) {
             if TypeExpr::can_cast(n.kind()) {
-                force_real = n
-                    .descendant_tokens()
-                    .iter()
-                    .any(|t| t.kind_as::<Lex>() == Some(Lex::RealKw));
-                force_int = n
-                    .descendant_tokens()
-                    .iter()
-                    .any(|t| t.kind_as::<Lex>() == Some(Lex::IntegerKw));
+                force_real = type_syntax_node_is_scalar_real(n);
+                force_int = type_syntax_node_is_scalar_integer(n);
+                nullable_int = type_expr_nullable_integer(n);
+                int_real_union = type_syntax_node_is_integer_real_union(n);
                 i += 1;
             }
         }
@@ -5286,7 +6088,15 @@ impl CompileCtx {
                     .any(|t| t.kind_as::<Lex>() == Some(Lex::Ident) && t.text() == "Map");
             }
         }
-        self.compile_declarator_list(&elts[i..], false, force_real, force_int, force_empty_map)
+        self.compile_declarator_list(
+            &elts[i..],
+            false,
+            force_real,
+            force_int,
+            force_empty_map,
+            nullable_int,
+            int_real_union,
+        )
     }
 
     fn compile_const_decl(&mut self, c: ConstDecl) -> Result<(), CompileError> {
@@ -5302,7 +6112,7 @@ impl CompileCtx {
             }
         }
         // Consts are untyped in this VM compiler path.
-        self.compile_declarator_list(&elts[i..], true, false, false, false)
+        self.compile_declarator_list(&elts[i..], true, false, false, false, false, false)
     }
 
     fn compile_global_decl(&mut self, g: GlobalDecl) -> Result<(), CompileError> {
@@ -5319,16 +6129,14 @@ impl CompileCtx {
         }
         let mut force_real = false;
         let mut force_int = false;
+        let mut nullable_int = false;
+        let mut int_real_union = false;
         if let Some(SyntaxElement::Node(n)) = elts.get(i) {
             if TypeExpr::can_cast(n.kind()) {
-                force_real = n
-                    .descendant_tokens()
-                    .iter()
-                    .any(|t| t.kind_as::<Lex>() == Some(Lex::RealKw));
-                force_int = n
-                    .descendant_tokens()
-                    .iter()
-                    .any(|t| t.kind_as::<Lex>() == Some(Lex::IntegerKw));
+                force_real = type_syntax_node_is_scalar_real(n);
+                force_int = type_syntax_node_is_scalar_integer(n);
+                nullable_int = type_expr_nullable_integer(n);
+                int_real_union = type_syntax_node_is_integer_real_union(n);
                 i += 1;
             }
         }
@@ -5341,7 +6149,15 @@ impl CompileCtx {
                     .any(|t| t.kind_as::<Lex>() == Some(Lex::Ident) && t.text() == "Map");
             }
         }
-        self.compile_declarator_list(&elts[i..], false, force_real, force_int, force_empty_map)
+        self.compile_declarator_list(
+            &elts[i..],
+            false,
+            force_real,
+            force_int,
+            force_empty_map,
+            nullable_int,
+            int_real_union,
+        )
     }
 
     /// Comma-separated `ident (= expr)?` after the leading keyword / optional type (`var` / `const` / `global`).
@@ -5352,6 +6168,8 @@ impl CompileCtx {
         force_real: bool,
         force_int: bool,
         force_empty_map: bool,
+        nullable_int: bool,
+        int_real_union: bool,
     ) -> Result<(), CompileError> {
         let mut i = 0usize;
         while i < elts.len() {
@@ -5374,8 +6192,14 @@ impl CompileCtx {
             if force_real {
                 self.real_typed_slots.insert(slot);
             }
-            if force_int {
+            if force_int && !int_real_union {
                 self.int_typed_slots.insert(slot);
+                if nullable_int {
+                    self.nullable_int_slots.insert(slot);
+                }
+            }
+            if int_real_union {
+                self.int_real_union_slots.insert(slot);
             }
             let mut initialized = false;
             if i < elts.len() {
@@ -5423,8 +6247,9 @@ impl CompileCtx {
                     std::cell::RefCell::new(Vec::new()),
                 )));
             }
-            if force_int && !initialized {
-                // Untyped default is `null`; typed `integer` defaults to 0 in v2/v4 suite expectations.
+            if force_int && !initialized && !nullable_int {
+                // Untyped default is `null`; plain typed `integer` defaults to 0 in v2/v4 suite expectations.
+                // `integer | null` / `integer?` keep `null`.
                 self.builder.emit_opcode(Opcode::Pop);
                 self.builder.emit_push_const(Value::num_int(0));
             }
@@ -5551,8 +6376,10 @@ impl CompileCtx {
             self.builder.emit_u16_operand(tmp_arr_len);
             let j_len_done = self.builder.emit_jump_placeholder();
             let use_map_len_pc = self.builder.len();
-            self.builder
-                .patch_i32_operand_at(j_use_map_len, use_map_len_pc as i32 - (j_use_map_len + 4) as i32);
+            self.builder.patch_i32_operand_at(
+                j_use_map_len,
+                use_map_len_pc as i32 - (j_use_map_len + 4) as i32,
+            );
             self.builder.emit_opcode(Opcode::GetLocal);
             self.builder.emit_u16_operand(tmp_map_len);
             let len_done_pc = self.builder.len();
@@ -5572,7 +6399,8 @@ impl CompileCtx {
         self.builder.emit_u16_operand(i_slot);
         if binds.len() == 1 {
             self.builder.emit_opcode(Opcode::GetLocal);
-            self.builder.emit_u16_operand(dyn_len_slot.expect("len slot"));
+            self.builder
+                .emit_u16_operand(dyn_len_slot.expect("len slot"));
         } else {
             self.builder.emit_opcode(Opcode::GetLocal);
             self.builder.emit_u16_operand(cont_slot);
@@ -5595,7 +6423,8 @@ impl CompileCtx {
         if binds.len() == 1 {
             // if (is_map) { (k,v)=entryAt; v_slot=v; discard k } else { v_slot = cont[i] }
             self.builder.emit_opcode(Opcode::GetLocal);
-            self.builder.emit_u16_operand(dyn_map_flag_slot.expect("flag slot"));
+            self.builder
+                .emit_u16_operand(dyn_map_flag_slot.expect("flag slot"));
             let j_array_path = self.builder.emit_jump_if_false_placeholder();
 
             // map path
@@ -5614,8 +6443,10 @@ impl CompileCtx {
             self.builder.emit_u16_operand(v_slot);
 
             let after_pick_pc = self.builder.len();
-            self.builder
-                .patch_i32_operand_at(j_after_pick, after_pick_pc as i32 - (j_after_pick + 4) as i32);
+            self.builder.patch_i32_operand_at(
+                j_after_pick,
+                after_pick_pc as i32 - (j_after_pick + 4) as i32,
+            );
         } else if use_map {
             self.builder.emit_map_entry_at();
             self.builder.emit_opcode(Opcode::SetLocal);
@@ -5692,6 +6523,28 @@ impl CompileCtx {
             if let Some(slot) = self.lookup_local(&local_name) {
                 self.builder.emit_opcode(Opcode::GetLocal);
                 self.builder.emit_u16_operand(slot);
+                if let Some(&fid) = self.function_slot_to_fid.get(&slot) {
+                    let meta = self
+                        .functions
+                        .get(fid as usize)
+                        .cloned()
+                        .ok_or(CompileError::Unsupported("call to bad function index"))?;
+                    let argc = u8::try_from(args.len())
+                        .map_err(|_| CompileError::Unsupported("too many call arguments"))?;
+                    if argc < meta.required_argc || argc > meta.argc {
+                        return Err(CompileError::Unsupported("INVALID_PARAMETER_COUNT"));
+                    }
+                    self.emit_call_arg_exprs_with_typed_param_coerce(fid, args, 0)?;
+                    for _ in argc..meta.argc {
+                        self.builder.emit_opcode(Opcode::PushNull);
+                    }
+                    let o = java_ops::java_analyzed_ops_syntax(call.syntax());
+                    if o > 0 {
+                        self.builder.emit_charge_ops(o);
+                    }
+                    self.builder.emit_call_value(meta.argc);
+                    return Ok(());
+                }
                 for a in args {
                     self.compile_expr(a.clone())?;
                 }
@@ -5705,11 +6558,7 @@ impl CompileCtx {
         let name = expr_plain_ident_from_expr(callee).ok_or(CompileError::Unsupported(
             "call callee must be a simple identifier",
         ))?;
-        if self.try_emit_implicit_this_instance_method_call(
-            &name,
-            args,
-            Some(call.syntax()),
-        )? {
+        if self.try_emit_implicit_this_instance_method_call(&name, args, Some(call.syntax()))? {
             return Ok(());
         }
         let argc = u8::try_from(args.len())
@@ -5755,17 +6604,18 @@ impl CompileCtx {
                 }
             }
         }
-        for a in args {
-            self.compile_expr(a.clone())?;
-        }
         let expr = Expr::Call(call.clone());
         if let Some(&fid) = self.function_by_name.get(&name) {
+            self.emit_call_arg_exprs_with_typed_param_coerce(fid, args, 0)?;
             let o = java_ops::java_analyzed_ops(&expr);
             if o > 0 {
                 self.builder.emit_charge_ops(o);
             }
             self.builder.emit_call_function(fid, argc);
             return Ok(());
+        }
+        for a in args {
+            self.compile_expr(a.clone())?;
         }
         if (self.native_id_fn)(&name).is_some() {
             let arg_o: u32 = args.iter().map(|a| java_ops::java_analyzed_ops(a)).sum();
@@ -5913,6 +6763,10 @@ impl CompileCtx {
 
         let fid = u16::try_from(self.functions.len())
             .map_err(|_| CompileError::Unsupported("too many functions"))?;
+        let param_real: Vec<bool> = params.iter().map(fn_param_is_real).collect();
+        let param_int: Vec<bool> = params.iter().map(fn_param_needs_int_call_coerce).collect();
+        debug_assert_eq!(param_real.len(), usize::from(argc));
+        debug_assert_eq!(param_int.len(), usize::from(argc));
         self.functions.push(FunctionEntry {
             name: format!("__anon{fid}"),
             entry_pc,
@@ -5920,7 +6774,15 @@ impl CompileCtx {
             argc,
             slot_base,
             slot_count,
+            param_real,
+            param_int,
         });
+
+        let param_name_set: HashSet<String> = params.iter().filter_map(|p| p.name()).collect();
+        let mut cap_slots: HashSet<u16> = HashSet::new();
+        self.collect_closure_capture_slots_for_block(&body, &param_name_set, &mut cap_slots)?;
+        let mut capture_vec: Vec<u16> = cap_slots.into_iter().collect();
+        capture_vec.sort_unstable();
 
         self.locals = saved_locals;
         self.outer_locals.pop();
@@ -5930,59 +6792,12 @@ impl CompileCtx {
         self.builder
             .patch_i32_operand_at(j_skip, after_fn as i32 - (j_skip + 4) as i32);
 
-        // Runtime closures currently snapshot/restore captured slots; until by-ref captures are
-        // implemented, capture nothing and rely on global-slot addressing for outer variables.
-        self.builder.emit_make_closure(fid, &[]);
+        self.builder.emit_make_closure(fid, &capture_vec);
         Ok(())
     }
 
     fn compile_lambda_expr(&mut self, l: &LambdaExpr) -> Result<(), CompileError> {
-        fn walk_tokens(node: &SyntaxNode, out: &mut Vec<SyntaxToken>) {
-            for el in node.children() {
-                match el {
-                    SyntaxElement::Token(t) => {
-                        if !syntax_el_is_trivia(&SyntaxElement::Token(t.clone())) {
-                            out.push(t);
-                        }
-                    }
-                    SyntaxElement::Node(n) => walk_tokens(&n, out),
-                }
-            }
-        }
-
-        // Extract parameter identifiers up to the first `->` token.
-        let mut params: Vec<String> = Vec::new();
-        let mut toks: Vec<SyntaxToken> = Vec::new();
-        walk_tokens(l.syntax(), &mut toks);
-        for t in &toks {
-            if t.text() == "->" || t.text() == "=>" || Lex::from_syntax_kind(t.kind()) == Some(Lex::Arrow) {
-                break;
-            }
-            if t.kind() == Lex::Ident.into_syntax_kind() {
-                params.push(t.text().to_string());
-            }
-        }
-        if params.is_empty() {
-            let txt = l.syntax().collect_text();
-            let arrow_at = txt.find("->").or_else(|| txt.find("=>"));
-            if let Some(ix) = arrow_at {
-                let head = &txt[..ix];
-                let mut cur = String::new();
-                for ch in head.chars() {
-                    if ch.is_ascii_alphanumeric() || ch == '_' {
-                        cur.push(ch);
-                    } else {
-                        if !cur.is_empty() {
-                            params.push(core::mem::take(&mut cur));
-                        }
-                    }
-                }
-                if !cur.is_empty() {
-                    params.push(cur);
-                }
-                params.retain(|s| !s.is_empty());
-            }
-        }
+        let params: Vec<String> = lambda_expr_param_names(l);
         let argc = u8::try_from(params.len())
             .map_err(|_| CompileError::Unsupported("too many parameters"))?;
 
@@ -6024,10 +6839,8 @@ impl CompileCtx {
         }
 
         let mut after_arrow = false;
-        let body_n =
-            find_body_after_arrow(l.syntax(), &mut after_arrow).ok_or(CompileError::Unsupported(
-                "lambda without body",
-            ))?;
+        let body_n = find_body_after_arrow(l.syntax(), &mut after_arrow)
+            .ok_or(CompileError::Unsupported("lambda without body"))?;
         if let Some(b) = crate::ast::Block::cast(body_n.clone()) {
             for s in b.stmts() {
                 self.compile_stmt(s)?;
@@ -6050,6 +6863,9 @@ impl CompileCtx {
 
         let fid = u16::try_from(self.functions.len())
             .map_err(|_| CompileError::Unsupported("too many functions"))?;
+        let z = usize::from(argc);
+        let param_real = vec![false; z];
+        let param_int = vec![false; z];
         self.functions.push(FunctionEntry {
             name: format!("__lambda{fid}"),
             entry_pc,
@@ -6057,7 +6873,23 @@ impl CompileCtx {
             argc,
             slot_base,
             slot_count,
+            param_real,
+            param_int,
         });
+
+        let param_name_set: HashSet<String> = params.iter().cloned().collect();
+        let mut cap_slots: HashSet<u16> = HashSet::new();
+        match lambda_body_for_capture(l) {
+            Some(LambdaBodyForCapture::Block(b)) => {
+                self.collect_closure_capture_slots_for_block(&b, &param_name_set, &mut cap_slots)?;
+            }
+            Some(LambdaBodyForCapture::Expr(ex)) => {
+                self.collect_closure_slots_expr(&ex, &param_name_set, &mut cap_slots)?;
+            }
+            None => {}
+        }
+        let mut capture_vec: Vec<u16> = cap_slots.into_iter().collect();
+        capture_vec.sort_unstable();
 
         self.locals = saved_locals;
         self.outer_locals.pop();
@@ -6067,7 +6899,7 @@ impl CompileCtx {
         self.builder
             .patch_i32_operand_at(j_skip, after_fn as i32 - (j_skip + 4) as i32);
 
-        self.builder.emit_make_closure(fid, &[]);
+        self.builder.emit_make_closure(fid, &capture_vec);
         Ok(())
     }
 
@@ -6177,8 +7009,9 @@ impl CompileCtx {
                 i += 1;
             }
             Some(SyntaxElement::Node(n)) => {
-                let ex = Expr::cast(n.clone())
-                    .ok_or(CompileError::Unsupported("interval literal: expected expression"))?;
+                let ex = Expr::cast(n.clone()).ok_or(CompileError::Unsupported(
+                    "interval literal: expected expression",
+                ))?;
                 left_expr = Some(ex);
                 i += 1;
                 let dd = parts.get(i).ok_or(CompileError::Unsupported(
@@ -6200,8 +7033,9 @@ impl CompileCtx {
 
         let right_expr: Option<Expr> = match parts.get(i) {
             Some(SyntaxElement::Node(n)) => {
-                let ex = Expr::cast(n.clone())
-                    .ok_or(CompileError::Unsupported("interval literal: expected expression"))?;
+                let ex = Expr::cast(n.clone()).ok_or(CompileError::Unsupported(
+                    "interval literal: expected expression",
+                ))?;
                 i += 1;
                 Some(ex)
             }
@@ -6365,6 +7199,11 @@ impl CompileCtx {
             if self.try_compile_expr_parts_dispatch(&parts)? {
                 return Ok(());
             }
+            // `return 12 ** 5 == 12 ** 5` wraps a flat `[lhs, BinaryExpr, …]` chain under `Node::Expr`;
+            // do not stop after the first child (`12 ** 5` only).
+            if self.try_compile_infix_chain_on_parts(&parts)? {
+                return Ok(());
+            }
             for el in n.children() {
                 if syntax_el_is_trivia(&el) {
                     continue;
@@ -6379,8 +7218,14 @@ impl CompileCtx {
             return Ok(());
         }
         if BinaryExpr::can_cast(n.kind()) {
+            // `compile_binary_fragment` assumes the left operand is already on the stack (as in a
+            // flat `[lhs, BinaryExpr, …]` chain). A `BinaryExpr` syntax node reached here is often
+            // nested (e.g. rhs of `==`), so emit the prefix first.
             let lhs = java_ops::prefix_before_first_binary_op(&n);
             let lhs_o = java_ops::java_ops_expr_flat(&lhs);
+            if !lhs.is_empty() {
+                self.compile_subexpr_from_parts(&lhs)?;
+            }
             return self.compile_binary_fragment(&n, lhs_o);
         }
         if let Some(ie) = IntervalExpr::cast(n.clone()) {
@@ -6559,27 +7404,50 @@ impl CompileCtx {
             return Ok(false);
         }
         // Allow a postfix chain on the LHS before the first `BinaryExpr` node.
-        let Some(first_bin) = parts.iter().position(|el| {
-            matches!(el, SyntaxElement::Node(n) if BinaryExpr::can_cast(n.kind()))
-        }) else {
+        let Some(first_bin) = parts
+            .iter()
+            .position(|el| matches!(el, SyntaxElement::Node(n) if BinaryExpr::can_cast(n.kind())))
+        else {
             return Ok(false);
         };
-        if first_bin == 0 {
-            return Ok(false);
-        }
-        // Compile the LHS expression prefix (may be a postfix chain like `a[0].b`).
-        if first_bin == 1 {
-            match self.emit_expr_head_operand(&parts[0])? {
-                None => return Ok(false),
-                Some(()) => {}
-            }
-        } else {
-            if !self.try_compile_postfix_chain_on_parts(&parts[..first_bin])? {
+        // Sipha `left_assoc_infix_level` can emit `Expr` as `[BINARY_EXPR(lhs…), BINARY_EXPR(op rhs)…]`
+        // (first `BinaryExpr` at index 0). `emit_expr_head_operand` returns `None` for a nested
+        // `BinaryExpr` lhs (e.g. `12 ** 5` before `==`); compile that subtree here.
+        let tail_start = if first_bin == 0 {
+            if let SyntaxElement::Node(n) = &parts[0] {
+                if BinaryExpr::can_cast(n.kind()) {
+                    self.compile_expr_from_syntax(n.clone())?;
+                    1usize
+                } else {
+                    return Ok(false);
+                }
+            } else {
                 return Ok(false);
             }
-        }
+        } else {
+            // Compile the LHS expression prefix (may be a postfix chain like `a[0].b`).
+            if first_bin == 1 {
+                match self.emit_expr_head_operand(&parts[0])? {
+                    None => {
+                        if let SyntaxElement::Node(n) = &parts[0] {
+                            if BinaryExpr::can_cast(n.kind()) {
+                                self.compile_expr_from_syntax(n.clone())?;
+                            } else {
+                                return Ok(false);
+                            }
+                        } else {
+                            return Ok(false);
+                        }
+                    }
+                    Some(()) => {}
+                }
+            } else if !self.try_compile_postfix_chain_on_parts(&parts[..first_bin])? {
+                return Ok(false);
+            }
+            first_bin
+        };
         // Validate tail as all `BinaryExpr`.
-        for p in parts.iter().skip(first_bin) {
+        for p in parts.iter().skip(tail_start) {
             let SyntaxElement::Node(node) = p else {
                 return Ok(false);
             };
@@ -6587,16 +7455,16 @@ impl CompileCtx {
                 return Ok(false);
             }
         }
-        let tail = &parts[first_bin..];
+        let tail = &parts[tail_start..];
         if let Some(sc_op) = Self::homogeneous_short_circuit_tail_op(tail) {
             if tail.len() >= 2 {
-                let lhs_ops = java_ops::java_ops_expr_flat(&parts[..first_bin]);
+                let lhs_ops = java_ops::java_ops_expr_flat(&parts[..tail_start]);
                 self.compile_homogeneous_short_circuit_chain(sc_op, tail, lhs_ops)?;
                 return Ok(true);
             }
         }
-        let mut prefix_len = first_bin;
-        for p in parts.iter().skip(first_bin) {
+        let mut prefix_len = tail_start;
+        for p in parts.iter().skip(tail_start) {
             let SyntaxElement::Node(bin) = p else {
                 unreachable!("validated above");
             };
@@ -6694,7 +7562,9 @@ impl CompileCtx {
                     }
                     // Some builtin keywords parse as `BuiltinTypeNameExpr` (Node).
                     [SyntaxElement::Node(n)] => {
-                        let kw = n.child_tokens().find_map(|t| Lex::from_syntax_kind(t.kind()));
+                        let kw = n
+                            .child_tokens()
+                            .find_map(|t| Lex::from_syntax_kind(t.kind()));
                         match kw {
                             Some(Lex::ArrayKw) => 4,
                             Some(Lex::BooleanKw) => 2,
@@ -6803,8 +7673,10 @@ impl CompileCtx {
 
                 // Default: pop rhs, push false
                 let not_array_pc = self.builder.len();
-                self.builder
-                    .patch_i32_operand_at(j_not_array, not_array_pc as i32 - (j_not_array + 4) as i32);
+                self.builder.patch_i32_operand_at(
+                    j_not_array,
+                    not_array_pc as i32 - (j_not_array + 4) as i32,
+                );
                 self.builder.emit_opcode(Opcode::Pop);
                 self.builder.emit_push_const(Value::Bool(false));
 
@@ -6996,10 +7868,7 @@ impl CompileCtx {
     fn emit_binop(&mut self, op: Lex) -> Result<(), CompileError> {
         match op {
             Lex::StarStar => {
-                let Some(nid) = (self.native_id_fn)("pow") else {
-                    return Err(CompileError::Unsupported("pow native"));
-                };
-                self.builder.emit_call_native(nid, 2);
+                self.builder.emit_opcode(Opcode::Pow);
                 Ok(())
             }
             Lex::BitAnd => {
@@ -7079,7 +7948,9 @@ impl CompileCtx {
                 if self.compile_prefix_chain_inc_dec(&op, true)? {
                     return Ok(());
                 }
-                return Err(CompileError::Unsupported("prefix ++/-- expects simple identifier"));
+                return Err(CompileError::Unsupported(
+                    "prefix ++/-- expects simple identifier",
+                ));
             }
             if t.kind() == minusminus {
                 let op = [SyntaxElement::Node(inner.clone())];
@@ -7096,7 +7967,9 @@ impl CompileCtx {
                 if self.compile_prefix_chain_inc_dec(&op, false)? {
                     return Ok(());
                 }
-                return Err(CompileError::Unsupported("prefix ++/-- expects simple identifier"));
+                return Err(CompileError::Unsupported(
+                    "prefix ++/-- expects simple identifier",
+                ));
             }
         }
         let mut i = 0usize;
@@ -7173,7 +8046,9 @@ impl CompileCtx {
             if self.compile_prefix_chain_inc_dec(operand, has_pre_incr)? {
                 return Ok(());
             }
-            return Err(CompileError::Unsupported("prefix ++/-- expects simple identifier"));
+            return Err(CompileError::Unsupported(
+                "prefix ++/-- expects simple identifier",
+            ));
         }
         match operand {
             [SyntaxElement::Node(inner)] => {
@@ -7217,5 +8092,3 @@ impl CompileCtx {
         Ok(())
     }
 }
-
- 

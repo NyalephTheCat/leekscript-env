@@ -15,7 +15,9 @@ fn load_actions(path: &str) -> Vec<Value> {
 }
 
 fn opcode(v: &Value) -> Option<i64> {
-    v.as_array().and_then(|a| a.first()).and_then(|x| x.as_i64())
+    v.as_array()
+        .and_then(|a| a.first())
+        .and_then(|x| x.as_i64())
 }
 
 /// Optional smoke test: run Java generator and ensure it produces output JSON.
@@ -48,4 +50,3 @@ fn java_generator_runs_and_emits_actions() {
     // The very first action should be START_FIGHT (0) in Java.
     assert_eq!(opcode(&actions[0]), Some(0));
 }
-

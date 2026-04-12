@@ -1,9 +1,9 @@
 //! Values carried on the VM stack (minimal set for the first execution tier).
 
-use std::cmp::Ordering;
-use std::cell::RefCell;
-use std::collections::HashMap;
 use std::cell::Cell;
+use std::cell::RefCell;
+use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::string::String;
 use std::vec::Vec;
@@ -334,11 +334,18 @@ pub enum Value {
     /// Interval literal (`[..]`, `[1..2[`, `]..1]`, …).
     Interval(IntervalValue),
     /// User function handle (first-class function value).
-    Function { fid: u16 },
+    Function {
+        fid: u16,
+    },
     /// User function with captured locals.
-    Closure { fid: u16, captures: Vec<(u16, Value)> },
+    Closure {
+        fid: u16,
+        captures: Vec<(u16, Value)>,
+    },
     /// Native function handle (first-class builtin function value).
-    NativeFunction { nid: u16 },
+    NativeFunction {
+        nid: u16,
+    },
 }
 
 impl PartialEq for Value {
@@ -368,11 +375,7 @@ impl PartialEq for Value {
                     fields: bf,
                     final_fields: bfl,
                 },
-            ) => {
-                an == bn
-                    && afl == bfl
-                    && af.borrow().as_slice() == bf.borrow().as_slice()
-            },
+            ) => an == bn && afl == bfl && af.borrow().as_slice() == bf.borrow().as_slice(),
             _ => false,
         }
     }
@@ -675,8 +678,10 @@ impl Value {
             } => {
                 let borrowed = fields.borrow();
                 // Java suite export for instances is deterministic; sort by field key.
-                let mut sorted = instance_pairs_for_export(borrowed.as_slice());
-                sorted.sort_by(|(ka, _), (kb, _)| object_field_key_export(ka).cmp(&object_field_key_export(kb)));
+                let mut sorted = instance_pairs_for_export(class_name, borrowed.as_slice());
+                sorted.sort_by(|(ka, _), (kb, _)| {
+                    object_field_key_export(ka).cmp(&object_field_key_export(kb))
+                });
                 let inner =
                     format_object_brace_export(sorted.as_slice(), |v| v.to_leek_export_string());
                 format!("{class_name} {inner}")
@@ -715,7 +720,9 @@ impl Value {
                 out.push(rch);
                 out
             }
-            Self::Function { .. } | Self::Closure { .. } | Self::NativeFunction { .. } => "#Anonymous Function".into(),
+            Self::Function { .. } | Self::Closure { .. } | Self::NativeFunction { .. } => {
+                "#Anonymous Function".into()
+            }
             Self::Class(c) => c.java_class_string(),
             Self::String(s) => {
                 // Java `AI.string`: values that are exactly one JSON string token use a doubled-`"`
@@ -746,7 +753,9 @@ impl Value {
                 // `TestMap.java:244`…).
                 // Leek `string([k : v, …])` / V4 `string({…})` bodies are not valid JSON but use the
                 // same raw embed rule (see `TestString.java` v4 map/object cases).
-                if crate::vm::host::json::decode(s).is_ok() || leek_export_raw_embed_composite_string(s) {
+                if crate::vm::host::json::decode(s).is_ok()
+                    || leek_export_raw_embed_composite_string(s)
+                {
                     let mut out = String::with_capacity(s.len() + 2);
                     out.push('"');
                     out.push_str(s);
@@ -820,8 +829,7 @@ impl Value {
                 seen.insert(key, 1);
                 let len = fields.borrow().len() as u64;
                 seen.remove(&key);
-                1u64
-                    .saturating_add(((class_name.len() as u64).saturating_add(7)) / 8)
+                1u64.saturating_add(((class_name.len() as u64).saturating_add(7)) / 8)
                     .saturating_add(len.saturating_mul(2))
             }
             Self::Set(s) => 1u64.saturating_add(s.iter().map(|v| v.ram_quads_ctx(seen)).sum()),
@@ -934,8 +942,10 @@ impl Value {
                 final_fields: _,
             } => {
                 let borrowed = fields.borrow();
-                let mut sorted = instance_pairs_for_export(borrowed.as_slice());
-                sorted.sort_by(|(ka, _), (kb, _)| object_field_key_export(ka).cmp(&object_field_key_export(kb)));
+                let mut sorted = instance_pairs_for_export(class_name, borrowed.as_slice());
+                sorted.sort_by(|(ka, _), (kb, _)| {
+                    object_field_key_export(ka).cmp(&object_field_key_export(kb))
+                });
                 let inner =
                     format_object_brace_export(sorted.as_slice(), |v| v.to_leek_coerce_string());
                 format!("{class_name} {inner}")
@@ -1004,17 +1014,16 @@ impl Value {
             Self::Object(o) => {
                 let o = o.borrow();
                 format_object_brace_export(o.as_slice(), |v| v.to_java_string_builtin_v4())
-            },
+            }
             Self::Instance {
                 class_name,
                 fields,
                 final_fields: _,
             } => {
                 let borrowed = fields.borrow();
-                let pairs = instance_pairs_for_export(borrowed.as_slice());
-                let inner = format_object_brace_export(pairs.as_slice(), |v| {
-                    v.to_java_string_builtin_v4()
-                });
+                let pairs = instance_pairs_for_export(class_name, borrowed.as_slice());
+                let inner =
+                    format_object_brace_export(pairs.as_slice(), |v| v.to_java_string_builtin_v4());
                 format!("{class_name} {inner}")
             }
             Self::Set(s) => {
@@ -1077,12 +1086,28 @@ fn is_leek_ident(s: &str) -> bool {
     it.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// User instances store a synthetic `class` entry for Java `instance.class` / `.fields`; omit it from
-/// export strings (see `TestObject.java` `Test {…}` vs internal `class` reference).
-fn instance_pairs_for_export(fields: &[(Value, Value)]) -> Vec<(Value, Value)> {
+/// Instances store synthetic `class` / `name` entries for Java `instance.class` / the class-name
+/// string. The `class` slot is an object (user-defined class), not [`Value::Class`]. Omit `class`
+/// from export like Java; omit `name` only when it holds the synthetic class-name string, not a
+/// user field (see `TestArray.java` partition / `TestObject.java`).
+fn instance_pairs_for_export(class_name: &str, fields: &[(Value, Value)]) -> Vec<(Value, Value)> {
     fields
         .iter()
-        .filter(|(k, _)| !matches!(k, Value::String(s) if s == "class"))
+        .filter(|(k, v)| {
+            if matches!(k, Value::String(s) if s == "class") {
+                return false;
+            }
+            if let Value::String(key) = k {
+                if key == "name" {
+                    if let Value::String(s) = v {
+                        if s == class_name {
+                            return false;
+                        }
+                    }
+                }
+            }
+            true
+        })
         .cloned()
         .collect()
 }
@@ -1193,8 +1218,7 @@ fn map_value_export_with_self_ref(
                 return "[:]".into();
             }
             let mut out = String::from("[");
-            let mut entries: Vec<(&Value, &Value)> =
-                snapshot.iter().map(|(k, v)| (k, v)).collect();
+            let mut entries: Vec<(&Value, &Value)> = snapshot.iter().map(|(k, v)| (k, v)).collect();
             entries.sort_by(|(ka, _), (kb, _)| map_key_cmp_for_java_export(ka, kb));
             for (i, (k, vv)) in entries.into_iter().enumerate() {
                 if i > 0 {
@@ -1237,11 +1261,15 @@ fn shallow_map_export(m: &Rc<RefCell<Vec<(Value, Value)>>>) -> String {
         }
         // Keys/values that are composite are collapsed to `<...>` in this shallow view.
         let k_str = match k {
-            Value::Array(_) | Value::Map(_) | Value::Object(_) | Value::Instance { .. } => "<...>".into(),
+            Value::Array(_) | Value::Map(_) | Value::Object(_) | Value::Instance { .. } => {
+                "<...>".into()
+            }
             _ => k.to_leek_export_string(),
         };
         let v_str = match v {
-            Value::Array(_) | Value::Map(_) | Value::Object(_) | Value::Instance { .. } => "<...>".into(),
+            Value::Array(_) | Value::Map(_) | Value::Object(_) | Value::Instance { .. } => {
+                "<...>".into()
+            }
             _ => v.to_leek_export_string(),
         };
         out.push_str(&k_str);

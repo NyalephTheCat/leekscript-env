@@ -47,19 +47,12 @@ fn normalize_java_vm_text(s: &str) -> String {
         .replace("ÃÂ", "π")
 }
 
+
 fn case_applies(c: &JavaVmCase) -> bool {
     if c.version_min > RUST_LS_VERSION || RUST_LS_VERSION > c.version_max {
         return false;
     }
-    // The Number matrix still contains many constructs outside this VM's current subset.
-    if c.id.starts_with("TestNumber.java:") {
-        return false;
-    }
-    // The Rust VM currently does not implement Java-style numeric wrapper statics/mutation.
-    // Skip those cases for now (they are mostly about class-static fields like `Real.MAX_VALUE`).
-    if c.source.contains("Real.") || c.source.contains("Integer.") {
-        return false;
-    }
+
     // `DISABLED_code` in Java sets `Case.enabled = false`; the exporter still emits these rows.
     // Skip snippets that do not parse in sipha / are intentionally out of VM scope.
     !matches!(

@@ -6,7 +6,6 @@ use leekscript::vm::{
     stdlib_global_function_init,
 };
 
-
 #[test]
 fn loop_bytecode_includes_charge_ops_for_java_style_budget() {
     let chunk = compile_chunk_v4("var i = 0; while (i < 2) { i = i + 1; } return i;").unwrap();
@@ -516,7 +515,14 @@ fn set_put_on_local_after_set_literal_compiles() {
     });
     let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
     let got = vm.run().unwrap();
-    assert_eq!(got, Value::Set(vec![Value::num_int(1), Value::num_int(2), Value::num_int(3)]));
+    assert_eq!(
+        got,
+        Value::Set(vec![
+            Value::num_int(1),
+            Value::num_int(2),
+            Value::num_int(3)
+        ])
+    );
 }
 
 #[test]
@@ -532,4 +538,78 @@ fn testobject_style_class_fields_and_foreach() {
     let mut vm2 = Vm::from_compiled_chunk(chunk).unwrap();
     let got = vm2.run().unwrap();
     assert_eq!(got.to_leek_export_string(), "Test {a: 8, b: 8, c: 8}");
+}
+
+#[test]
+fn nullable_integer_survives_null_assignment_in_while() {
+    let src = "integer | null x = 5; var r = 0; while (x != null) { r = abs(x); x = null } return r";
+    let chunk = compile_chunk_v4(src).unwrap();
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    vm.max_operations = Some(1000);
+    assert_eq!(vm.run().unwrap(), Value::num_int(5));
+}
+
+#[test]
+fn nested_ternary_and_pow_in_comparison() {
+    let chunk = compile_chunk_v4("return (5 > 10) ? 'a' : (4 == 2 ** 2) ? 'yes' : 'no';").unwrap();
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::String("yes".into()));
+
+    let chunk2 = compile_chunk_v4("var f = x -> x ** 2 return f(12)").unwrap();
+    let mut vm2 = Vm::from_compiled_chunk(chunk2).unwrap();
+    assert_eq!(vm2.run().unwrap(), Value::num_int(144));
+}
+
+#[test]
+fn nested_anon_functions_capture_outer_params() {
+    let src = r#"function outer(x) { return function(y) { return function(z) { return x + y + z } } } return outer(1)(2)(3)"#;
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::num_int(6));
+}
+
+#[test]
+fn closure_assignment_to_outer_var() {
+    let src = "any toto = 12; var f = function() { toto = 'salut'; }; f(); return toto";
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    let v = vm.run().unwrap();
+    assert_eq!(v.to_leek_export_string(), "\"salut\"");
+}
+
+#[test]
+fn closure_assignment_after_indexed_call() {
+    let src = "any toto = 12; var f = function() { toto = 'salut'; }; [true, 12, f][2](); return toto";
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    let v = vm.run().unwrap();
+    assert_eq!(v.to_leek_export_string(), "\"salut\"");
+}
+
+#[test]
+fn array_map_with_arrow_lambda_gets_two_arguments() {
+    let src = "return arrayMap([1, 2, 3], x -> x * 2)";
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    vm.run().expect("arrayMap(arr, lambda) should run");
+}
+
+/// Java `TestEdgeCases.java:269` — `arrayMap(arr, x -> …)` must stay two call arguments (parser used
+/// to fold `arr, x -> …` into one multi-param lambda).
+#[test]
+fn transform_recursive_with_array_map_matches_java_edge_case() {
+    let src = "function transform(arr, depth) { if (depth == 0) { return arr } return transform(arrayMap(arr, x -> x * 2), depth - 1) } return transform([1, 2, 3, 4], 3)";
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    let v = vm.run().expect("transform + arrayMap");
+    assert_eq!(v.to_leek_export_string(), "[8, 16, 24, 32]");
+}
+
+/// Java `StringClass.codePointAt(AI, String)` — single-arg overload uses index 0 (`ai/euler/pe008.leek`).
+#[test]
+fn code_point_at_one_arg_like_java() {
+    let src = "return codePointAt('9') - codePointAt('0')";
+    let chunk = compile_chunk_v4(src).expect("compile");
+    let mut vm = Vm::from_compiled_chunk(chunk).unwrap();
+    assert_eq!(vm.run().unwrap(), Value::num_int(9));
 }

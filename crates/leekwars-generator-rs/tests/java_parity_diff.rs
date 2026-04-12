@@ -17,16 +17,30 @@ fn load_actions(path: &std::path::Path) -> Vec<Value> {
 fn opcodes(actions: &[Value]) -> Vec<Option<i64>> {
     actions
         .iter()
-        .map(|v| v.as_array().and_then(|a| a.first()).and_then(|x| x.as_i64()))
+        .map(|v| {
+            v.as_array()
+                .and_then(|a| a.first())
+                .and_then(|x| x.as_i64())
+        })
         .collect()
 }
 
 fn normalize_actions(actions: Vec<Value>) -> Vec<Value> {
     actions
         .into_iter()
-        .filter(|v| v.as_array().and_then(|a| a.first()).and_then(|x| x.as_i64()).is_some())
+        .filter(|v| {
+            v.as_array()
+                .and_then(|a| a.first())
+                .and_then(|x| x.as_i64())
+                .is_some()
+        })
         // Known noise: SAY (203) is very scenario/stdlib dependent and not a core parity signal yet.
-        .filter(|v| v.as_array().and_then(|a| a.first()).and_then(|x| x.as_i64()) != Some(203))
+        .filter(|v| {
+            v.as_array()
+                .and_then(|a| a.first())
+                .and_then(|x| x.as_i64())
+                != Some(203)
+        })
         // MOVE_TO (10) contains a full path array which is highly tie-break sensitive in A*.
         // For combat-rule parity we only care about the start/end cells.
         .map(|v| {
@@ -50,7 +64,10 @@ fn normalize_actions(actions: Vec<Value>) -> Vec<Value> {
 #[ignore]
 fn diff_java_and_rust_opcode_streams() {
     let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let ws_root = manifest_dir.parent().and_then(|p| p.parent()).expect("workspace root");
+    let ws_root = manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .expect("workspace root");
 
     let java_dir = ws_root.join("leek-wars-generator");
     let scenario = java_dir.join("test/scenario/scenario1.json");
@@ -72,21 +89,34 @@ fn diff_java_and_rust_opcode_streams() {
     assert!(status.success(), "java generator failed");
 
     // Rust: run the compiled binary produced by cargo for this workspace.
-    let rust_bin = std::env::var("CARGO_BIN_EXE_leekwars-generator").ok().map(std::path::PathBuf::from).unwrap_or_else(|| {
-        // When running as an ignored test, Cargo doesn't always provide CARGO_BIN_EXE_* env vars.
-        // Fall back to `target/debug/leekwars-generator`, building it if needed.
-        let candidate = ws_root.join("target").join("debug").join("leekwars-generator");
-        if candidate.is_file() {
-            return candidate;
-        }
-        let status = Command::new("cargo")
-            .current_dir(ws_root)
-            .args(["build", "-q", "-p", "leekwars-generator-rs", "--bin", "leekwars-generator"])
-            .status()
-            .expect("build rust generator");
-        assert!(status.success(), "cargo build for rust generator failed");
-        candidate
-    });
+    let rust_bin = std::env::var("CARGO_BIN_EXE_leekwars-generator")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            // When running as an ignored test, Cargo doesn't always provide CARGO_BIN_EXE_* env vars.
+            // Fall back to `target/debug/leekwars-generator`, building it if needed.
+            let candidate = ws_root
+                .join("target")
+                .join("debug")
+                .join("leekwars-generator");
+            if candidate.is_file() {
+                return candidate;
+            }
+            let status = Command::new("cargo")
+                .current_dir(ws_root)
+                .args([
+                    "build",
+                    "-q",
+                    "-p",
+                    "leekwars-generator-rs",
+                    "--bin",
+                    "leekwars-generator",
+                ])
+                .status()
+                .expect("build rust generator");
+            assert!(status.success(), "cargo build for rust generator failed");
+            candidate
+        });
     let status = Command::new(rust_bin)
         .current_dir(ws_root)
         .arg(scenario.to_str().unwrap())
@@ -136,4 +166,3 @@ fn diff_java_and_rust_opcode_streams() {
         );
     }
 }
-

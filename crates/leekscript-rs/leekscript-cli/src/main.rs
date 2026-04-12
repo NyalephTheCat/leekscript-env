@@ -12,8 +12,8 @@ use std::process::ExitCode;
 use clap::Parser;
 use leekscript::format::FormatOptions;
 
-use crate::args::{language_options, Cli, Command};
-use crate::format_cmd::{build_format_options, cmd_format, load_format_config, FormatDest};
+use crate::args::{Cli, Command, language_options};
+use crate::format_cmd::{FormatDest, build_format_options, cmd_format, load_format_config};
 
 fn main() -> ExitCode {
     report::install_hook();
@@ -26,13 +26,7 @@ fn main() -> ExitCode {
             root,
             signature_files,
             files,
-        } => check::cmd_check(
-            lang,
-            parse_only,
-            root.as_deref(),
-            &signature_files,
-            &files,
-        ),
+        } => check::cmd_check(lang, parse_only, root.as_deref(), &signature_files, &files),
         Command::Format {
             merge_includes,
             root: format_root,

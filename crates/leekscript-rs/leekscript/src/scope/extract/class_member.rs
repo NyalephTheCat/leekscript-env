@@ -59,7 +59,9 @@ fn try_extract_name_first_field(
     let mut i = 0;
     while i < tokens.len() {
         match tokens[i].kind_as::<Lex>() {
-            Some(Lex::PrivateKw | Lex::PublicKw | Lex::ProtectedKw | Lex::StaticKw | Lex::FinalKw) => i += 1,
+            Some(
+                Lex::PrivateKw | Lex::PublicKw | Lex::ProtectedKw | Lex::StaticKw | Lex::FinalKw,
+            ) => i += 1,
             _ => break,
         }
     }

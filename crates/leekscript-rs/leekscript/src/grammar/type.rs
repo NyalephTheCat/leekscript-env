@@ -1,6 +1,6 @@
 //! LeekScript type grammar (aligned with leekscript-java `eatType` / `eatPrimaryType`).
-use super::cfg_flags;
 use super::GRule;
+use super::cfg_flags;
 use crate::syntax::kinds::Node;
 use sipha::prelude::*;
 

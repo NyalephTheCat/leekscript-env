@@ -133,5 +133,3 @@ pub(crate) fn spend_mp(st: &mut LeekWarsState, self_id: i64, amount: i64) {
 }
 
 include!("../leekwars_vm.rs");
-
-

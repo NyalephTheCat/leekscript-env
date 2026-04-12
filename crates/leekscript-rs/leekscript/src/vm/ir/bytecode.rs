@@ -114,7 +114,12 @@ impl BytecodeBuilder {
         }
     }
 
-    pub fn emit_instance_build(&mut self, class_name: &str, pair_count: u16, final_fields: &[String]) {
+    pub fn emit_instance_build(
+        &mut self,
+        class_name: &str,
+        pair_count: u16,
+        final_fields: &[String],
+    ) {
         self.emit_opcode(Opcode::InstanceBuild);
         let idx = self.intern_const(Value::String(class_name.to_string()));
         self.code.extend_from_slice(&idx.to_le_bytes());

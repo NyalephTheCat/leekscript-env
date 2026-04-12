@@ -67,4 +67,3 @@ pub struct WeaponDef {
     pub area: i64,
     pub max_uses: i64,
 }
-

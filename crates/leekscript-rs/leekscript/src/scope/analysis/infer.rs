@@ -423,9 +423,7 @@ fn postfix_suffix_operand_ty(a: &mut Analyzer, suffix: &SyntaxNode) -> Option<Le
             let base = sym.effective_ty();
             Some(a.narrowing.with_narrowing(sid, base))
         }
-        SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::ThisKw) => {
-            a.implicit_this_ty()
-        }
+        SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::ThisKw) => a.implicit_this_ty(),
         _ => None,
     }
 }
@@ -467,6 +465,26 @@ pub(crate) fn infer_member_expr(a: &mut Analyzer, node: &SyntaxNode) -> LeekTy {
                 .get(cn)
                 .map(|p| LeekTy::ClassObject(p.clone()))
                 .unwrap_or(LeekTy::Unknown),
+            _ => LeekTy::Unknown,
+        }
+    } else if field == "name" {
+        match &obj_ty_inner {
+            LeekTy::ClassObject(cn) => {
+                let t = lookup_class_member_ty(a, cn, "name", true);
+                if t != LeekTy::Unknown {
+                    t
+                } else {
+                    LeekTy::String
+                }
+            }
+            LeekTy::Class(cn) => {
+                let t = lookup_class_member_ty(a, cn, "name", false);
+                if t != LeekTy::Unknown {
+                    t
+                } else {
+                    LeekTy::String
+                }
+            }
             _ => LeekTy::Unknown,
         }
     } else {
@@ -537,7 +555,10 @@ fn call_expr_arg_types(a: &mut Analyzer, call: &SyntaxNode) -> Vec<LeekTy> {
 
 fn ty_apply_type_param_subst(ty: &LeekTy, subst: &HashMap<String, LeekTy>) -> LeekTy {
     match ty {
-        LeekTy::TypeParam(name) => subst.get(name).cloned().unwrap_or(LeekTy::TypeParam(name.clone())),
+        LeekTy::TypeParam(name) => subst
+            .get(name)
+            .cloned()
+            .unwrap_or(LeekTy::TypeParam(name.clone())),
         LeekTy::Array(el) => LeekTy::Array(Box::new(ty_apply_type_param_subst(el, subst))),
         LeekTy::Set(el) => LeekTy::Set(Box::new(ty_apply_type_param_subst(el, subst))),
         LeekTy::Map(k, v) => LeekTy::Map(
@@ -550,9 +571,17 @@ fn ty_apply_type_param_subst(ty: &LeekTy, subst: &HashMap<String, LeekTy>) -> Le
         LeekTy::Nullable(inner) => {
             LeekTy::Nullable(Box::new(ty_apply_type_param_subst(inner, subst)))
         }
-        LeekTy::Union(parts) => LeekTy::Union(parts.iter().map(|p| ty_apply_type_param_subst(p, subst)).collect()),
+        LeekTy::Union(parts) => LeekTy::Union(
+            parts
+                .iter()
+                .map(|p| ty_apply_type_param_subst(p, subst))
+                .collect(),
+        ),
         LeekTy::Function { params, ret } => LeekTy::Function {
-            params: params.iter().map(|p| ty_apply_type_param_subst(p, subst)).collect(),
+            params: params
+                .iter()
+                .map(|p| ty_apply_type_param_subst(p, subst))
+                .collect(),
             ret: Box::new(ty_apply_type_param_subst(ret, subst)),
         },
         other => other.clone(),
@@ -565,17 +594,15 @@ fn infer_call_type_param_subst_from_arg(
     out: &mut HashMap<String, LeekTy>,
 ) {
     match expected {
-        LeekTy::TypeParam(name) => {
-            match out.get(name) {
-                None => {
-                    out.insert(name.clone(), actual.clone());
-                }
-                Some(prev) => {
-                    let joined = LeekTy::unify_inference(prev, actual);
-                    out.insert(name.clone(), joined);
-                }
+        LeekTy::TypeParam(name) => match out.get(name) {
+            None => {
+                out.insert(name.clone(), actual.clone());
             }
-        }
+            Some(prev) => {
+                let joined = LeekTy::unify_inference(prev, actual);
+                out.insert(name.clone(), joined);
+            }
+        },
         LeekTy::Nullable(inner) => {
             if matches!(actual, LeekTy::Null) {
                 return;

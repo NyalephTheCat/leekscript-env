@@ -30,7 +30,9 @@ fn prev_child_node(children: &[SyntaxElement], i: usize) -> Option<&SyntaxNode> 
 /// constructors do.
 fn class_member_is_field_like(cm: &SyntaxNode) -> bool {
     cm.kind_as::<Node>() == Some(Node::ClassMember)
-        && !cm.child_nodes().any(|c| c.kind_as::<Node>() == Some(Node::Block))
+        && !cm
+            .child_nodes()
+            .any(|c| c.kind_as::<Node>() == Some(Node::Block))
 }
 
 #[inline]
@@ -65,7 +67,9 @@ fn node_has_optional_trailing_semicolon_policy(node: &SyntaxNode) -> bool {
 /// `return;` / `break;` / `continue;` — keep or insert `;` in [`SemicolonStyle::OnlyNeeded`].
 fn only_needed_requires_trailing_semicolon(node: &SyntaxNode) -> bool {
     match node.kind_as::<Node>() {
-        Some(Node::ReturnStmt) => ReturnStmt::cast(node.clone()).is_some_and(|r| r.expr().is_none()),
+        Some(Node::ReturnStmt) => {
+            ReturnStmt::cast(node.clone()).is_some_and(|r| r.expr().is_none())
+        }
         Some(Node::BreakStmt) | Some(Node::ContinueStmt) => true,
         _ => false,
     }
@@ -298,7 +302,8 @@ impl Printer<'_> {
     }
 
     fn format_block(&mut self, block: &SyntaxNode, parent_of_block: Option<&SyntaxNode>) {
-        let is_class_body = parent_of_block.is_some_and(|p| p.kind_as::<Node>() == Some(Node::ClassDecl));
+        let is_class_body =
+            parent_of_block.is_some_and(|p| p.kind_as::<Node>() == Some(Node::ClassDecl));
         let children: Vec<SyntaxElement> = block
             .children()
             .filter(|e| !syntax_el_is_trivia(e))
@@ -623,7 +628,8 @@ fn block_body_indent_depth(root: &SyntaxNode, node: &SyntaxNode) -> u32 {
         let Some(p) = parent_of_node(root, &cur) else {
             break;
         };
-        if p.kind_as::<Node>() == Some(Node::Block) && p.child_nodes().any(|c| same_syntax_node(&c, &cur))
+        if p.kind_as::<Node>() == Some(Node::Block)
+            && p.child_nodes().any(|c| same_syntax_node(&c, &cur))
         {
             count += 1;
         }

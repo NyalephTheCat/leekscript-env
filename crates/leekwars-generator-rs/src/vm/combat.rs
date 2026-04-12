@@ -24,7 +24,8 @@ pub(crate) fn reduce_effects(
             removed.push(ef.instance_id);
         } else {
             // UPDATE_EFFECT updates effect value: [304, id, value]
-            st.fight_actions.push(json!([304, ef.instance_id, ef.value]));
+            st.fight_actions
+                .push(json!([304, ef.instance_id, ef.value]));
         }
     }
     if !removed.is_empty() {
@@ -210,7 +211,9 @@ pub(crate) fn tick_effects_start_turn(st: &mut LeekWarsState) {
     // Start-of-turn effects: poison + heal-over-time.
     let ids: Vec<i64> = st.entities.keys().copied().collect();
     for id in ids {
-        let Some(ent) = st.entities.get_mut(&id) else { continue };
+        let Some(ent) = st.entities.get_mut(&id) else {
+            continue;
+        };
         if ent.life <= 0 {
             continue;
         }
@@ -243,8 +246,12 @@ pub(crate) fn tick_effects_start_turn(st: &mut LeekWarsState) {
                         // Invincible: no damage.
                         // Still tick duration below.
                     } else {
-                        let dealt =
-                            apply_damage_with_shields_with(ent, dmg, shield_abs, shield_rel_percent);
+                        let dealt = apply_damage_with_shields_with(
+                            ent,
+                            dmg,
+                            shield_abs,
+                            shield_rel_percent,
+                        );
                         if dealt > 0 {
                             let erosion = (dealt as f64 * 0.10).round() as i64;
                             apply_erosion(ent, erosion);
@@ -310,9 +317,7 @@ pub(crate) fn recompute_derived_buffs(ent: &mut LeekWarsEntity) {
                 ent.shield_rel_percent = ent.shield_rel_percent.saturating_add(ef.value);
             }
             EffectType::Vulnerability => {
-                ent.shield_rel_percent = ent
-                    .shield_rel_percent
-                    .saturating_sub(ef.value.max(0));
+                ent.shield_rel_percent = ent.shield_rel_percent.saturating_sub(ef.value.max(0));
             }
             EffectType::AbsoluteShield => {
                 ent.shield_abs = ent.shield_abs.saturating_add(ef.value.max(0));
@@ -421,4 +426,3 @@ pub fn tick_effects_start_turn_public(st: &mut LeekWarsState) {
 pub fn tick_chip_cooldowns_public(st: &mut LeekWarsState) {
     tick_chip_cooldowns(st);
 }
-

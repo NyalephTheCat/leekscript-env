@@ -116,10 +116,7 @@ fn emit_scenario_output(args: &Args, payload: &str) -> miette::Result<()> {
     }
     // With `--fight-report` and `--out`, still show the report on stdout; plain `--out` stays file-only.
     let show_stdout = args.out.is_none()
-        || matches!(
-            effective_format(args),
-            OutputFormat::FightReport
-        )
+        || matches!(effective_format(args), OutputFormat::FightReport)
         || args.fight_report;
     if show_stdout {
         println!("{payload}");
@@ -171,7 +168,9 @@ fn main() -> miette::Result<()> {
             if let Some(p) = &args.batch_text_out {
                 fs::write(p, human.as_bytes())
                     .into_diagnostic()
-                    .wrap_err_with(|| format!("failed to write batch report to `{}`", p.display()))?;
+                    .wrap_err_with(|| {
+                        format!("failed to write batch report to `{}`", p.display())
+                    })?;
             }
             return Ok(());
         }
@@ -236,13 +235,18 @@ fn main() -> miette::Result<()> {
         signature_files: leekwars_generator_rs::Generator::new().signature_files,
         register_manager: {
             if args.registers_file.is_some() && args.registers_dir.is_some() {
-                return Err(miette::miette!("use only one of `--registers-file` or `--registers-dir`"));
+                return Err(miette::miette!(
+                    "use only one of `--registers-file` or `--registers-dir`"
+                ));
             }
             if let Some(p) = &args.registers_file {
                 if args.reset_registers {
                     let _ = std::fs::remove_file(p);
                 }
-                Some(std::rc::Rc::new(leekwars_generator_rs::FileRegisterManager::new(p)) as leekwars_generator_rs::RegisterManagerRc)
+                Some(
+                    std::rc::Rc::new(leekwars_generator_rs::FileRegisterManager::new(p))
+                        as leekwars_generator_rs::RegisterManagerRc,
+                )
             } else if let Some(d) = &args.registers_dir {
                 let mgr = leekwars_generator_rs::DirRegisterManager::new(d);
                 if args.reset_registers {
@@ -276,12 +280,18 @@ fn main() -> miette::Result<()> {
             }
         }
         OutputFormat::ActionsRaw => {
-            let actions = outcome.fight.get("actions").cloned().unwrap_or(serde_json::Value::Null);
+            let actions = outcome
+                .fight
+                .get("actions")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
             serde_json::to_string(&actions).into_diagnostic()?
         }
         OutputFormat::Snapshot => {
             let Some(i) = args.snapshot_at else {
-                return Err(miette::miette!("`--format snapshot` requires `--snapshot-at <index>`"));
+                return Err(miette::miette!(
+                    "`--format snapshot` requires `--snapshot-at <index>`"
+                ));
             };
             let snap = outcome.snapshot_at(i)?;
             serde_json::to_string(&snap).into_diagnostic()?

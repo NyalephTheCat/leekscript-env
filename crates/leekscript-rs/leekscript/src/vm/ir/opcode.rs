@@ -128,4 +128,6 @@ pub enum Opcode {
     Shr = 56,
     /// Pop rhs, lhs; push logical right shift on `trunc(lhs)` as u64 (Java `>>>`).
     UShr = 57,
+    /// `**` operator (distinct from native `pow()`): prefer integer results when representable.
+    Pow = 58,
 }

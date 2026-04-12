@@ -17,6 +17,30 @@ use crate::syntax::syntax_el_is_trivia;
 const MUL_COST: u32 = 2;
 const DIV_COST: u32 = 5;
 const MOD_COST: u32 = 5;
+/// `>>` / `>>>` are emitted as two / three consecutive [`Lex::Gt`] tokens (see `grammar/expr.rs`
+/// [`GRule::OpShr`], [`GRule::OpUshr`]). Returns token run length (2 or 3), or `None` if `pos` is
+/// not the start of such a sequence.
+pub(crate) fn consecutive_gt_shift_len(parts: &[SyntaxElement], pos: usize) -> Option<usize> {
+    if !matches!(
+        parts.get(pos),
+        Some(SyntaxElement::Token(t)) if t.kind_as::<Lex>() == Some(Lex::Gt)
+    ) {
+        return None;
+    }
+    let g2 = matches!(
+        parts.get(pos + 1),
+        Some(SyntaxElement::Token(t)) if t.kind_as::<Lex>() == Some(Lex::Gt)
+    );
+    if !g2 {
+        return None;
+    }
+    let g3 = matches!(
+        parts.get(pos + 2),
+        Some(SyntaxElement::Token(t)) if t.kind_as::<Lex>() == Some(Lex::Gt)
+    );
+    Some(if g3 { 3 } else { 2 })
+}
+
 pub(crate) fn binary_op_kind(k: Lex) -> bool {
     matches!(
         k,
@@ -50,29 +74,35 @@ pub(crate) fn binary_op_kind(k: Lex) -> bool {
 }
 
 pub(crate) fn first_binary_op_token(bin: &SyntaxNode) -> Option<Lex> {
+    let parts: Vec<_> = bin.children().filter(|e| !syntax_el_is_trivia(e)).collect();
+    if parts.iter().any(|el| {
+        matches!(
+            el,
+            SyntaxElement::Token(t) if t.kind_as::<Lex>() == Some(Lex::InKw)
+        )
+    }) {
+        return Some(Lex::InKw);
+    }
     let mut saw_starstar = false;
-    for el in bin.children() {
-        if syntax_el_is_trivia(&el) {
-            continue;
+    let mut i = 0usize;
+    while i < parts.len() {
+        if let Some(len) = consecutive_gt_shift_len(&parts, i) {
+            return Some(if len == 3 { Lex::UShr } else { Lex::Shr });
         }
-        let SyntaxElement::Token(t) = &el else {
-            continue;
-        };
-        let Some(k) = t.kind_as::<Lex>() else {
-            continue;
-        };
-        if k == Lex::InKw {
-            return Some(Lex::InKw);
+        if let SyntaxElement::Token(t) = &parts[i] {
+            if let Some(k) = t.kind_as::<Lex>() {
+                if k == Lex::IsKw {
+                    return Some(Lex::IsKw);
+                }
+                if binary_op_kind(k) {
+                    return Some(k);
+                }
+                if k == Lex::StarStar {
+                    saw_starstar = true;
+                }
+            }
         }
-        if k == Lex::IsKw {
-            return Some(Lex::IsKw);
-        }
-        if binary_op_kind(k) {
-            return Some(k);
-        }
-        if k == Lex::StarStar {
-            saw_starstar = true;
-        }
+        i += 1;
     }
     if saw_starstar {
         Some(Lex::StarStar)
@@ -91,6 +121,11 @@ pub(crate) fn suffix_after_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxElemen
         )
     }) {
         return parts[in_pos.saturating_add(1)..].to_vec();
+    }
+    for i in 0..parts.len() {
+        if let Some(len) = consecutive_gt_shift_len(&parts, i) {
+            return parts[i + len..].to_vec();
+        }
     }
     // Prefer non-`**` operators when mixed (`a ** b == c`).
     if let Some(pos) = parts.iter().position(|el| {
@@ -131,6 +166,11 @@ pub(crate) fn prefix_before_first_binary_op(bin: &SyntaxNode) -> Vec<SyntaxEleme
             lhs_end = in_pos - 1;
         }
         return parts[..lhs_end].to_vec();
+    }
+    for i in 0..parts.len() {
+        if consecutive_gt_shift_len(&parts, i).is_some() {
+            return parts[..i].to_vec();
+        }
     }
     // Prefer non-`**` operators when mixed.
     if let Some(pos) = parts.iter().position(|el| {
@@ -350,7 +390,10 @@ fn java_ops_syntax(n: &SyntaxNode) -> u32 {
         return c;
     }
     if BinaryExpr::can_cast(n.kind()) {
-        if matches!(first_binary_op_token(n), Some(Lex::AndAnd) | Some(Lex::OrOr)) {
+        if matches!(
+            first_binary_op_token(n),
+            Some(Lex::AndAnd) | Some(Lex::OrOr)
+        ) {
             return 0;
         }
         let lhs = prefix_before_first_binary_op(n);

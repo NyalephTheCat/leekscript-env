@@ -48,7 +48,7 @@ pub use runtime::error::VmError;
 pub use runtime::interpreter::{
     DEFAULT_MAX_OPERATIONS, DEFAULT_MAX_RAM_QUADS, DISPATCH, NativeFn, OpHandler, Vm, op_illegal,
 };
-pub use runtime::stdlib::{stdlib_global_constant_init, stdlib_global_function_init};
 /// Alias of [`runtime::stdlib`] so `leekscript::vm::stdlib::…` paths stay stable.
-pub use runtime::stdlib as stdlib;
+pub use runtime::stdlib;
+pub use runtime::stdlib::{stdlib_global_constant_init, stdlib_global_function_init};
 pub use value::{NumberBits, PreludeClass, Value};

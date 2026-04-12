@@ -186,11 +186,8 @@ impl FileRegisterManager {
     }
 
     fn save_all(&self, all: &HashMap<String, serde_json::Value>) {
-        let v = serde_json::Value::Object(
-            all.iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-        );
+        let v =
+            serde_json::Value::Object(all.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
         if let Ok(out) = serde_json::to_string_pretty(&v) {
             let _ = std::fs::create_dir_all(self.path.parent().unwrap_or_else(|| Path::new(".")));
             let _ = std::fs::write(&self.path, out.as_bytes());
@@ -252,7 +249,8 @@ impl RegisterManager for DirRegisterManager {
     }
 
     fn save_registers(&self, entity_id: i64, registers_json: &str, _is_new: bool) {
-        let v = serde_json::from_str::<serde_json::Value>(registers_json).unwrap_or_else(|_| serde_json::json!({}));
+        let v = serde_json::from_str::<serde_json::Value>(registers_json)
+            .unwrap_or_else(|_| serde_json::json!({}));
         let Ok(out) = serde_json::to_string_pretty(&v) else {
             return;
         };
@@ -295,4 +293,3 @@ mod tests {
         ));
     }
 }
-

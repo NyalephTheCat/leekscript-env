@@ -212,7 +212,9 @@ pub(crate) fn lambda_param_spans(syntax: &SyntaxNode) -> Vec<(String, Span)> {
     if tokens.is_empty() {
         return vec![];
     }
-    let has_paren_params = tokens.iter().any(|t| t.kind_as::<Lex>() == Some(Lex::LParen));
+    let has_paren_params = tokens
+        .iter()
+        .any(|t| t.kind_as::<Lex>() == Some(Lex::LParen));
     if !has_paren_params {
         return last_ident_outside_generics(&tokens).into_iter().collect();
     }

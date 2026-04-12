@@ -8,16 +8,18 @@ use serde_json::json;
 use crate::persistence::Registers;
 
 use super::combat::{
-    apply_damage_with_shields, apply_damage_with_shields_with, apply_erosion, clear_poisons,
-    recompute_derived_buffs, reduce_effects, remove_shackles, slide_away_until_blocked, slide_entity,
-    slide_toward_target_with_checks, SlideMode,
+    SlideMode, apply_damage_with_shields, apply_damage_with_shields_with, apply_erosion,
+    clear_poisons, recompute_derived_buffs, reduce_effects, remove_shackles,
+    slide_away_until_blocked, slide_entity, slide_toward_target_with_checks,
 };
 use super::defs::{ChipDef, ChipEffectDef, EffectInstance, SummonDef, WeaponDef};
 use super::state::{
-    LeekWarsEntity, LeekWarsState, cell_dist_i64, cell_xy_i64, ctx, with_state, with_state_mut,
-    spend_mp, spend_tp,
+    LeekWarsEntity, LeekWarsState, cell_dist_i64, cell_xy_i64, ctx, spend_mp, spend_tp, with_state,
+    with_state_mut,
 };
-use super::types::{ChipItemId, ChipTemplateId, EffectType, LaunchType, SummonId, WeaponItemId, WeaponTemplateId};
+use super::types::{
+    ChipItemId, ChipTemplateId, EffectType, LaunchType, SummonId, WeaponItemId, WeaponTemplateId,
+};
 
 fn effect_add_action(ef: &EffectInstance) -> serde_json::Value {
     // Matches reference ActionAddEffect JSON:
@@ -233,8 +235,10 @@ fn nf_say(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<Value, VmError>
     };
     with_state_mut(vm, |st, self_id| {
         st.say_log.push((self_id, msg));
-        st.fight_actions
-            .push(json!([203, st.say_log.last().unwrap().1.replace('\t', "    ")]));
+        st.fight_actions.push(json!([
+            203,
+            st.say_log.last().unwrap().1.replace('\t', "    ")
+        ]));
     })?;
     Ok(Value::Null)
 }
@@ -507,9 +511,13 @@ fn nf_get_path_distance(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<V
             .iter()
             .filter_map(|c| i32::try_from(*c).ok())
             .collect();
-        let Ok(start) = i32::try_from(a) else { return 0 };
+        let Ok(start) = i32::try_from(a) else {
+            return 0;
+        };
         let Ok(goal) = i32::try_from(b) else { return 0 };
-        let Some(p) = st.map.a_star_path(start, &[goal], &occupied, None) else { return 0 };
+        let Some(p) = st.map.a_star_path(start, &[goal], &occupied, None) else {
+            return 0;
+        };
         p.len() as i64
     })?;
     Ok(Value::num_int(d))
@@ -532,7 +540,8 @@ fn nf_use_weapon(vm: &mut leekscript::vm::Vm, args: &[Value]) -> Result<Value, V
             return None;
         }
         Some((self_cell, te.cell))
-    })? else {
+    })?
+    else {
         return Ok(Value::Null);
     };
     with_state_mut(vm, |st, self_id| {
@@ -706,31 +715,36 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
         None => 0,
     };
     if cd_left > 0 {
-        st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+        st.fight_actions
+            .push(json!([12, chip.template.as_i64(), cell, 0]));
         return 0;
     }
 
     let Some(me) = st.entities.get(&self_id).cloned() else {
-        st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+        st.fight_actions
+            .push(json!([12, chip.template.as_i64(), cell, 0]));
         return 0;
     };
     // Max uses per turn: checked before cast, counted on success.
     if chip.max_uses != -1 {
         let uses = me.item_uses.get(&chip.item.as_i64()).copied().unwrap_or(0);
         if uses >= chip.max_uses {
-            st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+            st.fight_actions
+                .push(json!([12, chip.template.as_i64(), cell, 0]));
             return 0;
         }
     }
     if me.tp < chip.cost {
-        st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+        st.fight_actions
+            .push(json!([12, chip.template.as_i64(), cell, 0]));
         return 0;
     }
     // Cast validation (range + LOS) uses the *cast cell*.
     let self_cell = me.cell;
     let dist = cell_dist_i64(st, self_cell, cell);
     if dist < chip.min_range || dist > chip.max_range {
-        st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+        st.fight_actions
+            .push(json!([12, chip.template.as_i64(), cell, 0]));
         return 0;
     }
     // Launch-type validation.
@@ -738,16 +752,19 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
     let (tx, ty) = cell_xy_i64(st, cell).unwrap_or((0, 0));
     let ok_launch = chip.launch_type.allows(tx - sx, ty - sy);
     if !ok_launch {
-        st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+        st.fight_actions
+            .push(json!([12, chip.template.as_i64(), cell, 0]));
         return 0;
     }
     if chip.los {
         let Ok(sid) = i32::try_from(self_cell) else {
-            st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+            st.fight_actions
+                .push(json!([12, chip.template.as_i64(), cell, 0]));
             return 0;
         };
         let Ok(eid) = i32::try_from(cell) else {
-            st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+            st.fight_actions
+                .push(json!([12, chip.template.as_i64(), cell, 0]));
             return 0;
         };
         let occupied: std::collections::HashSet<i32> = st
@@ -759,7 +776,8 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
         let mut ignored = std::collections::HashSet::new();
         ignored.insert(sid);
         if !st.map.verify_los(sid, eid, true, &occupied, &ignored) {
-            st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+            st.fight_actions
+                .push(json!([12, chip.template.as_i64(), cell, 0]));
             return 0;
         }
     }
@@ -773,15 +791,18 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
     });
     if needs_empty {
         let Ok(cid) = i32::try_from(cell) else {
-            st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+            st.fight_actions
+                .push(json!([12, chip.template.as_i64(), cell, 0]));
             return 0;
         };
         if st.map.is_obstacle(cid) {
-            st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+            st.fight_actions
+                .push(json!([12, chip.template.as_i64(), cell, 0]));
             return 0;
         }
         if st.entities.values().any(|e| e.life > 0 && e.cell == cell) {
-            st.fight_actions.push(json!([12, chip.template.as_i64(), cell, 0]));
+            st.fight_actions
+                .push(json!([12, chip.template.as_i64(), cell, 0]));
             return 0;
         }
     }
@@ -793,8 +814,12 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
     let jet = rng_double_0_1(st);
 
     spend_tp(st, self_id, chip.cost);
-    st.fight_actions
-        .push(json!([12, chip.template.as_i64(), cell, if critical { 2 } else { 1 }]));
+    st.fight_actions.push(json!([
+        12,
+        chip.template.as_i64(),
+        cell,
+        if critical { 2 } else { 1 }
+    ]));
     if let Some(me_mut) = st.entities.get_mut(&self_id) {
         if chip.cooldown > 0 {
             if chip.team_cooldown {
@@ -844,7 +869,11 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
             // Enemies=1, Allies=2, Caster=4, Non-summons=8, Summons=16.
             let mut allowed = true;
             let caster_team = me.team;
-            let is_ally = st.entities.get(&tid).map(|e| e.team == caster_team).unwrap_or(false);
+            let is_ally = st
+                .entities
+                .get(&tid)
+                .map(|e| e.team == caster_team)
+                .unwrap_or(false);
             let is_enemy = !is_ally;
             let is_caster = tid == self_id;
             let is_summon = st.entities.get(&tid).map(|e| e.is_summon).unwrap_or(false);
@@ -910,13 +939,13 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                         .get(&self_id)
                         .map(|e| (e.strength + e.strength_bonus).max(0))
                         .unwrap_or(0) as f64;
-                    let caster_power = st.entities.get(&self_id).map(|e| e.power).unwrap_or(0) as f64;
+                    let caster_power =
+                        st.entities.get(&self_id).map(|e| e.power).unwrap_or(0) as f64;
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
-                    let dmg = (base
-                        * (1.0 + caster_strength / 100.0)
-                        * (1.0 + caster_power / 100.0))
-                        .round()
-                        .max(0.0) as i64;
+                    let dmg =
+                        (base * (1.0 + caster_strength / 100.0) * (1.0 + caster_power / 100.0))
+                            .round()
+                            .max(0.0) as i64;
                     if dmg > 0 {
                         if let Some(t) = st.entities.get_mut(&tid) {
                             recompute_derived_buffs(t);
@@ -935,7 +964,8 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                             st.fight_actions.push(json!([101, tid, dealt, erosion]));
                             if dealt > 0 && tid != self_id {
                                 let steal = ((dealt as f64)
-                                    * (st.entities.get(&self_id).map(|e| e.wisdom).unwrap_or(0) as f64)
+                                    * (st.entities.get(&self_id).map(|e| e.wisdom).unwrap_or(0)
+                                        as f64)
                                     / 1000.0)
                                     .round() as i64;
                                 if steal > 0 {
@@ -1022,11 +1052,10 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                         .get(&self_id)
                         .map(|e| e.magic.max(0))
                         .unwrap_or(0) as f64;
-                    let caster_power = st.entities.get(&self_id).map(|e| e.power).unwrap_or(0) as f64;
+                    let caster_power =
+                        st.entities.get(&self_id).map(|e| e.power).unwrap_or(0) as f64;
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
-                    let val = (base
-                        * (1.0 + caster_magic / 100.0)
-                        * (1.0 + caster_power / 100.0))
+                    let val = (base * (1.0 + caster_magic / 100.0) * (1.0 + caster_power / 100.0))
                         .round() as i64;
                     if turns > 0 && val > 0 {
                         let stackable = (eff.modifiers & 1) != 0;
@@ -1060,7 +1089,8 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                     let life = rng_int_inclusive(st, def.life_range.0, def.life_range.1);
                     let tp = rng_int_inclusive(st, def.tp_range.0, def.tp_range.1);
                     let mp = rng_int_inclusive(st, def.mp_range.0, def.mp_range.1);
-                    let strength = rng_int_inclusive(st, def.strength_range.0, def.strength_range.1);
+                    let strength =
+                        rng_int_inclusive(st, def.strength_range.0, def.strength_range.1);
                     st.entities.insert(
                         new_id,
                         LeekWarsEntity {
@@ -1151,8 +1181,10 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                                 continue;
                             }
                             let (from_caster, from_other) = {
-                                let ccell = st.entities.get(&self_id).map(|e| e.cell).unwrap_or(cell);
-                                let ocell = st.entities.get(&other_id).map(|e| e.cell).unwrap_or(cell);
+                                let ccell =
+                                    st.entities.get(&self_id).map(|e| e.cell).unwrap_or(cell);
+                                let ocell =
+                                    st.entities.get(&other_id).map(|e| e.cell).unwrap_or(cell);
                                 (ccell, ocell)
                             };
                             if let Some(c) = st.entities.get_mut(&self_id) {
@@ -1187,12 +1219,18 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                 | EffectType::Vulnerability => {
                     let turns = eff.turns.max(0);
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
-                    let caster_magic = st.entities.get(&self_id).map(|e| e.magic).unwrap_or(0).max(0) as f64;
-                    let caster_agility = st.entities.get(&self_id).map(|e| e.agility).unwrap_or(0) as f64;
+                    let caster_magic = st
+                        .entities
+                        .get(&self_id)
+                        .map(|e| e.magic)
+                        .unwrap_or(0)
+                        .max(0) as f64;
+                    let caster_agility =
+                        st.entities.get(&self_id).map(|e| e.agility).unwrap_or(0) as f64;
                     let scaled = match eff.id {
-                        EffectType::ShackleMp | EffectType::ShackleTp | EffectType::ShackleStrength => {
-                            base * (1.0 + caster_magic / 100.0)
-                        }
+                        EffectType::ShackleMp
+                        | EffectType::ShackleTp
+                        | EffectType::ShackleStrength => base * (1.0 + caster_magic / 100.0),
                         EffectType::DamageReturn => base * (1.0 + caster_agility / 100.0),
                         EffectType::Vulnerability => base,
                         _ => base,
@@ -1215,13 +1253,19 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
                         add_or_stack_effect(st, tid, inst, stackable);
                     }
                 }
-                EffectType::BuffStrength | EffectType::RelativeShield | EffectType::AbsoluteShield => {
+                EffectType::BuffStrength
+                | EffectType::RelativeShield
+                | EffectType::AbsoluteShield => {
                     let turns = eff.turns.max(0);
                     let base = (eff.value1 + jet * eff.value2) * aoe_factor * critical_power;
-                    let caster_science = st.entities.get(&self_id).map(|e| e.science).unwrap_or(0) as f64;
-                    let caster_resistance = st.entities.get(&self_id).map(|e| e.resistance).unwrap_or(0) as f64;
+                    let caster_science =
+                        st.entities.get(&self_id).map(|e| e.science).unwrap_or(0) as f64;
+                    let caster_resistance =
+                        st.entities.get(&self_id).map(|e| e.resistance).unwrap_or(0) as f64;
                     let val = match eff.id {
-                        EffectType::BuffStrength => (base * (1.0 + caster_science / 100.0)).round() as i64,
+                        EffectType::BuffStrength => {
+                            (base * (1.0 + caster_science / 100.0)).round() as i64
+                        }
                         EffectType::RelativeShield | EffectType::AbsoluteShield => {
                             (base * (1.0 + caster_resistance / 100.0)).round() as i64
                         }
@@ -1289,7 +1333,12 @@ fn apply_chip_use(st: &mut LeekWarsState, self_id: i64, chip_id: i64, cell: i64)
     1
 }
 
-fn add_or_stack_effect(st: &mut LeekWarsState, target_id: i64, inst: EffectInstance, stackable: bool) {
+fn add_or_stack_effect(
+    st: &mut LeekWarsState,
+    target_id: i64,
+    inst: EffectInstance,
+    stackable: bool,
+) {
     let Some(t) = st.entities.get_mut(&target_id) else {
         return;
     };

@@ -1,0 +1,104 @@
+# Example batch plan for: leekwars batch run --config batch.example.toml
+#
+# Credentials: use leekwars.toml (or env / --login) and optional --profile.
+# Preview without API calls: leekwars batch run --config batch.example.toml --dry-run
+
+# Seconds to wait after each fight before the next (rate limiting).
+delay_secs = 5
+# Random extra delay in [0, delay_jitter_secs], added on top of delay_secs.
+delay_jitter_secs = 0
+
+# Optional cap on total fights across the whole run (all accounts).
+# max_fights = 50
+# Override from CLI: leekwars batch run --config ... --max-fights 20
+
+# Wait for fight/get to report a winner (defaults: 180s max, 2500ms initial gap between polls).
+# Spacing increases exponentially (caps ~25s) so we don’t hammer the API every few hundred ms.
+# fight_wait_max_secs = 240
+# fight_poll_interval_ms = 3000
+
+# Retries on transient API errors (5xx, 429, timeouts). Set retry_max_attempts = 1 to disable backoff.
+# HTTP 429 uses exponential backoff (higher cap than 5xx) and respects Retry-After when the API sends it.
+# retry_max_attempts = 3
+# retry_base_delay_ms = 400
+
+# How much “quota budget” each fight type consumes (defaults are all 1).
+[quota_cost]
+farmer = 1
+solo = 1
+team = 1
+
+# smart = pick opponents with better tracked win rate; random = uniform choice.
+strategy = "smart"
+
+# Optional: when strategy = smart, prefer opponents with higher talent than you (Elo-style upside).
+# Score = win_rate + upset_preference * (gap / (talent_scale + gap)), gap = max(0, enemy_tal - ours).
+# Default upset_preference = 0 (win_rate first, then higher enemy talent on ties).
+# [opponent_bias]
+# upset_preference = 0.25
+# talent_scale = 250
+# min_samples = 3   # until this many recorded games per opponent, smart pick treats win_rate as 0.5 (explore)
+
+# Per-account override (multi-account only): same keys as [opponent_bias]
+# [[accounts]]
+# profile = "main"
+# opponent_bias = { upset_preference = 0.2, talent_scale = 300, min_samples = 5 }
+# ...
+
+# Persistent opponent stats (for smart) and JSONL fight log.
+stats_path = "leekwars-batch-stats.json"
+log_path = "leekwars-batch-log.jsonl"
+
+# --- Single account (omit [[accounts]]): use [quota] at top level ---
+[quota]
+farmer = 10
+solo = 0
+team = 0
+
+[quota.solo_leeks]
+Brisket = 1
+Basket = 1
+Bosquet = 1
+Bridge = 1
+# If solo > 0, either list leeks by id/name (legacy), or use per-leek quotas (recommended):
+# solo_leek_ids = [12345]
+# solo_leek_names = ["MyLeek"]
+#
+# Per-leek solo: names must match leeks on your farmer. `quota.solo` is the sum of these.
+# Shorthand: `LeekName = N` is quota N and weight 1.0. Use `{ quota = N, weight = W }` to skew
+# which leek is picked when the next fight type is solo (higher weight = more often).
+# [quota.solo_leeks]
+# Alpha = 15
+# Beta = { quota = 5, weight = 2.0 }
+#
+# If team > 0, set your composition id from the game UI:
+# team_composition_id = 67890
+
+# Relative weights for random choice among fight kinds that still have quota.
+# Must be > 0 for any kind with quota > 0.
+[weights]
+farmer = 1.0
+solo = 1.0
+team = 1.0
+
+# --- Multi-account (replace the [quota] / [weights] block above): ---
+# Top-level delay_secs, strategy, stats_path, log_path, quota_cost stay shared.
+# Per-leek overrides live under each account’s [quota] as [quota.solo_leeks] (not the top-level [solo_leeks]).
+# [[accounts]]
+# profile = "main"
+# [accounts.quota]
+# farmer = 10
+# solo = 0
+# team = 0
+# [accounts.quota.solo_leeks]
+# LeekA = 10
+# LeekB = { quota = 5, weight = 1.5 }
+# [accounts.weights]
+# farmer = 1.0
+# solo = 1.0
+# team = 1.0
+#
+# [[accounts]]
+# profile = "alt"
+# quota = { farmer = 5, solo = 0, team = 0 }
+# weights = { farmer = 1.0, solo = 1.0, team = 1.0 }

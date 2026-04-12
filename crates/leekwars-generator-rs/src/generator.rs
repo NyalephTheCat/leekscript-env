@@ -1,16 +1,16 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
 use serde_json::{Value, json};
 use sha1::Digest;
 
-use crate::{AnalyzeDiagnostic, LeekWarsContext, LeekWarsEntity, LeekWarsState, Outcome, Scenario};
 use crate::registers::RegisterManagerRc;
 use crate::world_map::{Rng, WorldMap};
+use crate::{AnalyzeDiagnostic, LeekWarsContext, LeekWarsEntity, LeekWarsState, Outcome, Scenario};
 
 #[derive(Debug, Default)]
 pub struct Generator {
@@ -32,10 +32,14 @@ impl Generator {
     }
 
     /// Run the scenario using the in-repo Rust VM and leekscript compiler.
-    pub fn run_scenario_from_file(&self, scenario_path: impl AsRef<Path>) -> miette::Result<Outcome> {
+    pub fn run_scenario_from_file(
+        &self,
+        scenario_path: impl AsRef<Path>,
+    ) -> miette::Result<Outcome> {
         let scenario_path = scenario_path.as_ref();
-        let src = fs::read_to_string(scenario_path)
-            .map_err(|e| miette::miette!("failed to read scenario `{}`: {e}", scenario_path.display()))?;
+        let src = fs::read_to_string(scenario_path).map_err(|e| {
+            miette::miette!("failed to read scenario `{}`: {e}", scenario_path.display())
+        })?;
         let scenario = parse_scenario_from_path(scenario_path, &src)?;
 
         let scenario_dir = scenario_path.parent().unwrap_or(Path::new("."));
@@ -64,10 +68,7 @@ impl Generator {
         let weapons = load_weapons_db(generator_root);
         let chips = load_chips_db(generator_root);
         let summons = load_summons_db(generator_root);
-        let mut rng_state: i64 = scenario
-            .random_seed
-            .unwrap_or(0)
-            as i64;
+        let mut rng_state: i64 = scenario.random_seed.unwrap_or(0) as i64;
         let mut id_map: std::collections::HashMap<i32, i64> = std::collections::HashMap::new();
         if cfg!(feature = "java-parity") {
             let mut next: i64 = 0;
@@ -104,13 +105,21 @@ impl Generator {
             // use its world directly to isolate combat-rule differences.
             if let Ok(path) = std::env::var("LW_REFERENCE_OUTCOME") {
                 let Ok(src) = std::fs::read_to_string(&path) else {
-                    return Err(miette::miette!("failed to read LW_REFERENCE_OUTCOME at {path}"));
+                    return Err(miette::miette!(
+                        "failed to read LW_REFERENCE_OUTCOME at {path}"
+                    ));
                 };
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(&src) else {
-                    return Err(miette::miette!("failed to parse LW_REFERENCE_OUTCOME JSON at {path}"));
+                    return Err(miette::miette!(
+                        "failed to parse LW_REFERENCE_OUTCOME JSON at {path}"
+                    ));
                 };
-                let fight = v.get("fight").ok_or_else(|| miette::miette!("reference outcome missing fight"))?;
-                let mapv = fight.get("map").ok_or_else(|| miette::miette!("reference outcome missing fight.map"))?;
+                let fight = v
+                    .get("fight")
+                    .ok_or_else(|| miette::miette!("reference outcome missing fight"))?;
+                let mapv = fight
+                    .get("map")
+                    .ok_or_else(|| miette::miette!("reference outcome missing fight.map"))?;
                 let width = mapv.get("width").and_then(|x| x.as_i64()).unwrap_or(18) as i32;
                 let height = mapv.get("height").and_then(|x| x.as_i64()).unwrap_or(18) as i32;
                 let map_type = mapv.get("type").and_then(|x| x.as_i64()).unwrap_or(-1) as i32;
@@ -118,7 +127,9 @@ impl Generator {
                 m.map_type = map_type;
                 if let Some(obs) = mapv.get("obstacles").and_then(|o| o.as_object()) {
                     for (k, vv) in obs {
-                        let Ok(cell_id) = k.parse::<i32>() else { continue };
+                        let Ok(cell_id) = k.parse::<i32>() else {
+                            continue;
+                        };
                         let size = vv.as_i64().unwrap_or(1) as i32;
                         if size <= 0 {
                             continue;
@@ -126,12 +137,18 @@ impl Generator {
                         // Anchor obstacle.
                         m.set_obstacle(cell_id, 1, size);
                         if size == 2 {
-                            if let Some(id2) = m.get_cell_by_dir(cell_id, crate::world_map::Dir::East) {
+                            if let Some(id2) =
+                                m.get_cell_by_dir(cell_id, crate::world_map::Dir::East)
+                            {
                                 m.set_obstacle(id2, 0, -1);
                             }
-                            if let Some(id3) = m.get_cell_by_dir(cell_id, crate::world_map::Dir::South) {
+                            if let Some(id3) =
+                                m.get_cell_by_dir(cell_id, crate::world_map::Dir::South)
+                            {
                                 m.set_obstacle(id3, 0, -2);
-                                if let Some(id4) = m.get_cell_by_dir(id3, crate::world_map::Dir::East) {
+                                if let Some(id4) =
+                                    m.get_cell_by_dir(id3, crate::world_map::Dir::East)
+                                {
                                     m.set_obstacle(id4, 0, -3);
                                 }
                             }
@@ -139,11 +156,16 @@ impl Generator {
                     }
                 }
                 // Placements are taken from the reference `leeks[].cellPos` by fight id.
-                let mut p = vec![0i32; (scenario.entities.iter().map(|t| t.len()).sum::<usize>()).max(1)];
+                let mut p =
+                    vec![0i32; (scenario.entities.iter().map(|t| t.len()).sum::<usize>()).max(1)];
                 if let Some(leeks) = fight.get("leeks").and_then(|x| x.as_array()) {
                     for l in leeks {
-                        let Some(fid) = l.get("id").and_then(|x| x.as_i64()) else { continue };
-                        let Some(cell) = l.get("cellPos").and_then(|x| x.as_i64()) else { continue };
+                        let Some(fid) = l.get("id").and_then(|x| x.as_i64()) else {
+                            continue;
+                        };
+                        let Some(cell) = l.get("cellPos").and_then(|x| x.as_i64()) else {
+                            continue;
+                        };
                         if let (Ok(fid), Ok(cell)) = (usize::try_from(fid), i32::try_from(cell)) {
                             if fid < p.len() {
                                 p[fid] = cell;
@@ -157,7 +179,8 @@ impl Generator {
                 let obstacle_count = rng.int_inclusive(30, 80);
                 let team_sizes: Vec<usize> = scenario.entities.iter().map(|t| t.len()).collect();
                 // Reference uses CONTEXT_TEST (0) for this scenario.
-                let (m, p, rng2) = WorldMap::generate_random(rng, 0, 18, 18, obstacle_count, &team_sizes);
+                let (m, p, rng2) =
+                    WorldMap::generate_random(rng, 0, 18, 18, obstacle_count, &team_sizes);
                 rng_state = rng2.n;
                 (m, Some(p))
             }
@@ -171,7 +194,12 @@ impl Generator {
                 obstacles = mapv
                     .get("obstacles")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|x| x.as_i64()).filter_map(|x| i32::try_from(x).ok()).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|x| x.as_i64())
+                            .filter_map(|x| i32::try_from(x).ok())
+                            .collect()
+                    })
                     .unwrap_or_default();
             }
             let mut m = WorldMap::new(width, height);
@@ -241,7 +269,9 @@ impl Generator {
 
             for (eid, team, chips) in plans {
                 for chip_item in chips {
-                    let Some(def) = chips_db.get(&chip_item).cloned() else { continue };
+                    let Some(def) = chips_db.get(&chip_item).cloned() else {
+                        continue;
+                    };
                     if def.initial_cooldown <= 0 {
                         continue;
                     }
@@ -263,7 +293,9 @@ impl Generator {
             std::collections::HashMap::new();
         for team in &scenario.entities {
             for e in team {
-                let Some(ai_rel) = e.ai.as_deref() else { continue };
+                let Some(ai_rel) = e.ai.as_deref() else {
+                    continue;
+                };
                 let mut ai_path = scenario_dir.join(ai_rel);
                 if !ai_path.exists() {
                     ai_path = generator_root.join(ai_rel);
@@ -277,14 +309,17 @@ impl Generator {
                 let diags = self.analyze_ai_file(generator_root, &ai_path)?;
                 analyze_time_ms += start.elapsed().as_millis() as i64;
                 if !diags.is_empty() {
-                    ai_logs.insert(e.id.to_string(), serde_json::to_value(&diags).unwrap_or(Value::Null));
+                    ai_logs.insert(
+                        e.id.to_string(),
+                        serde_json::to_value(&diags).unwrap_or(Value::Null),
+                    );
                 }
 
                 // Compile once (with includes + custom native mapping).
-                let canon_entry =
-                    fs::canonicalize(&ai_path).map_err(|er| miette::miette!("invalid entry {}: {er}", ai_path.display()))?;
-                let canon_root =
-                    fs::canonicalize(generator_root).unwrap_or_else(|_| generator_root.to_path_buf());
+                let canon_entry = fs::canonicalize(&ai_path)
+                    .map_err(|er| miette::miette!("invalid entry {}: {er}", ai_path.display()))?;
+                let canon_root = fs::canonicalize(generator_root)
+                    .unwrap_or_else(|_| generator_root.to_path_buf());
                 let chunk = leekscript::vm::compile_chunk_v4_with_includes_and_native_id_fn(
                     &canon_root,
                     &canon_entry,
@@ -344,7 +379,9 @@ impl Generator {
                     continue;
                 }
 
-                let Some(chunk) = compiled.get(&entity_id).cloned() else { continue };
+                let Some(chunk) = compiled.get(&entity_id).cloned() else {
+                    continue;
+                };
 
                 let run_start = Instant::now();
                 state.borrow_mut().fight_actions.push(json!([7, entity_id]));
@@ -366,7 +403,10 @@ impl Generator {
                             arr.push(json!({"turn": turn, "run": v}));
                         } else {
                             // If something else wrote a non-array, overwrite with a per-turn trace.
-                            ai_run.insert(entity_id.to_string(), serde_json::Value::Array(vec![json!({"turn": turn, "run": v})]));
+                            ai_run.insert(
+                                entity_id.to_string(),
+                                serde_json::Value::Array(vec![json!({"turn": turn, "run": v})]),
+                            );
                         }
                     } else if turn == 1 {
                         ai_run.insert(entity_id.to_string(), v);
@@ -382,7 +422,10 @@ impl Generator {
                         me.map(|e| e.max_mp).unwrap_or(0),
                     )
                 };
-                state.borrow_mut().fight_actions.push(json!([8, entity_id, tp, mp]));
+                state
+                    .borrow_mut()
+                    .fight_actions
+                    .push(json!([8, entity_id, tp, mp]));
             }
 
             // Stop early if only one team has living entities.
@@ -401,8 +444,12 @@ impl Generator {
 
         let winner_team: i64 = {
             let st = state.borrow();
-            let alive: std::collections::HashSet<i64> =
-                st.entities.values().filter(|e| e.life > 0).map(|e| e.team).collect();
+            let alive: std::collections::HashSet<i64> = st
+                .entities
+                .values()
+                .filter(|e| e.life > 0)
+                .map(|e| e.team)
+                .collect();
             if alive.len() == 1 {
                 *alive.iter().next().unwrap()
             } else {
@@ -433,7 +480,13 @@ impl Generator {
 
         let fight_actions = state.borrow().fight_actions.clone();
         let map_snapshot = state.borrow().map.clone();
-        let fight = self.build_fight_skeleton_with_actions(scenario, &map_snapshot, &id_map, &initial_cells, fight_actions);
+        let fight = self.build_fight_skeleton_with_actions(
+            scenario,
+            &map_snapshot,
+            &id_map,
+            &initial_cells,
+            fight_actions,
+        );
         let mut logs = json!({
             "ai": ai_logs,
             "ai_run": ai_run,
@@ -468,7 +521,8 @@ impl Generator {
         let path = path.as_ref();
         let canon_entry = fs::canonicalize(path)
             .map_err(|e| miette::miette!("invalid entry {}: {e}", path.display()))?;
-        let canon_root = fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+        let canon_root =
+            fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
         let lang = leekscript::LanguageOptions::default();
 
         let prep = leekscript::prepare_merged_check_unit(
@@ -590,8 +644,8 @@ impl Generator {
         self_id: i32,
         state: Rc<RefCell<LeekWarsState>>,
     ) -> miette::Result<Value> {
-        let canon_entry =
-            fs::canonicalize(path).map_err(|e| miette::miette!("invalid entry {}: {e}", path.display()))?;
+        let canon_entry = fs::canonicalize(path)
+            .map_err(|e| miette::miette!("invalid entry {}: {e}", path.display()))?;
         let canon_root =
             fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
 
@@ -602,8 +656,8 @@ impl Generator {
         )
         .map_err(|e| miette::miette!("{e}"))?;
 
-        let mut vm = leekscript::vm::Vm::from_compiled_chunk(chunk)
-            .map_err(|e| miette::miette!("{e}"))?;
+        let mut vm =
+            leekscript::vm::Vm::from_compiled_chunk(chunk).map_err(|e| miette::miette!("{e}"))?;
         vm.set_natives(crate::vm::default_natives());
         vm.set_host(Box::new(LeekWarsContext {
             self_id: self_id as i64,
@@ -633,8 +687,8 @@ impl Generator {
         max_operations: Option<u64>,
         max_ram_quads: Option<u64>,
     ) -> miette::Result<Value> {
-        let mut vm = leekscript::vm::Vm::from_compiled_chunk(chunk)
-            .map_err(|e| miette::miette!("{e}"))?;
+        let mut vm =
+            leekscript::vm::Vm::from_compiled_chunk(chunk).map_err(|e| miette::miette!("{e}"))?;
         vm.set_natives(crate::vm::default_natives());
         vm.set_host(Box::new(LeekWarsContext {
             self_id: self_id as i64,
@@ -807,7 +861,11 @@ fn compute_start_order_for_scenario(
             .iter()
             .map(|e| {
                 let id = *id_map.get(&e.id).unwrap_or(&(e.id as i64));
-                let freq = e.extra.get("frequency").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
+                let freq = e
+                    .extra
+                    .get("frequency")
+                    .and_then(|x| x.as_i64())
+                    .unwrap_or(0) as i32;
                 (id, freq)
             })
             .collect();
@@ -847,12 +905,17 @@ fn load_weapons_db(generator_root: &Path) -> std::collections::HashMap<i64, crat
     for (_, wv) in obj {
         let Some(wobj) = wv.as_object() else { continue };
         let item = wobj.get("item").and_then(|x| x.as_i64()).unwrap_or(0);
-        if item == 0 { continue; }
+        if item == 0 {
+            continue;
+        }
         let template = wobj.get("template").and_then(|x| x.as_i64()).unwrap_or(0);
         let cost = wobj.get("cost").and_then(|x| x.as_i64()).unwrap_or(0);
         let min_range = wobj.get("min_range").and_then(|x| x.as_i64()).unwrap_or(0);
         let max_range = wobj.get("max_range").and_then(|x| x.as_i64()).unwrap_or(0);
-        let launch_type_raw = wobj.get("launch_type").and_then(|x| x.as_i64()).unwrap_or(7);
+        let launch_type_raw = wobj
+            .get("launch_type")
+            .and_then(|x| x.as_i64())
+            .unwrap_or(7);
         let launch_type = crate::vm::LaunchType::from_i64(launch_type_raw)
             .unwrap_or(crate::vm::LaunchType::Circle);
         let max_uses = wobj.get("max_uses").and_then(|x| x.as_i64()).unwrap_or(-1);
@@ -911,7 +974,9 @@ fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate:
     for (_, cv) in obj {
         let Some(co) = cv.as_object() else { continue };
         let item = co.get("id").and_then(|x| x.as_i64()).unwrap_or(0);
-        if item == 0 { continue; }
+        if item == 0 {
+            continue;
+        }
         let template = co.get("template").and_then(|x| x.as_i64()).unwrap_or(0);
         let cost = co.get("cost").and_then(|x| x.as_i64()).unwrap_or(0);
         let min_range = co.get("min_range").and_then(|x| x.as_i64()).unwrap_or(0);
@@ -922,8 +987,14 @@ fn load_chips_db(generator_root: &Path) -> std::collections::HashMap<i64, crate:
         let area = co.get("area").and_then(|x| x.as_i64()).unwrap_or(1);
         let los = co.get("los").and_then(|x| x.as_bool()).unwrap_or(true);
         let cooldown = co.get("cooldown").and_then(|x| x.as_i64()).unwrap_or(0);
-        let team_cooldown = co.get("team_cooldown").and_then(|x| x.as_bool()).unwrap_or(false);
-        let initial_cooldown = co.get("initial_cooldown").and_then(|x| x.as_i64()).unwrap_or(0);
+        let team_cooldown = co
+            .get("team_cooldown")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let initial_cooldown = co
+            .get("initial_cooldown")
+            .and_then(|x| x.as_i64())
+            .unwrap_or(0);
         let max_uses = co.get("max_uses").and_then(|x| x.as_i64()).unwrap_or(-1);
         let mut effects = Vec::new();
         if let Some(arr) = co.get("effects").and_then(|x| x.as_array()) {
@@ -982,9 +1053,19 @@ fn load_summons_db(
     for (_, sv) in obj {
         let Some(so) = sv.as_object() else { continue };
         let id = so.get("id").and_then(|x| x.as_i64()).unwrap_or(0);
-        if id == 0 { continue; }
-        let name = so.get("name").and_then(|x| x.as_str()).unwrap_or("?").to_string();
-        let chips = so.get("chips").and_then(|x| x.as_array()).map(|arr| arr.iter().filter_map(|c| c.as_i64()).collect()).unwrap_or_default();
+        if id == 0 {
+            continue;
+        }
+        let name = so
+            .get("name")
+            .and_then(|x| x.as_str())
+            .unwrap_or("?")
+            .to_string();
+        let chips = so
+            .get("chips")
+            .and_then(|x| x.as_array())
+            .map(|arr| arr.iter().filter_map(|c| c.as_i64()).collect())
+            .unwrap_or_default();
         let chr = so.get("characteristics").and_then(|x| x.as_object());
         let get_range = |k: &str| -> (i64, i64) {
             let Some(arr) = chr.and_then(|c| c.get(k)).and_then(|v| v.as_array()) else {
@@ -995,15 +1076,18 @@ fn load_summons_db(
             (a, b)
         };
         let sid = crate::vm::SummonId(id);
-        out.insert(sid, crate::vm::SummonDef{
-            id: sid,
-            name,
-            chips,
-            life_range: get_range("life"),
-            tp_range: get_range("tp"),
-            mp_range: get_range("mp"),
-            strength_range: get_range("strength"),
-        });
+        out.insert(
+            sid,
+            crate::vm::SummonDef {
+                id: sid,
+                name,
+                chips,
+                life_range: get_range("life"),
+                tp_range: get_range("tp"),
+                mp_range: get_range("mp"),
+                strength_range: get_range("strength"),
+            },
+        );
     }
     out
 }
@@ -1039,7 +1123,11 @@ fn value_to_json(v: &leekscript::vm::Value) -> Value {
 }
 
 fn parse_scenario_from_path(path: &Path, src: &str) -> miette::Result<Scenario> {
-    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if ext == "json" || ext.is_empty() {
         return serde_json::from_str::<Scenario>(src)
             .map_err(|e| miette::miette!("failed to parse scenario json: {e}"));
@@ -1077,8 +1165,5 @@ fn default_signature_files(base: &Path) -> Vec<PathBuf> {
         base.join("sig/leekwars/leekwars.sig.functions.leek"),
     ];
 
-    candidates
-        .into_iter()
-        .filter(|p| p.exists())
-        .collect()
+    candidates.into_iter().filter(|p| p.exists()).collect()
 }

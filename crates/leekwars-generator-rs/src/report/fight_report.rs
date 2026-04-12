@@ -172,8 +172,11 @@ pub fn format_outcome_human(outcome: &Value) -> String {
 
 /// Like [`format_outcome_human`], but also searches for `data/` starting from `scenario_path`'s ancestors.
 pub fn format_outcome_human_for_path(outcome: &Value, scenario_path: &Path) -> String {
-    let data_dir =
-        find_game_data_dir(scenario_path).or_else(|| std::env::current_dir().ok().and_then(|cwd| find_game_data_dir(&cwd)));
+    let data_dir = find_game_data_dir(scenario_path).or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|cwd| find_game_data_dir(&cwd))
+    });
     let game = data_dir
         .as_ref()
         .map(|p| GameNames::load_from_data_dir(p))
@@ -207,14 +210,19 @@ pub fn format_outcome_human_with_game(outcome: &Value, game: &GameNames) -> Stri
 fn append_meta(buf: &mut String, outcome: &Value) {
     buf.push_str("Outcome\n");
     match outcome.get("winner").and_then(|v| v.as_i64()) {
-        Some(0) => buf.push_str("  Winner: none (draw, or max turns reached with both teams alive)\n"),
+        Some(0) => {
+            buf.push_str("  Winner: none (draw, or max turns reached with both teams alive)\n")
+        }
         Some(w) => buf.push_str(&format!("  Winner: team {w}\n")),
         None => buf.push_str("  Winner: (unknown)\n"),
     }
     if let Some(d) = outcome.get("duration").and_then(|v| v.as_i64()) {
         buf.push_str(&format!("  Fight lasted: {d} turn(s)\n"));
     }
-    let a = outcome.get("analyze_time").and_then(|v| v.as_i64()).unwrap_or(0);
+    let a = outcome
+        .get("analyze_time")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     let c = outcome
         .get("compilation_time")
         .and_then(|v| v.as_i64())
@@ -261,7 +269,12 @@ fn leek_at_cell(entity_cell: &HashMap<i64, i64>, dead: &HashSet<i64>, cell: i64)
         .map(|(e, _)| *e)
 }
 
-fn append_participants(buf: &mut String, fight: &Value, names: &HashMap<i64, String>, game: &GameNames) {
+fn append_participants(
+    buf: &mut String,
+    fight: &Value,
+    names: &HashMap<i64, String>,
+    game: &GameNames,
+) {
     buf.push_str("Participants (starting positions)\n");
     let Some(leeks) = fight.get("leeks").and_then(|v| v.as_array()) else {
         buf.push_str("  (no leeks in fight JSON)\n");
@@ -323,8 +336,7 @@ impl<'a> TimelineState<'a> {
             for leek in leeks {
                 if let (Some(id), Some(cell)) = (
                     leek.get("id").and_then(|v| v.as_i64()),
-                    leek
-                        .get("cellPos")
+                    leek.get("cellPos")
                         .or_else(|| leek.get("cell"))
                         .and_then(|v| v.as_i64()),
                 ) {
@@ -377,7 +389,12 @@ impl<'a> TimelineState<'a> {
     }
 }
 
-fn append_actions_timeline(buf: &mut String, fight: &Value, names: &HashMap<i64, String>, game: &GameNames) {
+fn append_actions_timeline(
+    buf: &mut String,
+    fight: &Value,
+    names: &HashMap<i64, String>,
+    game: &GameNames,
+) {
     buf.push_str("Timeline\n");
     let Some(actions) = fight.get("actions").and_then(|v| v.as_array()) else {
         buf.push_str("  (no actions)\n");
@@ -393,8 +410,13 @@ fn append_actions_timeline(buf: &mut String, fight: &Value, names: &HashMap<i64,
         };
         let ty = arr.first().and_then(|v| v.as_i64()).unwrap_or(-1);
         let line = format_action_line(&state, arr);
-        if ty == 6 && arr.len() >= 2 && let Some(n) = arr.get(1).and_then(|v| v.as_i64()) {
-            buf.push_str(&format!("\n── Turn {n} ─────────────────────────────────────────────\n"));
+        if ty == 6
+            && arr.len() >= 2
+            && let Some(n) = arr.get(1).and_then(|v| v.as_i64())
+        {
+            buf.push_str(&format!(
+                "\n── Turn {n} ─────────────────────────────────────────────\n"
+            ));
             buf.push_str(&format!("  [{idx}] {line}\n"));
         } else {
             buf.push_str(&format!("  [{idx}] {line}\n"));
@@ -577,16 +599,15 @@ fn format_action_line(state: &TimelineState, a: &[Value]) -> String {
         106 => {
             let id = a.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
             let v = a.get(2).and_then(|x| x.as_i64()).unwrap_or(0);
-            format!("LOSE_STRENGTH — {} loses {v} strength", leek_label(names, id))
+            format!(
+                "LOSE_STRENGTH — {} loses {v} strength",
+                leek_label(names, id)
+            )
         }
         107 | 108 | 109 | 110 | 111 | 112 => damage_kind(ty, names, a),
         201 => "LAMA".to_string(),
         203 => {
-            let msg = a
-                .get(1)
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let msg = a.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
             let preview: String = msg.chars().take(120).collect();
             let ell = if msg.chars().count() > 120 { "…" } else { "" };
             let speaker = state
@@ -632,15 +653,39 @@ fn format_action_line(state: &TimelineState, a: &[Value]) -> String {
                 leek_label(names, caster),
             )
         }
-        303 => format!("REMOVE_EFFECT — raw {}", serde_json::to_string(a).unwrap_or_default()),
-        304 => format!("UPDATE_EFFECT — raw {}", serde_json::to_string(a).unwrap_or_default()),
-        306 => format!("REDUCE_EFFECTS — raw {}", serde_json::to_string(a).unwrap_or_default()),
-        307 => format!("REMOVE_POISONS — raw {}", serde_json::to_string(a).unwrap_or_default()),
-        308 => format!("REMOVE_SHACKLES — raw {}", serde_json::to_string(a).unwrap_or_default()),
-        14 => format!("STACK_EFFECT — raw {}", serde_json::to_string(a).unwrap_or_default()),
-        15 => format!("OPEN_CHEST — raw {}", serde_json::to_string(a).unwrap_or_default()),
+        303 => format!(
+            "REMOVE_EFFECT — raw {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
+        304 => format!(
+            "UPDATE_EFFECT — raw {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
+        306 => format!(
+            "REDUCE_EFFECTS — raw {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
+        307 => format!(
+            "REMOVE_POISONS — raw {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
+        308 => format!(
+            "REMOVE_SHACKLES — raw {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
+        14 => format!(
+            "STACK_EFFECT — raw {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
+        15 => format!(
+            "OPEN_CHEST — raw {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
         1002 => format!("BUG — raw {}", serde_json::to_string(a).unwrap_or_default()),
-        _ => format!("opcode {ty} (raw) {}", serde_json::to_string(a).unwrap_or_default()),
+        _ => format!(
+            "opcode {ty} (raw) {}",
+            serde_json::to_string(a).unwrap_or_default()
+        ),
     }
 }
 
@@ -676,7 +721,9 @@ fn append_logs_summary(buf: &mut String, logs: Option<&Value>) {
             if let Some(ai) = obj.get("ai").and_then(|v| v.as_object()) {
                 for (id, v) in ai {
                     let n = v.as_array().map(|a| a.len()).unwrap_or(1);
-                    buf.push_str(&format!("  AI diagnostics · entity {id}: {n} entr(y/ies)\n"));
+                    buf.push_str(&format!(
+                        "  AI diagnostics · entity {id}: {n} entr(y/ies)\n"
+                    ));
                 }
             }
             if let Some(run) = obj.get("ai_run").and_then(|v| v.as_object()) {
@@ -776,4 +823,3 @@ mod tests {
         );
     }
 }
-
