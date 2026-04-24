@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return abs(['a', -15][1]);

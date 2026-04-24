@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global Array<integer> CELL_X = function() => Array<integer> { return [] }() CELL_X

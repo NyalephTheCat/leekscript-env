@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var m = new Map() m[1] = 2 return m

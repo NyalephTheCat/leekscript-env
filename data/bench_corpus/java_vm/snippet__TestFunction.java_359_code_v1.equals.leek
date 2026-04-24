@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+function generator() => Function< =>real> { return function() => real { return 12.5 }} var level1 = generator(); var level2 = level1(); return level2

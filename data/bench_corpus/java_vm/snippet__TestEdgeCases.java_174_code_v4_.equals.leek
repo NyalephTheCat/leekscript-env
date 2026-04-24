@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+for (var i = 0; i < 100; i++) { var temp = [] for (var j = 0; j < 1000; j++) push(temp, j) } return 'ok'

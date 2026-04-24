@@ -1,0 +1,9 @@
+var a = [];
+for (var i = 0; i < 14; ++i) {
+	a += [i * 1]
+}
+var t = 0;
+for (var v in a) {
+	t += v
+}
+return t;

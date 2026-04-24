@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { integer val = 42; getVal() { return val } } var x = new A(); var f = function() { x = new A() }; if (x instanceof A) { return x.getVal() } return 0

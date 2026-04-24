@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var s = [] var i = 3 var j while (i--) { for (j = 0; j < 2; ++j) { push(s, j) }} return s;

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer | null x = 5; var r = 0; while (x != null) { r = abs(x); x = null } return r

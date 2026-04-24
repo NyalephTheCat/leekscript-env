@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var m = [5.5: 12.5] return m[5.5]

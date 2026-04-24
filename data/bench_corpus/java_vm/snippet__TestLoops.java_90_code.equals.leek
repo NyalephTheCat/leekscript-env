@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var t = 0 do { t++ return t } while (t < 5)

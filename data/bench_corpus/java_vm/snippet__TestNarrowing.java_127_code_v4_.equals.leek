@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer | null x = 5; switch (x) { case null: return 0; default: return abs(x) }

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function f() => Function< => void> { var a = 0; var b = 10; return function() => void { for (var range = a; range <= b; range += 1) {} } }

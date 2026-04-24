@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer | null x = null; integer | null y = null; if (x == null || y == null) { return 0 }

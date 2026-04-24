@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+any m = ['a': 10] m['a'] += 5 return m['a']

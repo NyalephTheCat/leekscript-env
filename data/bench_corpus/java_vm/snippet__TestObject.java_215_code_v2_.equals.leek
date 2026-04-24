@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { real? a = 12 } new A().a

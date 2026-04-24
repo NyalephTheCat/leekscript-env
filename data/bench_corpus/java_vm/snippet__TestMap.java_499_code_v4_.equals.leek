@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return mapAverage([0: 2, 'a': 4, 'test': 6])

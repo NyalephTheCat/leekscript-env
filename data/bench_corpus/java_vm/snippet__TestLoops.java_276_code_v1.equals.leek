@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var a = [1, 2, 3] for (var i : var @e in a) { (function() { e = 5 })() } return a;

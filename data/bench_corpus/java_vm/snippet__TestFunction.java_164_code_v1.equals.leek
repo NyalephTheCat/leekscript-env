@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var f = function(@x) { x += 1 } var a = [1, 2, 3] arrayMap(a, f) return a

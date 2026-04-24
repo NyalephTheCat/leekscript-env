@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return 5.001_002_003

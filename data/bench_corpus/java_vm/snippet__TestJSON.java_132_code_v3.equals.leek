@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+var v = {b: {d: 12}, cc: [[], 4], h: []} return string(jsonDecode(jsonEncode(v))) == string(v)

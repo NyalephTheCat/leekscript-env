@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var count = 0 var adn = '' for (var j = 0; j < 200; j++) { adn += 'A' } var c = contains(adn, 'GAGA'); if (c) count++

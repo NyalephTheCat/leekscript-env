@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global real x = 56 return x

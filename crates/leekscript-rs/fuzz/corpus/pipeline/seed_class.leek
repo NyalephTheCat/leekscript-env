@@ -1,8 +1,0 @@
-// leeklang: version=v4
-class C {
-    integer n;
-    function get() { return n; }
-}
-var c = new C();
-c.n = 5;
-return c.get();

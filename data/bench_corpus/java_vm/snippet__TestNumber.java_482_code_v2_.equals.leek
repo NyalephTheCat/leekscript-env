@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer|real x = 0 x += 0.3 x

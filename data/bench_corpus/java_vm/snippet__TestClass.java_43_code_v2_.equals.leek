@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { private Array<integer> list = [] private add(integer | null v) { if (v != null) { push(list, v) } } public run() { add(null) add(3) return list } } return new A().run()

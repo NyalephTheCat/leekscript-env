@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function f(integer | real x) { return sqrt(x) } return f(12)

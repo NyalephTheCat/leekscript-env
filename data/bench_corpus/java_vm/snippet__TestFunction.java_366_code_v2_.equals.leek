@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function Functor() => Function < => string> { return function() => string { return 'yea' } } class Temp { Function < => Function> functor; Function result;constructor() { this.functor = Functor; this.result = this.functor(); } } var t = new Temp() return t.result()

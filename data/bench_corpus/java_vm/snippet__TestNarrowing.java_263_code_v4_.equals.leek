@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Base { } class Sub extends Base { integer val = 42 } class Container { Base obj } var c = new Container(); c.obj = new Sub(); if (c.obj instanceof Sub && (c.obj as Sub).val == 42) { return 1 } return 0

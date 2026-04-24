@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+var tabmulti=[[],[],[],[],[]]; var vPM=1; for(var i=0;i<=vPM;i++){ for(var j=-vPM;j<=vPM;j++){ tabmulti[i][j]=i*j;}} return tabmulti

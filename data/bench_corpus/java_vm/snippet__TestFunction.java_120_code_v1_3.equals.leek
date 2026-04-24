@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+function f() { return count([1, 2, 3]) > count([]) } var _count = count; count = function(x) { return _count(x) } return f()

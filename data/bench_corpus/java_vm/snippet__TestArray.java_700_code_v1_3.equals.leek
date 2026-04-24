@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+return arrayPartition([4,3,2,1], function(k, v) { return k < v;})

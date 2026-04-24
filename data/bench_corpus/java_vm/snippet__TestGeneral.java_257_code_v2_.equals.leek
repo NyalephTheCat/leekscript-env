@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+real a = 1.9 integer b = a return b

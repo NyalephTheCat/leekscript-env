@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var a = 12 if (0) { a = 5 a++ } else { a = 5.5 } return a

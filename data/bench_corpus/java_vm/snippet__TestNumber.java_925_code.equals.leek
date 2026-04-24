@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var ax = randInt(-17, 17) var ay = randInt(-17 + abs(ax), 17 - abs(ax))

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { x constructor(x) { this.x = x } } var a = [1, 2, 3, 4] return arrayMap(a, A)

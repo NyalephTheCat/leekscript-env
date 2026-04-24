@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+return log10(654321)

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var cell = 1 if (cell != null) return 12

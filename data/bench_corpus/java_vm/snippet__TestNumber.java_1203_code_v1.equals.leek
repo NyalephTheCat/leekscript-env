@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+return hypot([34, ''][0], 74)

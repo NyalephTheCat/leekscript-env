@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var tabmulti=[]; for (var i = 0; i < 9; ++i) tabmulti[i]=1; return tabmulti

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Cell { integer v = 42 } class A { Cell | null c = null; m() { if (c == null) { c = new Cell() } } } var a = new A(); a.m(); return a.c.v

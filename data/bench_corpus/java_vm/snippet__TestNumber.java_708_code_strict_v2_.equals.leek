@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+any a = 15; return ['', a /= 2];

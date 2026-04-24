@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { integer x = 42 } global obj = null; if (obj == null) { obj = new A() } return obj.x

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function getName(any location) { if (location instanceof Class) { return location.name } return '' } return getName(Number)

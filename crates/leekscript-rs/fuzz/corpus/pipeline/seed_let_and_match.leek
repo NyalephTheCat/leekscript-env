@@ -1,6 +1,0 @@
-// leeklang: version=v4 experimental-let=true experimental-match=true
-let x = 1;
-match (x) {
-    1: return 10;
-    ..: return 0;
-}

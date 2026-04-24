@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+any a = ['x': 1] any b = clone(a) b['y'] = 2 return mapSize(a)

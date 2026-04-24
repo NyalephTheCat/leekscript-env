@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = randReal(500, 510) return a >= 500 and a < 510

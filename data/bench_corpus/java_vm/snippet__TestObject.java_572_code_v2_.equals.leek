@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static f(x) { x = 2 var g = function() { f(x) } } }

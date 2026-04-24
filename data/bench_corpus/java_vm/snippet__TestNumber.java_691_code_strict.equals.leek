@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+var a = 12 a /= 3 return a;

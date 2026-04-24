@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var max = 0 if (max < 12) { max = 5 } return max

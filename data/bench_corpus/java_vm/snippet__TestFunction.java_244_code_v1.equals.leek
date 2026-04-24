@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var items = [[37, 3], [47, 10], [28, 5]] var aux; aux = function(@current, i, tp, added) { for (var j = i; j < 3; ++j) { if (tp < 0) continue; var new_added = added; new_added[2] = true; var copy = current; } }; aux([0, []], 0, 25, []);

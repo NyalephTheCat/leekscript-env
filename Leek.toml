@@ -1,0 +1,19 @@
+# Example manifest — see docs/design/leek-toml.md
+[package]
+name = "leekscript-env"
+version = "0.0.0"
+
+[language]
+version = 4
+strict = false
+
+[fmt]
+width = 100
+indent = 4
+
+[lint]
+level = "warn"
+allow = ["E8000"]
+
+[experimental]
+features = []

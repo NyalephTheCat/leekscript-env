@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+Interval i = [0..[ return i instanceof Interval

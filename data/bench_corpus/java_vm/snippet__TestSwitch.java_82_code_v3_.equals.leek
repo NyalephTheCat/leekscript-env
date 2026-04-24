@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var x = true switch (x) { case true: return 'yes' case false: return 'no' }

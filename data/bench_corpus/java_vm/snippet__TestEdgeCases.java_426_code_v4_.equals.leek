@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function key() { return 'x' } any m = ['x': 42] return m[key()]

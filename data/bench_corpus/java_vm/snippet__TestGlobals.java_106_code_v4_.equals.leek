@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var e = 2 var f = 4 global x global y = [1:2] x = (y[e | f << 2] = [:])

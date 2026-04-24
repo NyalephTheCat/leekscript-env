@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global Map<integer, Map<integer, boolean>> x x = (x[1] = [:]) x

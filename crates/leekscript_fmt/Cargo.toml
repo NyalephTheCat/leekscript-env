@@ -1,0 +1,14 @@
+[package]
+name = "leekscript_fmt"
+version = "0.1.0"
+edition.workspace = true
+description = "LeekScript source formatter (token-based, comment-preserving)"
+
+[dependencies]
+leekscript_directives = { path = "../leekscript_directives" }
+leekscript_lexer = { path = "../leekscript_lexer" }
+leekscript_parser = { path = "../leekscript_parser" }
+leekscript_span = { path = "../leekscript_span" }
+leekscript_config = { path = "../leekscript_config" }
+leekscript_syntax = { path = "../leekscript_syntax" }
+toml = "0.8"

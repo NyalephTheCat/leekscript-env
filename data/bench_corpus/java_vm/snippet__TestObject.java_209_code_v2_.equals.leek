@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { public static Function< => integer> f = function () => integer { return 1 } } return A.f()

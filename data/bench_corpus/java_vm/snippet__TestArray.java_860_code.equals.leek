@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return arrayMax([1, 2, 3, null, 4, 5])

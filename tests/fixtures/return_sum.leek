@@ -1,0 +1,2 @@
+// Fixture: top-level return for `lek run` interpreter
+return 1 + 1;

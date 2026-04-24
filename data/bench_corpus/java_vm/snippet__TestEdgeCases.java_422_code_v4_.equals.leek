@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+any m = ['a': ['b': ['c': 42]]] return m['a']['b']['c']

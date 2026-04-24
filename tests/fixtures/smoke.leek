@@ -1,0 +1,2 @@
+// Smoke test fixture for `lek check`
+var x = 1;

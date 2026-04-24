@@ -1,0 +1,7 @@
+function add3(a, b, c) {
+	return a + b + c;
+}
+function scale(x, y) {
+	return x * y + 12;
+}
+return scale(add3(1, 2, 3), 6);

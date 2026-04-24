@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return function() { var a = ['a','b','c','d']; push(a, 'b'); return a }();

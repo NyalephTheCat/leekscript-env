@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return bitCount(0b111100111001111)

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var i = <1, 2> return setPut(i, 2)

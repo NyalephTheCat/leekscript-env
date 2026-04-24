@@ -1,0 +1,9 @@
+[package]
+name = "leekscript_resolve"
+version = "0.1.0"
+edition.workspace = true
+description = "Lexical scope resolution for LeekScript HIR"
+
+[dependencies]
+leekscript_hir = { path = "../leekscript_hir" }
+leekscript_span = { path = "../leekscript_span" }

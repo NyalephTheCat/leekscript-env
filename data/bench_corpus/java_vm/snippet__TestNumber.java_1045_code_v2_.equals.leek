@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return min(5.5, [12.8, ''][0])

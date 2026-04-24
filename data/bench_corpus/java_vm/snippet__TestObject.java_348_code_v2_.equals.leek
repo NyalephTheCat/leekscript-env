@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Test { a b c } var test2 = new Test() test2['a'] = 8 return test2

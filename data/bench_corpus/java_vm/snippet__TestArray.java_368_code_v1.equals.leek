@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var a = [1.55]; a += 12.9; return a

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var s = '' return length(s)

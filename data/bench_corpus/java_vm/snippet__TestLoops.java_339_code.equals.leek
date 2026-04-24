@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+for (var x in ['a']) { var a = 'a' for (var y in ['a']) { var b = 'b' break } var d = 'd' } return 0;

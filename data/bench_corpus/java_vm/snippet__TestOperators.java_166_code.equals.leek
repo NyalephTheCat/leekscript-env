@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var sum = 1, ops = 10 return sum < ops * 0.95 || sum > ops

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var s = 0 for (var i = 0; i < 5; i++) { switch (i) { case 0: case 1: s += 10 break default: s += 1 break } } return s

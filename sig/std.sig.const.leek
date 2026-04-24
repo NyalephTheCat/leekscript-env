@@ -1,2 +1,0 @@
-include("core/stdlib.sig.const.leek")
-include("leekwars/leekwars.sig.const.leek")

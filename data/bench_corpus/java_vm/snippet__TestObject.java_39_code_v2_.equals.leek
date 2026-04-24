@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = {x: 1} var b = {v: a} return b

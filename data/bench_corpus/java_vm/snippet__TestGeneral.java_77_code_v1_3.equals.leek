@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+return color(0,255,255)

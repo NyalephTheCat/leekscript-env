@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var s = 0 var j = [] while (count(j) < 10) { push(j, 'a') s++ } return s;

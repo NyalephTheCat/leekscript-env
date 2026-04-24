@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var count = 0 var m = ['A', 'T', 'C', 'G'] var adn = '' adn += m[0] var c = contains(adn, 'GAGA'); if (c) count++

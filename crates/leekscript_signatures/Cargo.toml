@@ -1,0 +1,10 @@
+[package]
+name = "leekscript_signatures"
+version = "0.1.0"
+edition.workspace = true
+description = "TOML signature bundles: declare extra globals/functions for LeekScript resolve (e.g. Leek Wars natives)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+toml = "0.8"

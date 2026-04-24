@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static final a = [1, 2, 3] } arrayClear(A.a) return A.a

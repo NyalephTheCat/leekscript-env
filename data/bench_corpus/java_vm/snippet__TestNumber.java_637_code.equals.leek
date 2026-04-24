@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = 721 return a %= 17;

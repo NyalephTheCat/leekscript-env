@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = [:] return mapFold(a, function(r, v, k) { return r + v * k }, 10)

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Array<Array<integer>> a = [[5, 15]] real b = a[0][1] return b

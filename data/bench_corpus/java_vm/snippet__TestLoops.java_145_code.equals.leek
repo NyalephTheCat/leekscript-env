@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+for(var i=0;i<3;i++){ return i; } return 2;

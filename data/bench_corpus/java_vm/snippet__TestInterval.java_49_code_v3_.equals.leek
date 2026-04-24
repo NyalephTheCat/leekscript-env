@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Interval inter = [1..10] integer min = -intervalMin(inter) return min

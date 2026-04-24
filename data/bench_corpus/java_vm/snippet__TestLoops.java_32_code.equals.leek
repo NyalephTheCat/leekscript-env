@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var n = 5 var a = [] while (n--) { push(a, 1) }

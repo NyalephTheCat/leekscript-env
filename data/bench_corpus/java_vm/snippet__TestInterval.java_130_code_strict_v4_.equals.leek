@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+boolean x = 1 in [1..1] return x

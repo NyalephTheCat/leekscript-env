@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = [8,6,2,3,7,1,0]; sort(a, SORT_ASC); return a

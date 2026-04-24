@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static m(v) { return v } } var f = A.m return [A.m(5), A['m'](6), f(7)]

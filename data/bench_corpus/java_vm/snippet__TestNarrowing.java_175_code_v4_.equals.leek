@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Map | integer x = [1 : 'a']; if (x instanceof Map && x[1] == 'a') { return 1 } return 0

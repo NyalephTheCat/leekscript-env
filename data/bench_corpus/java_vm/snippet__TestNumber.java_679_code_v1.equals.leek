@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var a = 18; return a / 3;

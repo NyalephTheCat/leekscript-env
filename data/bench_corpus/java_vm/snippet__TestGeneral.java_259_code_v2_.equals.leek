@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer|real a = 1.999; integer b = a; return b

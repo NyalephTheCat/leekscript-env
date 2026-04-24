@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global x = 12; x /= 5; return x;

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { m(null|Array<integer> x) { return x == null ? 'none' : count(x) } } class B extends A { m(null|Array<integer> x) { return super.m(null) } } return new B().m([1])

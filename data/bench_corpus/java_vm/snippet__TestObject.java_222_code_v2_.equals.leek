@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { final a = 12 } var a = new A() a['a'] += 15 return a['a']

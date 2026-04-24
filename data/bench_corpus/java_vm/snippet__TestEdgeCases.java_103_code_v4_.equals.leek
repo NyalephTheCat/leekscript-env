@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var x = 0 var y = x == null ? 42 : x return y

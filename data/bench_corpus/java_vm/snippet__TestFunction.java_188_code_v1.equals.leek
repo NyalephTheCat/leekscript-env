@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var retour = [];for(var i=0;i<5;i++){if(i&1){var sqrt=function(e){return 1;}; push(retour, sqrt(4));}else{push(retour, sqrt(4));}}return retour

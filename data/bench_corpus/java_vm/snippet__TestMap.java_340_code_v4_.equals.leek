@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return mapMap(['a': 1, 'b': 2], function(v, k) { return k + v })

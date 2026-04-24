@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global integer x = 12; x++; return x;

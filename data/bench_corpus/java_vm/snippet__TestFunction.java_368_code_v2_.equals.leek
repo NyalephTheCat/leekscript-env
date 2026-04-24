@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Function< => integer> f function test(Function< => any> _) {} test(f)

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { x constructor(x) { this.x = x } } var f = A var o = {c: f} return o.c('a')

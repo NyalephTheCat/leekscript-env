@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer|Map? x = [1: 2]; if (x instanceof Map) { x = x[1] } return x

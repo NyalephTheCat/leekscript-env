@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var f = x, y -> x + y return f(5, 12)

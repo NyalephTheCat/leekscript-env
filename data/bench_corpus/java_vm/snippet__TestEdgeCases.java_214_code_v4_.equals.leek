@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function outer(x) { return function(y) { return function(z) { return x + y + z } } } return outer(1)(2)(3)

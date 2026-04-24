@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var mp = 10, grow = [100] while (mp--) { grow = [1] } return grow;

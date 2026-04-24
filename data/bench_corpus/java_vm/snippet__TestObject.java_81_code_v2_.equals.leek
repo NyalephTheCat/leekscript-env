@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { f static v() { return 55 } constructor(x, y = v()) { f = x * y } } return A(9).f

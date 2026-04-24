@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+return average([0: 2, 'a': 4, 'test': 6])

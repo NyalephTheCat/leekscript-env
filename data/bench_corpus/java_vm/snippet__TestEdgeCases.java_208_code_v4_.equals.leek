@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var large = [] for (var i = 0; i < 1000; i++) push(large, i) var f = function() { return count(large) } return f()

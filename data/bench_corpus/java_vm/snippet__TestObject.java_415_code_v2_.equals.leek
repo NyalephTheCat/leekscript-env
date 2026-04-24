@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A {	public id; } class W extends A {} class H extends W { constructor(id){ this.id=id } }

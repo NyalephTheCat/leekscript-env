@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var m = ['a': 2.5, 'b': 4.8] m['c'] = 6.9 return m

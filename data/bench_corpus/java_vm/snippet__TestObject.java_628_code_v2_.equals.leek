@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { integer x = 10 m(y) { this.x += y return this } } return new A().m(50)

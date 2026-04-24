@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { protected static x = 10 } class B extends A {} return B.x

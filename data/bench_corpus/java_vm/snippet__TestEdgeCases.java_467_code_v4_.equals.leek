@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function modify(arr) { push(arr, 99) } var a = [1, 2, 3] modify(a) return a

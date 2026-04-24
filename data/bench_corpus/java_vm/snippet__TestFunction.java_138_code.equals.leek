@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var fa = [function(a) { return 12; }] return fa[0](null);

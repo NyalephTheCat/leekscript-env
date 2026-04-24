@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+abs = 2 return abs

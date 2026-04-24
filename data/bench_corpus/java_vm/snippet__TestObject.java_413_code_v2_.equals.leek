@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { m() { return 'parent' } t() { return this.m() } } class B extends A { m() { return 'enfant' } } return new B().t()

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var k = ['a', 12][0] var m = ['a': 2] m[k]++ return m

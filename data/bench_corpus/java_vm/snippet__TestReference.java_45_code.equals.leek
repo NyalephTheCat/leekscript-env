@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global x = 7 var y = @x var f = function() { y = x } f() return y

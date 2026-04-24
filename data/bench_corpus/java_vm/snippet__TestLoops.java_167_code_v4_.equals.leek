@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var tabmulti=[[],[],[],[],[]]; var i = 3, j = -2 tabmulti[i][j]=i*j; return tabmulti

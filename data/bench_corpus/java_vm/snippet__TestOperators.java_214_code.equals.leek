@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = 20 if (15 > a > 11) { return true } return false

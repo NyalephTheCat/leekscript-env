@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var i = 10 while (['hello', i][1]) { i-- } return i;

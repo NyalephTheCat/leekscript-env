@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+for (var x in [1]) { return 12 }

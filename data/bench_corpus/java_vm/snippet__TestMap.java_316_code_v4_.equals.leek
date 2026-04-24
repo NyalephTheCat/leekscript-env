@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var m = [:] mapPut(m, 2, 3) return m

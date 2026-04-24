@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var shared = [0] var inc = function() { shared[0]++ } var get = function() { return shared[0] } for (var i = 0; i < 100; i++) inc() return get()

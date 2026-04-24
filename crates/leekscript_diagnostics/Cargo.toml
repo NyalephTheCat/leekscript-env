@@ -1,0 +1,10 @@
+[package]
+name = "leekscript_diagnostics"
+version = "0.1.0"
+edition.workspace = true
+description = "Diagnostic registry (E####) and helpers for LeekScript tooling"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+thiserror = "1.0"

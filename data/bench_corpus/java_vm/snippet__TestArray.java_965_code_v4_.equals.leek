@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return arrayFind([1, 2, 3, 4, 5], function(v) { return v > 3 })

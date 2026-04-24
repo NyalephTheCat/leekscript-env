@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { items } class B extends A { constructor() { this.items = [] } } var x = new B() return x

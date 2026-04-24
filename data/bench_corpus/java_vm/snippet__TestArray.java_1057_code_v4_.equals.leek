@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Array<Array<real>> a = [[1.0, 7.0]] integer b = a[0][1] as integer return b

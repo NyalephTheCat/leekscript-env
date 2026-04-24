@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { integer v = 0 } A | integer x = 10; function add(integer a, integer b) { return a + b } if (x instanceof A) { return x.v } else { return add(x, 5) }

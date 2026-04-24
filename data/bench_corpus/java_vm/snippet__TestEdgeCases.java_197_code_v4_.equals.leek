@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global pq = [] function pqPush(val) { push(pq, val) sort(pq) } function pqPop() { return shift(pq) } for (var i = 10; i > 0; i--) pqPush(i) return pqPop()

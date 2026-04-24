@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { private constructor() {} static getInstance() { return new A() } } return A.getInstance()

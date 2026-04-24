@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+var a = ['cle1':'a','cle2':'b','cle3':'c','cle4':'d']; return search(a,'c')

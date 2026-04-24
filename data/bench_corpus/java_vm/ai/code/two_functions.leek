@@ -1,0 +1,5 @@
+// leek-version: 4
+// leek-strict: false
+var ppair = function(p, v) { return {p: p, v: v} }
+var pqSingleton = function(p, v) { return [{p: p, v: v}] }
+return [ppair(2, 5), pqSingleton(3, 6)]

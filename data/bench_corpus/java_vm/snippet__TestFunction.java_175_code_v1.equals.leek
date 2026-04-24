@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var x = [] var f = function() { return @x } var a = f() push(a, 5) return x

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static m() { return 12 } } class B extends A { static n() { return class.m() } } return B.n()

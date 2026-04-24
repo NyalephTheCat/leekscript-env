@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var m = [1: 10] return m[1] |= 5

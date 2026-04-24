@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function tree(depth) { if (depth == 0) return [1] var arr = [] push(arr, tree(depth - 1)) push(arr, tree(depth - 1)) return arr } return count(tree(5))

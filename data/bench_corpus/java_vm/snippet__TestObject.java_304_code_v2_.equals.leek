@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static v() { return 55 } static m(x, y = v()) { return x * y } } return A.m(9)

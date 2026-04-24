@@ -1,0 +1,15 @@
+[package]
+name = "leekscript_parser"
+version = "0.1.0"
+edition.workspace = true
+description = "LeekScript parser (incremental: delimiters, then full grammar)"
+
+[dependencies]
+leekscript_lexer = { path = "../leekscript_lexer" }
+leekscript_span = { path = "../leekscript_span" }
+leekscript_syntax = { path = "../leekscript_syntax" }
+rowan = "0.15"
+
+[features]
+# Debug tracing for parser behavior (prints to stderr).
+parser-trace = []

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return substring('bonjour',2,3)

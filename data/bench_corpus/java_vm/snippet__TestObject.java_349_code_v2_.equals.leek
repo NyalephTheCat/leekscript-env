@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Test { a b c } var test2 = new Test() for (var field in Test.fields) { test2[field] = 8 } return test2

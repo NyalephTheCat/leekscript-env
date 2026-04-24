@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+any t = 0; var f = function(a) { t = @a }; var b = []; f(b); push(t, 5); return b;

@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+class R { private f = [] m(k, r) { return this.f[k] = r } } var x = new R() return x.m(1, 'hello')

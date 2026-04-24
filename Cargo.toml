@@ -1,18 +1,33 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/sipha/sipha",
-  "crates/leekscript-rs/leekscript",
-  "crates/leekscript-rs/leekscript-cli",
-  "crates/leekscript-rs/leekscript-lsp",
-  "crates/leekwars-generator-rs",
-  "crates/leekwars-api",
-  "crates/leekwars-cli",
+    "crates/leekscript_span",
+    "crates/leekscript_diagnostics",
+    "crates/leekscript_config",
+    "crates/leekscript_directives",
+    "crates/leekscript_lexer",
+    "crates/leekscript_parser",
+    "crates/leekscript_syntax",
+    "crates/leekscript_fmt",
+    "crates/leekscript_hir",
+    "crates/leekscript_resolve",
+    "crates/leekscript_signatures",
+    "crates/leekscript_types",
+    "crates/leekscript_run",
+    "crates/leekscript_fuzz",
+    "crates/leek_wars_gen",
+
+    "crates/lek",
+    "crates/leekscript_bench",
 ]
 
-[workspace.lints]
+# `cargo fuzz` harness (kept out of normal workspace builds).
+exclude = ["fuzz"]
 
-[workspace.lints.clippy]
-result_large_err = "allow"
-too_many_arguments = "allow"
+[workspace.package]
+edition = "2021"
+license = "MIT"
 
+# Better runtime for `cargo run -p leekscript_bench --release` and other release binaries (slightly slower links).
+[profile.release]
+lto = "thin"

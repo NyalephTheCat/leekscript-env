@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var a = [306 : 1610.592, 323 : 1207.944, 324 : 2013.24, 341 : 1525.741] assocSort(a, SORT_DESC) return a

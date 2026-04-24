@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+var a = ['a':'va','b':'vb','c':'vc','d':'vd']; removeKey(a,'a'); return a

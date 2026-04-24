@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var t = [1,2,3,4]; arrayIter(t, function(k, @v){ v = k; }); return t;

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var pq = [{p: 22, v: 55}] return pq[0].p

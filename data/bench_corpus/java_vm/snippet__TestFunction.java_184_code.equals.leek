@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function te(a){ return function(){ return a**2; }; } return te(2)();

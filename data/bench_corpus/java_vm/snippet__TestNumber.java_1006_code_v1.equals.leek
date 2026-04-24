@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+return max([15.7, ''][0], 12.8);

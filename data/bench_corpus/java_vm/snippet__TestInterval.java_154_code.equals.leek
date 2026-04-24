@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var x = 2 return intervalContains([1..3], x)

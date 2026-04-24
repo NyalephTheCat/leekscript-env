@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+function t(@a) {} t([ [12], [12] ])

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function f() { return 42 } integer x = f() return x

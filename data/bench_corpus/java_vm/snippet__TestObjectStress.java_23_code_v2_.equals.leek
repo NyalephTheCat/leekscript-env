@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var o = {} for (var i = 0; i < 500000; ++i) o[i] = 1 return count(o.values())

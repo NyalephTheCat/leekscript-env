@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+Set<integer> i = <1, 2>; return i instanceof Set

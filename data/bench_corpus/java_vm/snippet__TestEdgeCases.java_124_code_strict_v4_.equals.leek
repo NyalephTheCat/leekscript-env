@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+integer? a = null; integer b = a ?? 5; return b

@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+cos = function(x, y, z) { return x + y * z } return cos(1, 2, 3)

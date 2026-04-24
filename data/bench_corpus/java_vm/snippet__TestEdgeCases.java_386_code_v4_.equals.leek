@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+any x = 42 if (typeOf(x) == 1) { return x + 1 } return 0

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static m() { return 12 } } var r = [A.m] return r[0]()

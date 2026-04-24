@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { private x; constructor() { this.x = [] push(this.x, 10); } } return new A()

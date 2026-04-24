@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static m(x = 12) { return arrayMap([1, 1, 1], (_) => x) } } return A.m()

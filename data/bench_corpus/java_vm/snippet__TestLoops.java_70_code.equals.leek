@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var i = 0 do { i++ if (i == 50) break } while (i < 100); return i;

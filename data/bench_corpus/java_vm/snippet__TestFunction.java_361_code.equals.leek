@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function generator(Function a) { return function () {	a(); } } generator(function () {});

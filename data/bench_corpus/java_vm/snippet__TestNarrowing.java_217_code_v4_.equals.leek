@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Cell { integer id = 5 } Cell | integer x = 3; if (x instanceof Cell) { return x.id } else { return abs(x) }

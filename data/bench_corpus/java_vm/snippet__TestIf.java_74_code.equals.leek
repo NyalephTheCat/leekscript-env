@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+if (1212) { return 'ok' } else { return 5 }

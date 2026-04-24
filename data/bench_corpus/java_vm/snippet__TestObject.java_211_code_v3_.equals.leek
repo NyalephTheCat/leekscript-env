@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { public static Function< => Array<integer>> | Function<integer => Array<integer>?> f = function (integer a) => Array<integer> { return new Array() as Array<integer> } } function g() => Array<integer>? { return A.f(1) } return g()

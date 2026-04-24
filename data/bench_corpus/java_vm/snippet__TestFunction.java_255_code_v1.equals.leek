@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+var aux = function(tp, add) { if (tp < 0) return; var new_add = add; aux(tp - 5, new_add); }; aux(25, []);

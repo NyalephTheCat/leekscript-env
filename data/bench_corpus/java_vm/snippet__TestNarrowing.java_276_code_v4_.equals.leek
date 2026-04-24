@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Map<integer, integer|Map> m = [0: 3, 1: [2: 10]]; integer|Map? v = m[0]; if (v instanceof Map) { v = v[2] } return v

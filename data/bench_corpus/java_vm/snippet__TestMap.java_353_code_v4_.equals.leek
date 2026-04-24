@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = ['a':'va','b':'vb','c':'vc','d':'vd']; mapRemove(a,'a'); return a

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+do { if (true) return 12 } while (true); return 1;

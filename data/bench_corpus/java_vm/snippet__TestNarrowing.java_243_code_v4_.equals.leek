@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class B { integer v = 10 } var x = new B(); var f = function() { x = new B() }; if (x instanceof B) { return x.v } return 0

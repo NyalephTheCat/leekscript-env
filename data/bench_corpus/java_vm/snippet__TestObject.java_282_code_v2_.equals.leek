@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class test { static boolean f1(Array<any> x) {} static boolean f2(any x) { f1(x) } }

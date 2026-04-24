@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global boolean x; x = count([]) == 0; return x

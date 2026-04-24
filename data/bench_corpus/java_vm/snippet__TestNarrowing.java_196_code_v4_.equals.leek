@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Item {} class Chip extends Item { boolean flag = true } class Holder { Item item = new Chip() } var h = new Holder(); if (h.item instanceof Chip && h.item.flag) { return 1 } return 0

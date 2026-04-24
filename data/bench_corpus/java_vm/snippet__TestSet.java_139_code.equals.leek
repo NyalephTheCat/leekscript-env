@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var i = <>; var j = <1, 2>; return setIsSubsetOf(j, i)

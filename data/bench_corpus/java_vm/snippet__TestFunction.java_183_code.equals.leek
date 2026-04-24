@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function f(x) { var s = 0 s |= 12 return s } f(12);

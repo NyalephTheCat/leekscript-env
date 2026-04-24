@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function doNothingWithInt(Function<integer => any> f) {} function doNothing() {} function doNothingInt(integer a) {} function doNothingWith(Function< => any> f) {}doNothingWith(doNothing); doNothingWithInt(doNothingInt);

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = ['cle1':'a','cle2':'b']; return 'cle3' not in a

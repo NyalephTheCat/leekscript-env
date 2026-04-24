@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static integer x = 12 m() { integer i = x return i } } new A().m()

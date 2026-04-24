@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+any m = [:] for (var i = 0; i < 1000; i++) m[i] = i return mapSize(m)

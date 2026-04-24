@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = 0.8 return max(0, a)

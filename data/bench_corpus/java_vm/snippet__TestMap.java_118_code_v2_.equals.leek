@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var m = ['salut': 12.5] return m['salut']

@@ -1,0 +1,9 @@
+[package]
+name = "leekscript_directives"
+version = "0.1.0"
+edition.workspace = true
+description = "Parse // leek-* file preamble directives (toolchain)"
+
+[dependencies]
+leekscript_span = { path = "../leekscript_span" }
+serde = { version = "1.0", features = ["derive"] }

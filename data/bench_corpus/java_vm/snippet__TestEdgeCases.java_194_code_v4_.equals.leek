@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function createMatrix(n) { var m = [] for (var i = 0; i < n; i++) { var row = [] for (var j = 0; j < n; j++) push(row, i * n + j) push(m, row) } return m } var mat = createMatrix(10) return mat[5][5]

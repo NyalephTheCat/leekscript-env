@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function maybeNull(b) { if (b) return 'value' return null } var r = maybeNull(false) return r == null ? 'default' : r

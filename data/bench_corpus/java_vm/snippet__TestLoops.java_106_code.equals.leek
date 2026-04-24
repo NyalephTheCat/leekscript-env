@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var c = 0 for (var t = []; count(t) < 10; push(t, 'x')) { c++ } return c;

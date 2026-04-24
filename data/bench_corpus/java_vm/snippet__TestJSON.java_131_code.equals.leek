@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var v = 'salut' return jsonDecode(jsonEncode(v)) == v

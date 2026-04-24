@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class B { static a() {} } class A extends B { static b() {} } return arraySort(A.staticMethods)

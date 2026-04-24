@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+var a = randFloat(500, 510) return a >= 500 and a < 510

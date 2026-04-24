@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = [] for (var i = 0; i < 1000; i++) push(a, i) return count(a)

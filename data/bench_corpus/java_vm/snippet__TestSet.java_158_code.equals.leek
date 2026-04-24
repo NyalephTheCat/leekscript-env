@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var s1 = <1, 2, 3> var s2 = <2, 3, 4> return setIntersection(s1, s2)

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { private integer? val = null private get(integer? v) { return v } public run() { return get(val) } } return new A().run()

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { x constructor() { this.x = this.m } m() {} } return new A().x

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var x var y for (x : y in [1, 2]) { return arrayMap([3, 4], function(z) { return x + y }) }

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Cell { integer v = 0 } Cell | null x = new Cell(); if (x != null) { var y = x; y = new Cell(); return y.v } return -1

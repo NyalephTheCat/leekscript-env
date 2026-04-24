@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+any v = [['a', 'b'], 12] v[0][0] = 5 return v

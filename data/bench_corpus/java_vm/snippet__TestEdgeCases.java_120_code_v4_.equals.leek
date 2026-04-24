@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class C { any v; } var c = new C() c.v ??= 7 return c.v

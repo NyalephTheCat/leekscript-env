@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+any b = 5 if (0) { b = 'salut' } return b

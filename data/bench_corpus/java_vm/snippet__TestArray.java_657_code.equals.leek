@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var x = arrayMap([1, 2, 3], function(v) { var r = [1, 2, 3] return r }) push(x[0], 4) return x

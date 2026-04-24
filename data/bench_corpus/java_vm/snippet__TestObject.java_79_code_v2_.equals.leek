@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { f constructor(x = 5, y = 7, z = 10) { f = x * y * z } } return A().f

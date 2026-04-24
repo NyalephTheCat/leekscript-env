@@ -1,0 +1,10 @@
+[package]
+name = "leekscript_types"
+version = "0.1.0"
+edition.workspace = true
+description = "Minimal LeekScript type analysis (casts, typed features parity scaffolding)"
+
+[dependencies]
+leekscript_hir = { path = "../leekscript_hir" }
+leekscript_span = { path = "../leekscript_span" }
+

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return arrayFlatten([6, [[7]], [8, 9]], 2)

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Function<integer => boolean> t = function(integer b) => boolean { return true }

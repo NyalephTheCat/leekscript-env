@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var i = <'okay', 1> setRemove(i, 'okay') return i

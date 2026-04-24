@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return binString(0b11001111000111001011101101110000110011)

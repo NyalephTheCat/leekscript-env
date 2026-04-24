@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { v() { return 55 } m(x, y = v()) { return x * y } } return new A().m(9)

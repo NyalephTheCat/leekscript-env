@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { integer x = 10 m() { return x-- } } return new A().m()

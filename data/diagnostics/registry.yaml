@@ -1,0 +1,619 @@
+# Stable diagnostic registry — maps Java leekscript.common.Error to E#### codes
+# Policy: docs/design/diagnostic-codes.md
+# Regenerate only with care; never reassign an existing code.
+
+schema_version: 1
+reference_source: leek-wars-generator/leekscript/src/main/java/leekscript/common/Error.java
+
+entries:
+  - code: E1200
+    reference: FUNCTION_NAME_UNAVAILABLE
+    band: user_fn_decl
+
+  - code: E1201
+    reference: PARAMETER_NAME_UNAVAILABLE
+    band: user_fn_decl
+
+  - code: E0200
+    reference: OPENING_PARENTHESIS_EXPECTED
+    band: parse
+
+  - code: E0201
+    reference: OPENING_CURLY_BRACKET_EXPECTED
+    band: parse
+
+  - code: E1202
+    reference: PARAMETER_NAME_EXPECTED
+    band: user_fn_decl
+
+  - code: E1203
+    reference: FUNCTION_NAME_EXPECTED
+    band: user_fn_decl
+
+  - code: E0202
+    reference: PARENTHESIS_EXPECTED_AFTER_PARAMETERS
+    band: parse
+
+  - code: E0203
+    reference: OPEN_BLOC_REMAINING
+    band: parse
+
+  - code: E0204
+    reference: NO_BLOC_TO_CLOSE
+    band: parse
+
+  - code: E0205
+    reference: END_OF_SCRIPT_UNEXPECTED
+    band: parse
+
+  - code: E0206
+    reference: END_OF_INSTRUCTION_EXPECTED
+    band: parse
+
+  - code: E0207
+    reference: BREAK_OUT_OF_LOOP
+    band: parse
+
+  - code: E0208
+    reference: CONTINUE_OUT_OF_LOOP
+    band: parse
+
+  - code: E0600
+    reference: INCLUDE_ONLY_IN_MAIN_BLOCK
+    band: include
+
+  - code: E0601
+    reference: AI_NAME_EXPECTED
+    band: include
+
+  - code: E0602
+    reference: AI_NOT_EXISTING
+    band: include
+
+  - code: E0209
+    reference: CLOSING_PARENTHESIS_EXPECTED
+    band: parse
+
+  - code: E0210
+    reference: CLOSING_SQUARE_BRACKET_EXPECTED
+    band: parse
+
+  - code: E0211
+    reference: FUNCTION_ONLY_IN_MAIN_BLOCK
+    band: parse
+
+  - code: E1000
+    reference: VARIABLE_NAME_EXPECTED
+    band: names
+
+  - code: E1001
+    reference: VARIABLE_NAME_UNAVAILABLE
+    band: names
+
+  - code: E1002
+    reference: VARIABLE_NOT_EXISTS
+    band: names
+
+  - code: E1003
+    reference: KEYWORD_UNEXPECTED
+    band: names
+
+  - code: E0212
+    reference: KEYWORD_IN_EXPECTED
+    band: parse
+
+  - code: E0213
+    reference: WHILE_EXPECTED_AFTER_DO
+    band: parse
+
+  - code: E0214
+    reference: NO_IF_BLOCK
+    band: parse
+
+  - code: E0215
+    reference: GLOBAL_ONLY_IN_MAIN_BLOCK
+    band: parse
+
+  - code: E0216
+    reference: VAR_NAME_EXPECTED_AFTER_GLOBAL
+    band: parse
+
+  - code: E1004
+    reference: VAR_NAME_EXPECTED
+    band: names
+
+  - code: E1005
+    reference: SIMPLE_ARRAY
+    band: names
+
+  - code: E1006
+    reference: ASSOCIATIVE_ARRAY
+    band: names
+
+  - code: E0217
+    reference: PARENTHESIS_EXPECTED_AFTER_FUNCTION
+    band: parse
+
+  - code: E1007
+    reference: UNKNOWN_VARIABLE_OR_FUNCTION
+    band: names
+
+  - code: E0400
+    reference: OPERATOR_UNEXPECTED
+    band: expr
+
+  - code: E0401
+    reference: VALUE_EXPECTED
+    band: expr
+
+  - code: E0402
+    reference: CANT_ADD_INSTRUCTION_AFTER_BREAK
+    band: expr
+
+  - code: E0403
+    reference: UNCOMPLETE_EXPRESSION
+    band: expr
+
+  - code: E3100
+    reference: CANT_ASSIGN_VALUE
+    band: types_assign
+
+  - code: E2000
+    reference: FUNCTION_NOT_EXISTS
+    band: builtin_api
+
+  - code: E2001
+    reference: INVALID_PARAMETER_COUNT
+    band: builtin_api
+
+  - code: E0101
+    reference: INVALID_CHAR
+    band: lexical
+
+  - code: E0102
+    reference: INVALID_NUMBER
+    band: lexical
+
+  - code: E4000
+    reference: CONSTRUCTOR_ALREADY_EXISTS
+    band: oop_struct
+
+  - code: E0218
+    reference: END_OF_CLASS_EXPECTED
+    band: parse
+
+  - code: E4001
+    reference: FIELD_ALREADY_EXISTS
+    band: oop_struct
+
+  - code: E4002
+    reference: NO_SUCH_CLASS
+    band: oop_struct
+
+  - code: E4600
+    reference: THIS_NOT_ALLOWED_HERE
+    band: this_super
+
+  - code: E4601
+    reference: KEYWORD_MUST_BE_IN_CLASS
+    band: this_super
+
+  - code: E4602
+    reference: SUPER_NOT_AVAILABLE_PARENT
+    band: this_super
+
+  - code: E4003
+    reference: CLASS_MEMBER_DOES_NOT_EXIST
+    band: oop_struct
+
+  - code: E4004
+    reference: CLASS_STATIC_MEMBER_DOES_NOT_EXIST
+    band: oop_struct
+
+  - code: E4005
+    reference: EXTENDS_LOOP
+    band: oop_struct
+
+  - code: E8000
+    reference: REFERENCE_DEPRECATED
+    band: deprecated
+
+  - code: E4006
+    reference: DUPLICATED_METHOD
+    band: oop_struct
+
+  - code: E8001
+    reference: DEPRECATED_FUNCTION
+    band: deprecated
+
+  - code: E2002
+    reference: UNKNOWN_FUNCTION
+    band: builtin_api
+
+  - code: E5000
+    reference: DIVISION_BY_ZERO
+    band: runtime_val
+
+  - code: E5001
+    reference: CAN_NOT_EXECUTE_VALUE
+    band: runtime_val
+
+  - code: E5002
+    reference: CAN_NOT_EXECUTE_WITH_ARGUMENTS
+    band: runtime_val
+
+  - code: E0603
+    reference: NO_AI_EQUIPPED
+    band: include
+
+  - code: E0604
+    reference: INVALID_AI
+    band: include
+
+  - code: E5900
+    reference: COMPILE_JAVA
+    band: platform
+
+  - code: E5901
+    reference: AI_DISABLED
+    band: platform
+
+  - code: E5902
+    reference: AI_INTERRUPTED
+    band: platform
+
+  - code: E5903
+    reference: AI_TIMEOUT
+    band: platform
+
+  - code: E5600
+    reference: CODE_TOO_LARGE
+    band: limits
+
+  - code: E5601
+    reference: CODE_TOO_LARGE_FUNCTION
+    band: limits
+
+  - code: E9000
+    reference: INTERNAL_ERROR
+    band: ice
+
+  - code: E4007
+    reference: UNKNOWN_METHOD
+    band: oop_struct
+
+  - code: E4008
+    reference: UNKNOWN_STATIC_METHOD
+    band: oop_struct
+
+  - code: E4009
+    reference: STRING_METHOD_MUST_RETURN_STRING
+    band: oop_struct
+
+  - code: E4010
+    reference: UNKNOWN_FIELD
+    band: oop_struct
+
+  - code: E4011
+    reference: UNKNOWN_CONSTRUCTOR
+    band: oop_struct
+
+  - code: E4603
+    reference: INSTANCEOF_MUST_BE_CLASS
+    band: this_super
+
+  - code: E3600
+    reference: NOT_ITERABLE
+    band: collections
+
+  - code: E5602
+    reference: STACKOVERFLOW
+    band: limits
+
+  - code: E0404
+    reference: INVALID_OPERATOR
+    band: expr
+
+  - code: E4300
+    reference: PRIVATE_FIELD
+    band: visibility
+
+  - code: E4301
+    reference: PROTECTED_FIELD
+    band: visibility
+
+  - code: E4302
+    reference: PRIVATE_STATIC_FIELD
+    band: visibility
+
+  - code: E4303
+    reference: PROTECTED_STATIC_FIELD
+    band: visibility
+
+  - code: E4304
+    reference: PRIVATE_METHOD
+    band: visibility
+
+  - code: E4305
+    reference: PROTECTED_METHOD
+    band: visibility
+
+  - code: E4306
+    reference: PRIVATE_CONSTRUCTOR
+    band: visibility
+
+  - code: E4307
+    reference: PROTECTED_CONSTRUCTOR
+    band: visibility
+
+  - code: E4308
+    reference: PRIVATE_STATIC_METHOD
+    band: visibility
+
+  - code: E4309
+    reference: PROTECTED_STATIC_METHOD
+    band: visibility
+
+  - code: E0605
+    reference: CANNOT_LOAD_AI
+    band: include
+
+  - code: E5904
+    reference: TRANSPILE_TO_JAVA
+    band: platform
+
+  - code: E5905
+    reference: CANNOT_WRITE_AI
+    band: platform
+
+  - code: E4012
+    reference: RESERVED_FIELD
+    band: oop_struct
+
+  - code: E5003
+    reference: VALUE_IS_NOT_AN_ARRAY
+    band: runtime_val
+
+  - code: E8002
+    reference: TRIPLE_EQUALS_DEPRECATED
+    band: deprecated
+
+  - code: E2003
+    reference: REMOVED_FUNCTION
+    band: builtin_api
+
+  - code: E2004
+    reference: FUNCTION_NOT_AVAILABLE
+    band: builtin_api
+
+  - code: E5004
+    reference: ARRAY_OUT_OF_BOUND
+    band: runtime_val
+
+  - code: E5005
+    reference: MAP_DUPLICATED_KEY
+    band: runtime_val
+
+  - code: E2200
+    reference: WRONG_ARGUMENT_TYPE
+    band: call_shape
+
+  - code: E5006
+    reference: UNKNOWN_ERROR
+    band: runtime_val
+
+  - code: E5007
+    reference: INVALID_VALUE
+    band: runtime_val
+
+  - code: E5603
+    reference: TOO_MUCH_OPERATIONS
+    band: limits
+
+  - code: E5604
+    reference: ARRAY_TOO_LARGE
+    band: limits
+
+  - code: E5605
+    reference: OUT_OF_MEMORY
+    band: limits
+
+  - code: E0103
+    reference: MULTIPLE_NUMERIC_SEPARATORS
+    band: lexical
+
+  - code: E2005
+    reference: REMOVED_FUNCTION_REPLACEMENT
+    band: builtin_api
+
+  - code: E1204
+    reference: CANNOT_REDEFINE_FUNCTION
+    band: user_fn_decl
+
+  - code: E3101
+    reference: CANNOT_ASSIGN_FINAL_FIELD
+    band: types_assign
+
+  - code: E3102
+    reference: CANNOT_ASSIGN_FINAL_VALUE
+    band: types_assign
+
+  - code: E4013
+    reference: DUPLICATED_CONSTRUCTOR
+    band: oop_struct
+
+  - code: E0219
+    reference: ARROW_EXPECTED
+    band: parse
+
+  - code: E5300
+    reference: MODIFICATION_DURING_ITERATION
+    band: runtime_iter
+
+  - code: E5301
+    reference: ENTITY_DIED
+    band: runtime_iter
+
+  - code: E5906
+    reference: HELP_PAGE_LINK
+    band: platform
+
+  - code: E3000
+    reference: ASSIGN_SAME_VARIABLE
+    band: types
+
+  - code: E3001
+    reference: COMPARISON_ALWAYS_FALSE
+    band: types
+
+  - code: E3002
+    reference: COMPARISON_ALWAYS_TRUE
+    band: types
+
+  - code: E0405
+    reference: UNKNOWN_OPERATOR
+    band: expr
+
+  - code: E1205
+    reference: DUPLICATED_ARGUMENT
+    band: user_fn_decl
+
+  - code: E3003
+    reference: ASSIGNMENT_INCOMPATIBLE_TYPE
+    band: types
+
+  - code: E0220
+    reference: CLOSING_CHEVRON_EXPECTED
+    band: parse
+
+  - code: E3004
+    reference: TYPE_EXPECTED
+    band: types
+
+  - code: E3005
+    reference: IMPOSSIBLE_CAST
+    band: types
+
+  - code: E0221
+    reference: COMMA_EXPECTED
+    band: parse
+
+  - code: E3006
+    reference: INCOMPATIBLE_TYPE
+    band: types
+
+  - code: E3007
+    reference: DANGEROUS_CONVERSION
+    band: types
+
+  - code: E3008
+    reference: DANGEROUS_CONVERSION_VARIABLE
+    band: types
+
+  - code: E3601
+    reference: MAY_NOT_BE_ITERABLE
+    band: collections
+
+  - code: E2201
+    reference: NOT_CALLABLE
+    band: call_shape
+
+  - code: E2202
+    reference: MAY_NOT_BE_CALLABLE
+    band: call_shape
+
+  - code: E3009
+    reference: IMPOSSIBLE_CAST_VALUES
+    band: types
+
+  - code: E3010
+    reference: FIELD_MAY_NOT_EXIST
+    band: types
+
+  - code: E3011
+    reference: USELESS_NON_NULL_ASSERTION
+    band: types
+
+  - code: E3602
+    reference: MAY_NOT_BE_INDEXABLE
+    band: collections
+
+  - code: E3603
+    reference: NOT_INDEXABLE
+    band: collections
+
+  - code: E3012
+    reference: OVERRIDDEN_METHOD_DIFFERENT_TYPE
+    band: types
+
+  - code: E3013
+    reference: USELESS_CAST
+    band: types
+
+  - code: E5606
+    reference: TOO_MUCH_ERRORS
+    band: limits
+
+  - code: E3604
+    reference: INTERVAL
+    band: collections
+
+  - code: E3605
+    reference: OPERATOR_IN_ON_INVALID_CONTAINER
+    band: collections
+
+  - code: E3606
+    reference: CANNOT_ITERATE_UNBOUNDED_INTERVAL
+    band: collections
+
+  - code: E3014
+    reference: UNARY_OPERATOR_INCOMPATIBLE_TYPE
+    band: types
+
+  - code: E3607
+    reference: INTERVAL_INFINITE_CLOSED
+    band: collections
+
+  - code: E0222
+    reference: DOT_DOT_EXPECTED
+    band: parse
+
+  - code: E0104
+    reference: STRING_NOT_CLOSED
+    band: lexical
+
+  - code: E0223
+    reference: DEFAULT_ARGUMENT_NOT_END
+    band: parse
+
+  - code: E0224
+    reference: CASE_OR_DEFAULT_EXPECTED
+    band: parse
+
+  - code: E0225
+    reference: COLON_EXPECTED_AFTER_CASE
+    band: parse
+
+  - code: E8800
+    reference: UNUSED_VARIABLE
+    band: lint
+
+  # --- toolchain-only (no Java Error); reserve in bands per diagnostic-codes.md
+  - code: E7001
+    reference: null
+    id: invalid_leek_toml
+    band: config
+
+  - code: E7201
+    reference: null
+    id: unknown_leek_directive
+    band: directives
+
+  - code: E7202
+    reference: null
+    id: leek_directive_invalid_value
+    band: directives
+
+  - code: E7002
+    reference: UNCAUGHT_THROW
+    band: runtime_val

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+boolean x = 3 not in [0, 1, 2]; return x

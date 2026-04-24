@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { name part constructor(name, part) { this.name = name this.part = part } } var list = [new A('foo', true), new A('bar', false), new A('baz', true)] return arrayMap(list, function(a) { return a.name })

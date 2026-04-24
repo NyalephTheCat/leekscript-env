@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function cellsInRange(i) { var areaInRange = []; if (i == 0) { return cellsInRange(10); } else { return areaInRange; } } var myRange = cellsInRange(0); return myRange

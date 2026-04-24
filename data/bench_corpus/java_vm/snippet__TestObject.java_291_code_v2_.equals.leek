@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static m() { return 'x' } t() { return class.m() } } var a = new A() return a.t()

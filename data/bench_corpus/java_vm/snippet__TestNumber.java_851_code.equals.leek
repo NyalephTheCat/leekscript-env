@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = 123123123 return a >>= 6;

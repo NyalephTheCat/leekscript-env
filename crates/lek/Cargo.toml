@@ -1,0 +1,30 @@
+[package]
+name = "lek"
+version = "0.1.0"
+edition.workspace = true
+description = "LeekScript CLI (lek init, check, fmt, registry, config)"
+
+[[bin]]
+name = "lek"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+leekscript_config = { path = "../leekscript_config" }
+leekscript_diagnostics = { path = "../leekscript_diagnostics" }
+leekscript_directives = { path = "../leekscript_directives" }
+leekscript_fmt = { path = "../leekscript_fmt" }
+leekscript_hir = { path = "../leekscript_hir" }
+leekscript_lexer = { path = "../leekscript_lexer" }
+leekscript_syntax = { path = "../leekscript_syntax" }
+leekscript_parser = { path = "../leekscript_parser" }
+leekscript_resolve = { path = "../leekscript_resolve" }
+leekscript_run = { path = "../leekscript_run" }
+leekscript_signatures = { path = "../leekscript_signatures" }
+leekscript_span = { path = "../leekscript_span" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+miette = { version = "7.6.0", features = ["fancy"] }
+
+[dev-dependencies]
+leekscript_signatures = { path = "../leekscript_signatures" }

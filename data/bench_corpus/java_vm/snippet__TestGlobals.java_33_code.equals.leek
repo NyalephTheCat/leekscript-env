@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+global r = [0] return r[0] += 12

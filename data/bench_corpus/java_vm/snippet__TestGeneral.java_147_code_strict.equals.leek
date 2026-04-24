@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: true
+any a = 2 a = 'hello' return a

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var m = ['a': 2] m['a']++ return m

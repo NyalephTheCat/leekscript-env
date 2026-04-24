@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var f = x -> { var y = x == 0 ? 'error' : 1/x return '' + y } return [f(-2), f(0), f(2)]

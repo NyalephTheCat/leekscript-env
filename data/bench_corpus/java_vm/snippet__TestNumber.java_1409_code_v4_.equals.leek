@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return rotateRight(99999999999, 40)

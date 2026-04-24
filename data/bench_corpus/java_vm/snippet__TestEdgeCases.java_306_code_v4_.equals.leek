@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function f(integer i) { return i } return f(42.9)

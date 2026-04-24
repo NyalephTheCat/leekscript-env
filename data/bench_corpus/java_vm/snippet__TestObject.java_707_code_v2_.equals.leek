@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static z static y static x } return A.staticFields

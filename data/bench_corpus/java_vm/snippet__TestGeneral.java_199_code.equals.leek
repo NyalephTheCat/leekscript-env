@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = 12 if (1) { a = 5 a++ } else { a = 3 } return a

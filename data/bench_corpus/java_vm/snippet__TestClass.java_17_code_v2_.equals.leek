@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A {} if (A) { return 12 } return null

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { public integer x = 42 public m() { return this.x } } return new A().m()

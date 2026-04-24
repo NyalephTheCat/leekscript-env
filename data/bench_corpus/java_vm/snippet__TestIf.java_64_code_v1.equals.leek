@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+function t(@c) { var cell = c if (cell!=null ) 1; } return t(300);

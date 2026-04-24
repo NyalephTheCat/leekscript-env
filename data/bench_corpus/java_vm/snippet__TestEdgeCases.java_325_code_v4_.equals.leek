@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+Array<integer> a = [1, 2, 3] return a

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function test(x) { x += 10 return x } return test(5)

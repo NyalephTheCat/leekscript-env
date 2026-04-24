@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+real | null | integer x = 3.14; real y = 0; if (x != null) { y = x } return y

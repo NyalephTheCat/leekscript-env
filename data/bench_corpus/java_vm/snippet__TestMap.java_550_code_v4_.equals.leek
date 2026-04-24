@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = [:] return mapFilter(a, function(v, k) { return v > 10 })

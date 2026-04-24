@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var test = {} test['a'] = 8 test['b'] = 12 return test

@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+return function() { var t = [null, null, 4, 8, 9]; sort(t); return t; }();

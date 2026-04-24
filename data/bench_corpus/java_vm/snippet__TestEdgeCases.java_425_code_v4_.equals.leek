@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+function idx() { return 1 } var a = [10, 20, 30] return a[idx()]

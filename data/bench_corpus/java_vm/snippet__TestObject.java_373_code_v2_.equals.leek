@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Test { static a static b static c } Test['a'] = 12 Test['b'] = 15 Test['c'] = 20 return [Test.a, Test.b, Test.c]

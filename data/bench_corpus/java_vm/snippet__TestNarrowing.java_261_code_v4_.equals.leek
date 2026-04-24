@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Item { } class Chip extends Item { boolean ready = true } class Action { Item item } var a = new Action(); a.item = new Chip(); if (a.item instanceof Chip && (a.item as Chip).ready) { return 1 } return 0

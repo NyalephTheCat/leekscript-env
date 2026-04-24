@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class a { static method() { return '42' } } class b { toto constructor() { this.toto = a.method } } return new b().toto()

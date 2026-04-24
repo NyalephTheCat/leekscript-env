@@ -1,0 +1,5 @@
+var s = "";
+for (var j = 0; j < 4; ++j) {
+	s += "xy";
+}
+return count(s);

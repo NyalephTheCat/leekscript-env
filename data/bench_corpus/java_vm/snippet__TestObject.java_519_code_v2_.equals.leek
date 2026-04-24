@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { sqrt() { return sqrt(10, 15) } sqrt(x, y) { return sqrt(x + y) } } return new A().sqrt()

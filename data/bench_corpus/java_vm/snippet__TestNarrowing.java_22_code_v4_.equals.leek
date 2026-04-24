@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer | null x = 5; if (x != null) { return abs(x) } return 0

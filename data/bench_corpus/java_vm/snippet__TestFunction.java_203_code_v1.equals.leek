@@ -1,0 +1,3 @@
+// leek-version: 1
+// leek-strict: false
+function t() { var a = 12 return @a } return t() + 2

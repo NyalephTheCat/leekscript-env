@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return isPermutation(11112222, 22221111)

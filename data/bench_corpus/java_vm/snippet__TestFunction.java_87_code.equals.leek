@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var fact = function(x) { if (x > 1) { return fact(x - 1) * x } else { return 1 } } return fact(10);

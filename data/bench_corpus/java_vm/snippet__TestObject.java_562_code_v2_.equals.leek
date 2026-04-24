@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { static bulbsNameChip = ['puny_bulb': PI] } return A.bulbsNameChip

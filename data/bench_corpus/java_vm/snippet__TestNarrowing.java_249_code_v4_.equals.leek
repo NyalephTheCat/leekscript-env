@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class D { integer v = 7 } D | null x = new D(); var f = function() { x = null }; if (x != null) { return x.v } return 0

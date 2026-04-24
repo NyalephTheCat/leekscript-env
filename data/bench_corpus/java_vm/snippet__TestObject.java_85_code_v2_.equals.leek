@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { f constructor(x = 12, y = x) { f = arrayMap([1, 1, 1], (_) => x + y) } } return new A().f

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = [[], ['a']] pushAll(a[1], ['b', 'c']) return a;

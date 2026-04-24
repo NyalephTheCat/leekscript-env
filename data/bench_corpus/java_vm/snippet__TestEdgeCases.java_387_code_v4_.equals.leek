@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+any x = 'hello' if (typeOf(x) == 3) { return length(x) } return 0

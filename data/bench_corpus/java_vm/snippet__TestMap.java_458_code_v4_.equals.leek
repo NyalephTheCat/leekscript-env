@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var a = ['cle1':'a','cle2':'b','cle3':'c','cle4':'d']; return '454' in a

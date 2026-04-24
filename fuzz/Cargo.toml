@@ -1,0 +1,30 @@
+[package]
+name = "leekscript-env-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rand = "0.8"
+serde_json = "1"
+
+leekscript_fuzz = { path = "../crates/leekscript_fuzz" }
+leekscript_run = { path = "../crates/leekscript_run" }
+leek_wars_gen = { path = "../crates/leek_wars_gen" }
+
+[[bin]]
+name = "leekscript_toolchain"
+path = "fuzz_targets/leekscript_toolchain.rs"
+
+[[bin]]
+name = "leekgen_compare_repro"
+path = "fuzz_targets/leekgen_compare_repro.rs"
+
+[[bin]]
+name = "leek_wars_gen_rust_engine"
+path = "fuzz_targets/leek_wars_gen_rust_engine.rs"
+

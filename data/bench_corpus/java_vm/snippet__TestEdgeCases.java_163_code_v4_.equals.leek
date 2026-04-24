@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var s = '' for (var i = 0; i < 1000; i++) s += 'x' return length(s)

@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { m() { return 'ok' } } class B extends A { m() { return super.m() } } var a = new B() return a.m()

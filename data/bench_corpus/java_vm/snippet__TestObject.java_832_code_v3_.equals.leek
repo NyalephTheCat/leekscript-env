@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+return {a: 5, b: 'toto', c: true, d: function() { return 5 } }.values()

@@ -1,0 +1,5 @@
+// leek-version: 1
+// leek-strict: false
+var effects = [[1], [1]];
+
+return (effects[0] + effects[2]) /2;

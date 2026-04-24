@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+var x = null if (x) return 'true' else return 'false'

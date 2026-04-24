@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+var a = ['b':'vb','c':'vc','a':'va','d':'vd']; keySort(a, SORT_DESC); return a

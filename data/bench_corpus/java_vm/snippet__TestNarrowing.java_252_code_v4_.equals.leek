@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class E { integer a = 3; integer b = 4 } var x = new E(); var f = function() { x = new E() }; if (x instanceof E) { return x.a + x.b } return 0

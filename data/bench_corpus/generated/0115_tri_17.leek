@@ -1,0 +1,5 @@
+var s = 0;
+for (var k = 1; k <= 17; ++k) {
+	s += k
+}
+return s;

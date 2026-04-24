@@ -1,0 +1,3 @@
+// leek-version: 3
+// leek-strict: false
+var m = [] var ns = '01234566' return m[ns] = 1

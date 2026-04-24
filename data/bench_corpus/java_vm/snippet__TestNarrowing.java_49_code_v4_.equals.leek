@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+integer | null x = 5; integer | null y = 3; if (x != null && y != null) { return abs(x) + abs(y) } return 0

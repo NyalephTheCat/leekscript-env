@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class A { private static x = 1 static y = class.x } return A.y

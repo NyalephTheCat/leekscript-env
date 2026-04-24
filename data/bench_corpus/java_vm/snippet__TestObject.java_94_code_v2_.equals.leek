@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Affiche { static COULEUR = getColor(42, 125, 78) } return Affiche.COULEUR

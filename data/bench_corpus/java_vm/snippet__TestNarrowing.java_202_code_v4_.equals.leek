@@ -1,0 +1,3 @@
+// leek-version: 4
+// leek-strict: false
+class Item {} class Chip extends Item { boolean flag = true } global Item item = new Chip(); if (item instanceof Chip && item.flag) { return 1 } return 0
