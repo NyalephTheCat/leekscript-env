@@ -2,6 +2,7 @@
 name = "lek"
 version = "0.1.0"
 edition.workspace = true
+publish = false
 description = "LeekScript CLI (lek init, check, fmt, registry, config)"
 
 [[bin]]

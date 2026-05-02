@@ -16,6 +16,7 @@ members = [
     "crates/leekscript_run",
     "crates/leekscript_fuzz",
     "crates/leek_wars_gen",
+    "crates/lw_meta",
 
     "crates/lek",
     "crates/leekscript_bench",

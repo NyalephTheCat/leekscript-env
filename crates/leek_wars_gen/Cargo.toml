@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Leek Wars fight generation: scenario types, official generator parity runner, and a Rust engine stub"
 repository = "https://github.com/leek-wars/leekscript-env"
+publish = false
 
 [build-dependencies]
 regex = "1"
@@ -28,15 +29,22 @@ path = "src/bin/leekgen_fuzz.rs"
 
 [dependencies]
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
+console = "0.15"
+indicatif = "0.17"
 ctrlc = "3"
 diffy = "0.4"
+hex = "0.4"
 rand = "0.8"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 thiserror = "1"
 toml = "0.8"
+ureq = { version = "2", features = ["json"] }
 leekscript_config = { path = "../leekscript_config" }
 leekscript_run = { path = "../leekscript_run" }
 leekscript_signatures = { path = "../leekscript_signatures" }
 leekscript_fuzz = { path = "../leekscript_fuzz" }
+lw_meta = { path = "../lw_meta" }

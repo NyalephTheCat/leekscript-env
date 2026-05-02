@@ -2,6 +2,7 @@
 name = "leekscript_diagnostics"
 version = "0.1.0"
 edition.workspace = true
+publish = false
 description = "Diagnostic registry (E####) and helpers for LeekScript tooling"
 
 [dependencies]

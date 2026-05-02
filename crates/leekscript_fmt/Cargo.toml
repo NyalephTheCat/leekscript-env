@@ -2,6 +2,7 @@
 name = "leekscript_fmt"
 version = "0.1.0"
 edition.workspace = true
+publish = false
 description = "LeekScript source formatter (token-based, comment-preserving)"
 
 [dependencies]

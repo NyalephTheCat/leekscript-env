@@ -23,4 +23,7 @@ pub enum GenError {
 
     #[error("{0}")]
     Message(String),
+
+    #[error("Leek Wars meta API: {0}")]
+    LwMetaApi(#[from] lw_meta::ApiError),
 }

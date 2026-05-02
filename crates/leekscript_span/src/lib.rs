@@ -1,4 +1,5 @@
 //! Byte offsets into UTF-8 source text (must stay on `char` boundaries).
+#![warn(clippy::pedantic)]
 
 use std::ops::Range;
 
@@ -10,24 +11,45 @@ pub struct Span {
 }
 
 impl Span {
+    /// # Panics
+    ///
+    /// If `range.start` or `range.end` is greater than `u32::MAX`.
+    #[must_use]
     pub fn new(range: Range<usize>) -> Self {
-        Self {
-            start: range.start as u32,
-            end: range.end as u32,
-        }
+        let start = u32::try_from(range.start).expect("span start must fit in u32");
+        let end = u32::try_from(range.end).expect("span end must fit in u32");
+        Self { start, end }
     }
 
+    /// # Panics
+    ///
+    /// If `at` is greater than `u32::MAX`.
+    #[must_use]
     pub fn point(at: usize) -> Self {
-        let u = at as u32;
+        let u = u32::try_from(at).expect("span offset must fit in u32");
         Self { start: u, end: u }
     }
 
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.start == self.end
+    }
+
+    /// # Panics
+    ///
+    /// If `self.end - self.start` does not fit in `usize` (the difference is always ≤ `u32::MAX`).
+    #[must_use]
     pub fn len(self) -> usize {
-        (self.end - self.start) as usize
+        usize::try_from(self.end - self.start).expect("span length must fit in usize")
     }
 }
 
 /// 1-based line, 1-based column (character offset within the line, UTF-8 safe via byte scan).
+///
+/// # Panics
+///
+/// If the character count on the current line exceeds `u32::MAX`.
+#[must_use]
 pub fn line_col_at(source: &str, byte_offset: usize) -> (u32, u32) {
     let mut line = 1u32;
     let mut line_start = 0usize;
@@ -40,7 +62,10 @@ pub fn line_col_at(source: &str, byte_offset: usize) -> (u32, u32) {
             line_start = i + ch.len_utf8();
         }
     }
-    let col = source[line_start..byte_offset].chars().count() as u32 + 1;
+    let count = source[line_start..byte_offset].chars().count();
+    let col = u32::try_from(count)
+        .expect("column char count must fit in u32")
+        .saturating_add(1);
     (line, col)
 }
 

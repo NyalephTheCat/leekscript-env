@@ -1,4 +1,4 @@
-# Example manifest — see docs/design/leek-toml.md
+# Example manifest — planned reference: docs/reference/leek-toml.md
 [package]
 name = "leekscript-env"
 version = "0.0.0"

@@ -1,6 +1,8 @@
 # leekscript-env
 
-Workspace for the LeekScript toolchain (`lek`) and supporting libraries. Layout and docs live under `docs/`.
+Workspace for the LeekScript toolchain (`lek`) and supporting libraries.
+
+**Documentation:** [docs/README.md](docs/README.md) (index). **`lek` CLI:** [lek-cli.md](docs/reference/lek-cli.md). **Crate paths:** [docs/crates/README.md](docs/crates/README.md). Contributor setup: [local development](docs/guides/local-development.md), [environment variables](docs/guides/environment.md), [contributing](docs/guides/contributing.md). **Releases:** [release & versioning](docs/operations/release-and-versioning.md).
 
 ## Build
 

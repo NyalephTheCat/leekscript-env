@@ -1,11 +1,20 @@
-use crate::scenario::Scenario;
+use crate::scenario::{EntityInfo, Scenario};
 use serde_json::json;
 use std::collections::HashMap;
+
+fn effective_int(total: Option<i32>, base: i32) -> i32 {
+    total.unwrap_or(base)
+}
+
+fn effective_entity_life(e: &EntityInfo) -> i32 {
+    effective_int(e.total_life, e.life)
+}
 
 use super::chips::ChipStats;
 use super::map;
 use super::rng::JavaCompatRng;
 use super::summons::SummonTemplate;
+use super::trace::{TraceConfig, TraceEvent};
 use super::weapons::WeaponStats;
 use leekscript_run::Value;
 
@@ -92,6 +101,8 @@ pub struct SimEntity {
     pub face: i32,
     pub weapons: Vec<i32>,
     pub chips: Vec<i32>,
+    /// Component **template** ids from scenario / API (metadata; not all combat paths consume this yet).
+    pub components: Vec<i32>,
     /// Equipped weapon **item** id (`weapons.json` / scenario), if any.
     pub equipped_weapon: Option<i32>,
     pub ai_path: String,
@@ -206,11 +217,35 @@ pub struct FightWorld {
     pub say_inbox: HashMap<i32, Vec<(i32, String)>>,
     /// Official generator: `Outcome.logs`: `ai_owner` → [`FarmerLog`](FarmerAiLog) JSON.
     pub farmer_ai_logs: HashMap<i32, FarmerAiLog>,
+    /// Optional Rust-only trace (see [`super::trace`]).
+    pub trace: Option<TraceSink>,
+}
+
+/// Mutable trace buffer attached to a fight when tracing is enabled.
+#[derive(Debug, Clone)]
+pub struct TraceSink {
+    pub config: TraceConfig,
+    pub events: Vec<TraceEvent>,
 }
 
 impl FightWorld {
     /// Official generator: `State.MAX_TURNS` (`Chip.getCooldown() == -1` → `MAX_TURNS + 2` turns).
     pub const JAVA_MAX_TURNS: i32 = 64;
+
+    pub fn trace_event(&mut self, turn: i32, fid: i32, kind: &str, detail: Option<serde_json::Value>) {
+        let Some(sink) = self.trace.as_mut() else {
+            return;
+        };
+        if !sink.config.enabled || sink.events.len() >= sink.config.max_events {
+            return;
+        }
+        sink.events.push(TraceEvent {
+            turn,
+            fid,
+            kind: kind.to_string(),
+            detail,
+        });
+    }
 
     pub fn cleanup_on_death(&mut self, dead_fid: i32) {
         // Remove launched effects (log removals on targets).
@@ -318,6 +353,9 @@ impl FightWorld {
                     .copied()
                     .filter(|wid| weapons_by_item.contains_key(wid))
                     .collect();
+                let life0 = effective_entity_life(e);
+                let tp0 = effective_int(e.total_tp, e.tp);
+                let mp0 = effective_int(e.total_mp, e.mp);
                 entities.push(SimEntity {
                     fid,
                     team: team_idx as i32,
@@ -327,23 +365,23 @@ impl FightWorld {
                     name: e.name.clone(),
                     cell,
                     spawn_cell: cell,
-                    life: e.life,
-                    total_life: e.life,
-                    strength: e.strength,
-                    agility: e.agility,
-                    wisdom: e.wisdom,
-                    resistance: e.resistance,
-                    science: e.science,
-                    magic: e.magic,
+                    life: life0,
+                    total_life: life0,
+                    strength: effective_int(e.total_strength, e.strength),
+                    agility: effective_int(e.total_agility, e.agility),
+                    wisdom: effective_int(e.total_wisdom, e.wisdom),
+                    resistance: effective_int(e.total_resistance, e.resistance),
+                    science: effective_int(e.total_science, e.science),
+                    magic: effective_int(e.total_magic, e.magic),
                     power: 0,
                     absolute_shield: 0,
                     relative_shield: 0,
                     damage_return: 0,
-                    tp: e.tp,
-                    mp: e.mp,
-                    total_tp: e.tp,
-                    total_mp: e.mp,
-                    frequency: e.frequency,
+                    tp: tp0,
+                    mp: mp0,
+                    total_tp: tp0,
+                    total_mp: mp0,
+                    frequency: effective_int(e.total_frequency, e.frequency),
                     entity_type: e.r#type,
                     skin: e.skin,
                     hat: e.hat,
@@ -351,6 +389,7 @@ impl FightWorld {
                     face: e.face,
                     weapons,
                     chips: e.chips.clone(),
+                    components: e.components.clone(),
                     equipped_weapon: None,
                     ai_path: e.ai.clone(),
                     ai_id: e.ai_folder,
@@ -358,8 +397,8 @@ impl FightWorld {
                     ai_version: e.ai_version,
                     ai_strict: e.ai_strict,
                     birth_turn: 1,
-                    cores: e.cores,
-                    ram: e.ram,
+                    cores: effective_int(e.total_cores, e.cores),
+                    ram: effective_int(e.total_ram, e.ram),
                     farmer_id: e.farmer,
                     farmer_name,
                     farmer_country,
@@ -484,6 +523,7 @@ impl FightWorld {
             inbox: HashMap::new(),
             say_inbox: HashMap::new(),
             farmer_ai_logs,
+            trace: None,
         }
     }
 
@@ -784,6 +824,7 @@ impl FightWorld {
             face: 0,
             weapons: Vec::new(),
             chips: tpl.chips.clone(),
+            components: Vec::new(),
             equipped_weapon: None,
             ai_path: String::new(),
             ai_id: self.entity(owner_fid).map(|o| o.ai_id).unwrap_or(0),
@@ -1336,6 +1377,7 @@ mod initial_cooldown_tests {
             face: 0,
             weapons: Vec::new(),
             chips: Vec::new(),
+            components: Vec::new(),
             equipped_weapon: None,
             ai_path: String::new(),
             ai_id: 0,
@@ -1444,6 +1486,7 @@ mod initial_cooldown_tests {
             inbox: HashMap::new(),
             say_inbox: HashMap::new(),
             farmer_ai_logs: HashMap::new(),
+            trace: None,
         };
         w.apply_resurrection(0, 1, 5, false, false);
         assert_eq!(w.turn_fids, vec![0, 1, 2]);

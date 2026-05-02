@@ -5,7 +5,8 @@ use super::rng::JavaCompatRng;
 use super::sig_globals;
 use super::summons::load_summons_json;
 use super::weapons::load_weapons_json;
-use super::world::FightWorld;
+use super::trace::TraceEvent;
+use super::world::{FightWorld, TraceSink};
 use crate::engine::JavaFightBootstrap;
 use crate::fight::java_bootstrap::compute_java_fight_bootstrap;
 use crate::error::GenError;
@@ -17,12 +18,37 @@ use leekscript_run::{
 include!(concat!(env!("OUT_DIR"), "/extra_natives.rs"));
 use leekscript_signatures::SignatureFile;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use super::trace::TraceConfig;
+
 type CachedAi = (leekscript_run::HirFile, u8, Option<bool>);
+
+/// Options for a single fight run (trace, future extensions).
+#[derive(Debug, Clone, Default)]
+pub struct FightRunOptions {
+    pub trace: Option<TraceConfig>,
+    /// If set, `.leek` sources resolve under this directory; chips/weapons/summons still load from `ai_base` (`data/*.json`).
+    pub ai_scripts_root: Option<PathBuf>,
+}
+
+/// Outcome of [`run_scenario_path_with_options`].
+#[derive(Debug, Clone)]
+pub struct FightRunOutput {
+    pub outcome_json: String,
+    pub trace_events: Option<Vec<TraceEvent>>,
+}
+
+fn short_source_hash(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    let full = h.finalize();
+    hex::encode(full)[..16].to_string()
+}
 
 fn debug_source_context_for_hir(
     generator_root: &Path,
@@ -102,21 +128,41 @@ pub fn run_scenario_path_with_ai_overlay(
     ai_base: &Path,
     ai_overlay: Option<&Path>,
 ) -> Result<String, GenError> {
-    run_scenario_path_inner(scenario_path, ai_base, ai_overlay)
+    Ok(
+        run_scenario_path_inner(scenario_path, ai_base, ai_overlay, FightRunOptions::default())?
+            .outcome_json,
+    )
 }
 
 /// Run a scenario JSON through the in-tree fight loop and return outcome JSON (same general shape as the official generator).
 ///
 /// Replays official-generator `State.init` procedural map + start order in Rust (no JVM subprocess).
 pub fn run_scenario_path(scenario_path: &Path, ai_base: &Path) -> Result<String, GenError> {
-    run_scenario_path_inner(scenario_path, ai_base, None)
+    Ok(
+        run_scenario_path_inner(scenario_path, ai_base, None, FightRunOptions::default())?.outcome_json,
+    )
+}
+
+/// Like [`run_scenario_path_with_ai_overlay`] with extra options (e.g. Rust-only fight trace).
+pub fn run_scenario_path_with_options(
+    scenario_path: &Path,
+    ai_base: &Path,
+    ai_overlay: Option<&Path>,
+    options: FightRunOptions,
+) -> Result<FightRunOutput, GenError> {
+    run_scenario_path_inner(scenario_path, ai_base, ai_overlay, options)
 }
 
 fn run_scenario_path_inner(
     scenario_path: &Path,
     ai_base: &Path,
     ai_overlay: Option<&Path>,
-) -> Result<String, GenError> {
+    options: FightRunOptions,
+) -> Result<FightRunOutput, GenError> {
+    let scripts_base = options
+        .ai_scripts_root
+        .as_deref()
+        .unwrap_or(ai_base);
     let scenario_path = if scenario_path.is_absolute() {
         scenario_path.to_path_buf()
     } else {
@@ -140,6 +186,15 @@ fn run_scenario_path_inner(
     {
         let bootstrap = compute_java_fight_bootstrap(&world.borrow());
         apply_java_bootstrap(&world, &bootstrap);
+    }
+
+    if let Some(tc) = options.trace.clone() {
+        if tc.enabled {
+            world.borrow_mut().trace = Some(TraceSink {
+                config: tc,
+                events: Vec::new(),
+            });
+        }
     }
 
     if world.borrow().turn_fids.is_empty() {
@@ -227,17 +282,29 @@ fn run_scenario_path_inner(
             eng.advance(&world.borrow());
             continue;
         }
-        let ai_path = resolve_ai_source_path(ai_base, ai_overlay, &ai_rel);
+        let ai_path = resolve_ai_source_path(scripts_base, ai_overlay, &ai_rel);
+        let src = std::fs::read_to_string(&ai_path)
+            .map_err(|e| {
+                let mut msg = format!("read AI {}: {}", ai_path.display(), e);
+                if scripts_base != ai_base && ai_rel.contains("leekwars-ai") {
+                    msg.push_str(&format!(
+                        " (data from {}, scripts from {}; fix --ai-root / LEEKWARS_AI_ROOT if wrong)",
+                        ai_base.display(),
+                        scripts_base.display()
+                    ));
+                }
+                GenError::Message(msg)
+            })?;
+        let src_digest = short_source_hash(src.as_bytes());
         let cache_key = format!(
-            "{}::v{}::strict{}",
+            "{}::v{}::strict{}::{}",
             ai_path.to_string_lossy(),
             ai_version,
-            if ai_strict { 1 } else { 0 }
+            if ai_strict { 1 } else { 0 },
+            src_digest
         );
 
         if !compile_cache.contains_key(&cache_key) {
-            let src = std::fs::read_to_string(&ai_path)
-                .map_err(|e| GenError::Message(format!("read AI {}: {}", ai_path.display(), e)))?;
             let opts = CompileOptions {
                 source_path: Some(ai_path.clone()),
                 snippet_origin: Some(ai_path.clone()),
@@ -247,7 +314,7 @@ fn run_scenario_path_inner(
                 cli_strict: Some(ai_strict),
                 ..Default::default()
             };
-            let unit = compile_source(cache_key.clone(), &src, &opts).map_err(|diags| {
+            let unit = compile_source(cache_key.clone(), src.as_str(), &opts).map_err(|diags| {
                 GenError::Message(
                     diags
                         .iter()
@@ -266,7 +333,7 @@ fn run_scenario_path_inner(
         if !entity_ais.contains_key(&fid) {
             let host = FightHost::new(Rc::clone(&world));
             let ops_limit = world.borrow().max_operations_per_entity;
-            let dbg = debug_source_context_for_hir(ai_base, hir, &ai_path).ok();
+            let dbg = debug_source_context_for_hir(scripts_base, hir, &ai_path).ok();
             let (mut session, turn_stmts, turn_files) =
                 InterpretSession::from_hir_leek_wars_ai_with_extra_natives(
                     hir,
@@ -320,6 +387,24 @@ fn run_scenario_path_inner(
             world.borrow_mut().log_action(json!([8, fid, tp, mp]));
         }
 
+        {
+            let (life, tp, mp) = world
+                .borrow()
+                .entity(fid)
+                .map(|e| (e.life, e.tp, e.mp))
+                .unwrap_or((0, 0, 0));
+            world.borrow_mut().trace_event(
+                eng.turn,
+                fid,
+                "end_entity_turn",
+                Some(json!({
+                    "life": life,
+                    "tp": tp,
+                    "mp": mp,
+                })),
+            );
+        }
+
         // Official generator: `State.endTurn` does not advance the order when the fight ends.
         if world.borrow().is_finished() {
             break;
@@ -337,6 +422,7 @@ fn run_scenario_path_inner(
         }
     }
 
+    let trace_events = world.borrow_mut().trace.take().map(|s| s.events);
     let out_val = {
         let w = world.borrow();
         let winner = w.compute_winner();
@@ -344,7 +430,10 @@ fn run_scenario_path_inner(
         outcome_json(&w, winner, duration)
     };
 
-    Ok(serde_json::to_string(&out_val)?)
+    Ok(FightRunOutput {
+        outcome_json: serde_json::to_string(&out_val)?,
+        trace_events,
+    })
 }
 
 fn outcome_json(world: &FightWorld, winner: i32, duration: i32) -> serde_json::Value {

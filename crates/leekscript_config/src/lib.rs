@@ -1,4 +1,4 @@
-//! `Leek.toml` discovery and validation — see repository `docs/design/leek-toml.md`.
+//! `Leek.toml` discovery and validation — see `docs/reference/leek-toml.md`.
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};

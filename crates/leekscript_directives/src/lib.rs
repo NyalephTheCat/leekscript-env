@@ -1,7 +1,9 @@
-//! File preamble `// leek-*` directives — see `docs/design/directives.md`.
+//! File preamble `// leek-*` directives — see `docs/reference/directives.md`.
 //!
 //! Scans up to `max_lines` physical lines (default 64), stopping early at the first line that is not
 //! blank, a line comment, or a block comment.
+
+#![warn(clippy::pedantic)]
 
 use leekscript_span::Span;
 use serde::Serialize;
@@ -42,6 +44,7 @@ pub struct DirectiveDiagnostic {
 }
 
 /// Parse leading comments; `max_lines` caps how many physical lines are examined.
+#[must_use]
 pub fn parse_file_preamble(
     src: &str,
     max_lines: usize,
@@ -54,8 +57,7 @@ pub fn parse_file_preamble(
     while line_no < max_lines && offset <= src.len() {
         let line_end = src[offset..]
             .find('\n')
-            .map(|p| offset + p)
-            .unwrap_or(src.len());
+            .map_or(src.len(), |p| offset + p);
         let line = &src[offset..line_end];
         let line_start = offset;
 
@@ -175,7 +177,7 @@ fn parse_version(value: Option<&str>) -> Result<u8, String> {
         return Err("expected a version number after `leek-version`".into());
     };
     let raw = raw.trim();
-    let n: i64 = raw
+    let n: u8 = raw
         .parse()
         .map_err(|_| format!("`{raw}` is not a valid language version"))?;
     if !(1..=99).contains(&n) {
@@ -183,7 +185,7 @@ fn parse_version(value: Option<&str>) -> Result<u8, String> {
             "language version must be between 1 and 99, got {n}"
         ));
     }
-    Ok(n as u8)
+    Ok(n)
 }
 
 fn parse_strict(value: Option<&str>) -> Result<bool, String> {

@@ -2,6 +2,7 @@
 name = "leekscript_directives"
 version = "0.1.0"
 edition.workspace = true
+publish = false
 description = "Parse // leek-* file preamble directives (toolchain)"
 
 [dependencies]

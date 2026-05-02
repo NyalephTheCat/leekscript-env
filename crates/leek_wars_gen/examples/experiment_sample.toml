@@ -1,0 +1,33 @@
+# Sample experiment spec — copy and edit paths for your checkout.
+# Run: `leekgen experiment run --spec crates/leek_wars_gen/examples/experiment_sample.toml --root /path/to/leek-wars-generator`
+
+scenario = "../../leek-wars-generator/test/scenario/scenario1.json"
+generator_root = "../../leek-wars-generator"
+output_dir = "../../target/leek_experiment_sample_out"
+
+seeds = { list = [1, 2] }
+
+# Optional: Rust-only trace (writes runs/<id>/trace.jsonl)
+# [trace]
+# max_events = 5000
+
+# Optional: HTTP snapshot for offline preset authoring
+# loadout_preset = "meta_preset.json"
+
+# Optional: random Java vs Rust spot-check (slow; skipped if AI overlay/tunables)
+# java_verify_rate = 0.0
+
+[[arms]]
+name = "baseline"
+
+# Example: sweep `const` lines in a `.leek` file (paths relative to generator_root).
+# [[arms]]
+# name = "tuned"
+# [arms.tunables."leekscript/src/test/resources/ai/example.leek"]
+# MY_THRESHOLD = [3, 5, 7]
+
+# Sparse variants (one row per variant; keys are AI paths relative to generator_root):
+# [[arms]]
+# name = "sparse"
+# [[arms.variants]]
+# 'ai/foo.leek' = { BAR = 1 }

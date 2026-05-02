@@ -834,16 +834,10 @@ fn expand_stmt_list(
                     }]);
                 }
             };
-            if stack.contains(&canon) {
-                return Err(vec![CompileDiagnostic {
-                    phase: CompilePhase::Hir,
-                    reference: "INCLUDE_CIRCULAR".into(),
-                    span,
-                    message: format!("circular include `{}`", path),
-                    snippet_origin: Some(current_file.to_path_buf()),
-                }]);
-            }
-            if loaded.contains(&canon) {
+            // Finished expansion: skip (dedupe). Still on the recursion stack: skip too — same as
+            // duplicate `include` / forward reference while the file's outer expansion is in flight
+            // (matches common Java-style include graphs, e.g. mutual types across files).
+            if loaded.contains(&canon) || stack.contains(&canon) {
                 continue;
             }
             if let Some(unit) = cache.get(&canon) {
@@ -1063,7 +1057,7 @@ pub fn compile_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{interpret_hir, Value};
+    use crate::{interpret_hir, value_java_export, Value};
 
     #[test]
     fn smoke_compiles() {
@@ -2015,6 +2009,63 @@ mod tests {
         .unwrap();
         let main_path = dir.join("main.leek");
         let main_src = "include(\"left.leek\");\ninclude(\"right.leek\");\nreturn xl + xr;\n";
+        std::fs::write(&main_path, main_src).unwrap();
+        let canon_main = std::fs::canonicalize(&main_path).unwrap();
+        let opts = CompileOptions {
+            source_path: Some(canon_main.clone()),
+            ..Default::default()
+        };
+        let u = compile_source(canon_main.display().to_string(), main_src, &opts).unwrap();
+        assert_eq!(
+            interpret_hir(&u.hir, u.language_version).unwrap(),
+            Some(Value::Integer(42))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// JVM / shipped fights: duplicate keys in `[k : v, …]` use the last value (not a hard error).
+    #[test]
+    fn map_literal_duplicate_key_v4_last_value_wins_export_matches_java_vm() {
+        let opts = CompileOptions {
+            cli_language_version: Some(4),
+            ..Default::default()
+        };
+        let cases = [
+            ("return [1 : 2, 1 : 3];\n", "[1 : 3]"),
+            ("return ['a' : 2, 'a' : 3];\n", "[\"a\" : 3]"),
+            ("return [true : 2, true : 3];\n", "[true : 3]"),
+        ];
+        for (src, want) in cases {
+            let u = compile_source("<dup>", src, &opts).expect("compile");
+            let v = interpret_hir(&u.hir, u.language_version)
+                .expect("run")
+                .expect("value");
+            assert_eq!(
+                value_java_export(&v, u.language_version),
+                want,
+                "src={src:?}"
+            );
+        }
+    }
+
+    /// When A includes B and B includes A while A is still expanding, the second include is skipped
+    /// (same as an already-finished include). Matches Java-style mutual top-level includes.
+    #[test]
+    fn include_mutual_while_parent_expanding_is_skipped() {
+        let dir = std::env::temp_dir().join(format!("leek_inc_mutual_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("item.leek"),
+            "include(\"effect.leek\");\nglobal integer FROM_ITEM = 10;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("effect.leek"),
+            "include(\"item.leek\");\nglobal integer FROM_EFFECT = 32;\n",
+        )
+        .unwrap();
+        let main_path = dir.join("main.leek");
+        let main_src = "include(\"item.leek\");\nreturn FROM_ITEM + FROM_EFFECT;\n";
         std::fs::write(&main_path, main_src).unwrap();
         let canon_main = std::fs::canonicalize(&main_path).unwrap();
         let opts = CompileOptions {

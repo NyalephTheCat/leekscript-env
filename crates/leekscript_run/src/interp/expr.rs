@@ -609,10 +609,9 @@ fn eval_keyed_literal(
     for (ke, ve) in entries {
         let k = eval_expr(cx, ke)?;
         let v = eval_expr(cx, ve)?;
+        // Match Leek Wars JVM: later entry wins (same as v1–3 and as `{}` object literals in v4).
+        // Duplicate keys are not a hard error in shipped fights; see e.g. static `Map` fields in AI.
         if let Some(j) = m.find_key(&k) {
-            if cx.language_version >= 4 && !object_literal {
-                return Err(InterpretError::map_duplicated_key().into());
-            }
             m[j].1 = v;
         } else {
             m.push_kv(k, v);

@@ -1,5 +1,5 @@
 # Stable diagnostic registry — maps Java leekscript.common.Error to E#### codes
-# Policy: docs/design/diagnostic-codes.md
+# Policy: docs/reference/diagnostics-registry.md
 # Regenerate only with care; never reassign an existing code.
 
 schema_version: 1

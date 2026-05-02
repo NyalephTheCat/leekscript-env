@@ -1,6 +1,9 @@
 use crate::engine::{default_java_cwd, resolve_generator_jar, RunRequest};
 use crate::error::GenError;
-use crate::fight::{run_scenario_path, run_scenario_path_with_ai_overlay};
+use crate::fight::{
+    run_scenario_path, run_scenario_path_with_ai_overlay, run_scenario_path_with_options,
+    FightRunOptions, FightRunOutput,
+};
 use leekscript_run::{compile_source, CompileOptions};
 use std::path::Path;
 
@@ -26,6 +29,17 @@ impl RustEngine {
         ai_overlay: Option<&Path>,
     ) -> Result<String, GenError> {
         run_scenario_path_with_ai_overlay(&req.file, ai_base, ai_overlay)
+    }
+
+    /// Full fight output (outcome JSON + optional trace); see [`FightRunOptions`].
+    pub fn run_scenario_with_options(
+        &self,
+        req: &RunRequest,
+        ai_base: &Path,
+        ai_overlay: Option<&Path>,
+        options: FightRunOptions,
+    ) -> Result<FightRunOutput, GenError> {
+        run_scenario_path_with_options(&req.file, ai_base, ai_overlay, options)
     }
 
     /// Run a scenario through the in-tree fight loop (simplified physics vs Java).

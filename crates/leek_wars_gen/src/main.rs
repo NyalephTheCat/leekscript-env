@@ -3,10 +3,22 @@
 //! This binary is intentionally **Rust engine only** (no JVM, no `generator.jar`). Java parity tooling
 //! lives in separate binaries (`leekgen-compare`, `leekgen-fuzz`).
 
+mod meta_entity;
+mod meta_rankings;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use console::Style;
 use leek_wars_gen::engine::RunRequest;
+use leek_wars_gen::experiment::bench::{
+    apply_all_ai_override, apply_team0_ai_override, apply_team1_ai_override, build_pvp_scenario_value,
+    farmer_inner, fetch_side_row, list_farmer_leeks, list_team_compositions, print_pvp_summary,
+    run_pvp_batch, BenchSide, PvpBenchParams,
+};
 use leek_wars_gen::{GenError, RustEngine};
+use lw_meta::{fetch_farmer, meta_agent, RetryPolicy};
 use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "leekgen", version, about = "Leek Wars fight generator CLI (Rust-only)")]
@@ -25,6 +37,14 @@ enum Command {
     Fuzz(FuzzCmd),
     /// Replay a fuzz artifact directory (Rust engine).
     Replay(ReplayCmd),
+    /// Declarative experiment sweeps (TOML spec, cache, NDJSON manifest).
+    Experiment(ExperimentTop),
+    /// Snapshot helpers: raw URL fetch or Leek Wars rankings (`lw_meta`).
+    Meta(MetaTop),
+    /// Live composition/leek PvP batches (multi-seed, progress bar, win-rate table).
+    Pvp(PvpTop),
+    /// Summarize a `trace.jsonl` from `experiment` into feature JSON.
+    Trace(TraceTop),
     /// Scenario file utilities (list/validate/convert/new/print).
     Scenario(ScenarioTop),
     /// Show the resolved `Leek.toml` generator configuration.
@@ -33,6 +53,298 @@ enum Command {
     Init(InitCmd),
     /// Benchmark Rust engine performance on a scenario.
     Bench(BenchCmd),
+}
+
+#[derive(Subcommand)]
+enum ExperimentCmd {
+    /// Run all tasks from an experiment TOML file.
+    Run(ExperimentRunCmd),
+}
+
+#[derive(Args)]
+struct ExperimentTop {
+    #[command(subcommand)]
+    cmd: ExperimentCmd,
+}
+
+#[derive(Args)]
+struct ExperimentRunCmd {
+    /// Experiment specification (`experiment.toml`).
+    spec: PathBuf,
+    /// Root directory for AI/data (default: config / `LEEK_GENERATOR_CWD`).
+    #[arg(long, value_name = "DIR")]
+    root: Option<PathBuf>,
+    /// Parallel worker threads (each runs independent fights).
+    #[arg(long, default_value_t = 4)]
+    jobs: usize,
+}
+
+#[derive(Subcommand)]
+enum MetaCmd {
+    /// GET a URL and write `{ fetched_at, url, body }` JSON.
+    Fetch(MetaFetchCmd),
+    /// Top leeks / teams / compositions (or `service/get-all` with `--token`).
+    Rankings(MetaRankingsTop),
+    /// Single leek sheet or composition bundle (`leek/get` per roster leek) for local sims.
+    Entity(MetaEntityTop),
+}
+
+#[derive(Args)]
+struct MetaTop {
+    #[command(subcommand)]
+    cmd: MetaCmd,
+}
+
+#[derive(Args)]
+struct PvpTop {
+    #[command(subcommand)]
+    cmd: PvpCmd,
+}
+
+#[derive(Subcommand)]
+enum PvpCmd {
+    /// List this farmer's team compositions (`farmer/get`, no token).
+    List(PvpListCmd),
+    /// Run several seeded fights: `--team0` vs `--team1` (`composition:ID` or `leek:ID`).
+    Run(PvpRunCmd),
+    /// Compare multiple `--candidate` sides against the same `--vs` opponent.
+    Compare(PvpCompareCmd),
+}
+
+#[derive(Args)]
+struct PvpListCmd {
+    #[arg(long)]
+    farmer: u64,
+    #[command(flatten)]
+    http: MetaLwHttpArgs,
+}
+
+#[derive(Args)]
+struct PvpRunCmd {
+    /// Your side (solo or full composition).
+    #[arg(long, value_parser = clap::value_parser!(BenchSide), value_name = "SIDE")]
+    team0: BenchSide,
+    /// Opponent side.
+    #[arg(long, value_parser = clap::value_parser!(BenchSide), value_name = "SIDE")]
+    team1: BenchSide,
+    #[command(flatten)]
+    http: MetaLwHttpArgs,
+    #[command(flatten)]
+    pvp_run: PvpRunFlags,
+}
+
+#[derive(Args)]
+struct PvpCompareCmd {
+    /// Fixed opponent (`composition:…` or `leek:…`).
+    #[arg(
+        long = "vs",
+        visible_alias = "versus",
+        value_parser = clap::value_parser!(BenchSide),
+        value_name = "SIDE"
+    )]
+    opponent: BenchSide,
+    /// Sides to compare (repeat per roster you want to test).
+    #[arg(
+        long = "candidate",
+        value_parser = clap::value_parser!(BenchSide),
+        value_name = "SIDE",
+        required = true
+    )]
+    candidates: Vec<BenchSide>,
+    #[command(flatten)]
+    http: MetaLwHttpArgs,
+    #[command(flatten)]
+    pvp_run: PvpRunFlags,
+}
+
+#[derive(Args)]
+struct PvpRunFlags {
+    /// Leek Wars **generator** checkout (`LEEK_GENERATOR_CWD`): `data/*.json` and default AI base.
+    #[arg(long, value_name = "DIR")]
+    root: Option<PathBuf>,
+    /// Directory that **contains** your `leekwars-ai/` tree when it lives outside `--root` (API paths look like `leekwars-ai/v2/...`).
+    #[arg(long, value_name = "DIR", env = "LEEKWARS_AI_ROOT")]
+    ai_root: Option<PathBuf>,
+    /// Independent fights to run (different `random_seed` values).
+    #[arg(long, default_value_t = 32)]
+    seeds: u32,
+    /// First `random_seed` (then +1 for each additional fight).
+    #[arg(long, default_value_t = 1)]
+    seed_start: i32,
+    #[arg(long, default_value_t = 4)]
+    jobs: usize,
+    /// Every leek on **both** teams uses this path (e.g. `ai/v2/main.leek`). Use when you only have one local tree; wins over per-team overrides.
+    #[arg(long, value_name = "REL_PATH")]
+    override_ai: Option<String>,
+    /// Replace team0 AI path for every leek on your side.
+    #[arg(long, value_name = "REL_PATH")]
+    override_team0_ai: Option<String>,
+    /// Replace team1 (opponent) AI paths — needed if you lack `leekwars-ai/...` locally and only use `ai/v2/...`.
+    #[arg(long, value_name = "REL_PATH")]
+    override_team1_ai: Option<String>,
+    /// Disable progress bar (e.g. for logs).
+    #[arg(long)]
+    no_progress: bool,
+    /// Print JSON records instead of the colored summary.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct MetaFetchCmd {
+    url: String,
+    #[arg(long, value_name = "PATH")]
+    output: PathBuf,
+}
+
+#[derive(Args)]
+struct MetaRankingsTop {
+    #[command(flatten)]
+    http: MetaLwHttpArgs,
+    #[command(subcommand)]
+    cmd: MetaRankingsCmd,
+}
+
+#[derive(Args)]
+struct MetaLwHttpArgs {
+    #[arg(long, default_value = "https://leekwars.com/api/", env = "LEEKWARS_API_BASE")]
+    api_base: String,
+    #[arg(long, env = "LEEKWARS_TOKEN")]
+    token: Option<String>,
+    #[arg(long, default_value_t = 12, env = "LEEKWARS_MAX_ATTEMPTS")]
+    max_attempts: u32,
+    #[arg(long, default_value_t = 1000, env = "LEEKWARS_BACKOFF_INITIAL_MS")]
+    backoff_initial_ms: u64,
+    #[arg(long, default_value_t = 120_000, env = "LEEKWARS_BACKOFF_MAX_MS")]
+    backoff_max_ms: u64,
+    #[arg(long, default_value_t = 0, env = "LEEKWARS_REQUEST_GAP_MS")]
+    request_gap_ms: u64,
+}
+
+#[derive(Subcommand)]
+enum MetaRankingsCmd {
+    Leeks(MetaRankLeeksCmd),
+    Teams(MetaRankTeamsCmd),
+    Compositions(MetaRankTeamsCmd),
+    All(MetaRankAllCmd),
+    Services(MetaRankServicesCmd),
+}
+
+#[derive(Args)]
+struct MetaRankLeeksCmd {
+    #[arg(long, short = 'o', value_name = "PATH")]
+    output: PathBuf,
+    #[arg(long, default_value = "talent")]
+    order: String,
+    #[arg(long)]
+    leek_level: Option<u32>,
+    #[arg(long, default_value_t = 500)]
+    top: usize,
+    #[arg(long)]
+    country: Option<String>,
+    #[arg(long)]
+    include_inactive: bool,
+}
+
+#[derive(Args)]
+struct MetaRankTeamsCmd {
+    #[arg(long, short = 'o', value_name = "PATH")]
+    output: PathBuf,
+    #[arg(long, default_value = "talent")]
+    order: String,
+    #[arg(long, default_value_t = 500)]
+    top: usize,
+    #[arg(long)]
+    country: Option<String>,
+    #[arg(long)]
+    include_inactive: bool,
+}
+
+#[derive(Args)]
+struct MetaRankAllCmd {
+    #[arg(long, short = 'o', value_name = "PATH")]
+    output: PathBuf,
+    #[arg(long, default_value = "talent")]
+    order: String,
+    #[arg(long)]
+    leek_level: Option<u32>,
+    #[arg(long, default_value_t = 500)]
+    top: usize,
+    #[arg(long)]
+    country: Option<String>,
+    #[arg(long)]
+    include_inactive: bool,
+}
+
+#[derive(Args)]
+struct MetaRankServicesCmd {
+    #[arg(long, short = 'o', value_name = "PATH")]
+    output: PathBuf,
+    #[arg(long = "module", short = 'm')]
+    modules: Vec<String>,
+    #[arg(long)]
+    raw: bool,
+}
+
+#[derive(Args)]
+struct MetaEntityTop {
+    #[command(flatten)]
+    http: MetaLwHttpArgs,
+    #[command(subcommand)]
+    cmd: MetaEntityCmd,
+}
+
+#[derive(Subcommand)]
+enum MetaEntityCmd {
+    /// Stats + weapon/chip template ids + components + AI metadata (from `leek/get`).
+    Leek(MetaEntityLeekCmd),
+    /// Composition summary; optionally fetch each member's `leek/get` (see `--summary-only`).
+    Composition(MetaEntityCompositionCmd),
+}
+
+#[derive(Args)]
+struct MetaEntityLeekCmd {
+    #[arg(long, short = 'o', value_name = "PATH")]
+    output: PathBuf,
+    #[arg(long)]
+    id: u64,
+    /// Only the trimmed [`lw_meta::leek_sim_profile`] (no raw `leek/get` in the snapshot body).
+    #[arg(long)]
+    profile_only: bool,
+}
+
+#[derive(Args)]
+struct MetaEntityCompositionCmd {
+    #[arg(long, short = 'o', value_name = "PATH")]
+    output: PathBuf,
+    #[arg(long)]
+    id: u64,
+    /// Only `team/composition-rich-tooltip` (no per-leek `leek/get`).
+    #[arg(long)]
+    summary_only: bool,
+    /// When fetching leeks: store profile-only sheets (smaller JSON).
+    #[arg(long)]
+    profile_only: bool,
+}
+
+#[derive(Subcommand)]
+enum TraceCmd {
+    /// Print JSON summary for a trace sidecar file.
+    Summarize(TraceSummarizeCmd),
+}
+
+#[derive(Args)]
+struct TraceTop {
+    #[command(subcommand)]
+    cmd: TraceCmd,
+}
+
+#[derive(Args)]
+struct TraceSummarizeCmd {
+    trace: PathBuf,
+    /// Print minified JSON (default: pretty).
+    #[arg(long)]
+    compact: bool,
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, ValueEnum)]
@@ -357,6 +669,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Sim(cmd) => cmd_sim(cmd)?,
         Command::Fuzz(cmd) => cmd_fuzz(cmd)?,
         Command::Replay(cmd) => cmd_replay(cmd)?,
+        Command::Experiment(top) => match top.cmd {
+            ExperimentCmd::Run(cmd) => cmd_experiment_run(cmd)?,
+        },
+        Command::Meta(top) => match top.cmd {
+            MetaCmd::Fetch(cmd) => cmd_meta_fetch(cmd)?,
+            MetaCmd::Rankings(r) => cmd_meta_rankings(r)?,
+            MetaCmd::Entity(e) => cmd_meta_entity(e)?,
+        },
+        Command::Pvp(top) => match top.cmd {
+            PvpCmd::List(cmd) => cmd_pvp_list(cmd)?,
+            PvpCmd::Run(cmd) => cmd_pvp_run(cmd)?,
+            PvpCmd::Compare(cmd) => cmd_pvp_compare(cmd)?,
+        },
+        Command::Trace(top) => match top.cmd {
+            TraceCmd::Summarize(cmd) => cmd_trace_summarize(cmd)?,
+        },
         Command::Scenario(cmd) => cmd_scenario(cmd.cmd)?,
         Command::Config(cmd) => cmd_config(cmd)?,
         Command::Init(cmd) => cmd_init(cmd)?,
@@ -1139,6 +1467,330 @@ fn cmd_bench(cmd: BenchCmd) -> Result<(), GenError> {
         }
     }
 
+    Ok(())
+}
+
+fn apply_pvp_ai_overrides(sc: &mut serde_json::Value, f: &PvpRunFlags) -> Result<(), GenError> {
+    if let Some(ref p) = f.override_ai {
+        apply_all_ai_override(sc, p)?;
+        return Ok(());
+    }
+    if let Some(ref p) = f.override_team0_ai {
+        apply_team0_ai_override(sc, p)?;
+    }
+    if let Some(ref p) = f.override_team1_ai {
+        apply_team1_ai_override(sc, p)?;
+    }
+    Ok(())
+}
+
+fn pvp_retry(http: &MetaLwHttpArgs) -> RetryPolicy {
+    RetryPolicy::from_ms(
+        http.max_attempts,
+        http.backoff_initial_ms,
+        http.backoff_max_ms,
+    )
+}
+
+fn cmd_pvp_list(cmd: PvpListCmd) -> Result<(), GenError> {
+    let agent = meta_agent();
+    let retry = pvp_retry(&cmd.http);
+    let body = fetch_farmer(
+        &agent,
+        &cmd.http.api_base,
+        cmd.farmer,
+        cmd.http.token.as_deref(),
+        &retry,
+    )?;
+    let fin = farmer_inner(&body);
+    let name = fin
+        .get("name")
+        .and_then(|x| x.as_str())
+        .unwrap_or("?");
+    let rows = list_team_compositions(fin);
+    let title = Style::new().cyan().bold();
+    eprintln!(
+        "{}",
+        title.apply_to(format!("Farmer {} — {}", cmd.farmer, name))
+    );
+    if !rows.is_empty() {
+        eprintln!("  {}", Style::new().dim().apply_to("team compositions"));
+        eprintln!("  {:>10}  {}", "id", "name");
+        for (id, cn) in &rows {
+            eprintln!("  {:>10}  {}", id, cn);
+        }
+    } else {
+        eprintln!(
+            "  {}",
+            Style::new().dim().apply_to(
+                "no compositions in this response — set LEEKWARS_TOKEN (or --token) for full team data"
+            )
+        );
+    }
+    let leeks = list_farmer_leeks(fin);
+    if !leeks.is_empty() {
+        eprintln!("  {}", Style::new().dim().apply_to("leeks (use as leek:ID in pvp run)"));
+        eprintln!("  {:>10}  {}", "id", "name");
+        for (id, cn) in &leeks {
+            eprintln!("  {:>10}  {}", id, cn);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_pvp_run(cmd: PvpRunCmd) -> Result<(), GenError> {
+    let cfg = leek_wars_gen::config::resolve(cmd.pvp_run.root.clone())?;
+    let root = cfg.root;
+    let agent = meta_agent();
+    let retry = pvp_retry(&cmd.http);
+    let gap = Duration::from_millis(cmd.http.request_gap_ms);
+
+    let (row0, label0) = fetch_side_row(
+        &agent,
+        &cmd.http.api_base,
+        &cmd.team0,
+        &retry,
+        gap,
+    )?;
+    if !gap.is_zero() {
+        thread::sleep(gap);
+    }
+    let (row1, label1) = fetch_side_row(
+        &agent,
+        &cmd.http.api_base,
+        &cmd.team1,
+        &retry,
+        gap,
+    )?;
+
+    let n = cmd.pvp_run.seeds.max(1);
+    let mut scenarios = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        let seed = cmd
+            .pvp_run
+            .seed_start
+            .saturating_add(i as i32);
+        let mut sc = build_pvp_scenario_value(
+            row0.clone(),
+            row1.clone(),
+            &label0,
+            &label1,
+            seed,
+        )?;
+        apply_pvp_ai_overrides(&mut sc, &cmd.pvp_run)?;
+        scenarios.push((format!("{label0} | seed={seed}"), sc));
+    }
+
+    let ai_scripts = cmd.pvp_run.ai_root.as_deref();
+    let params = PvpBenchParams {
+        generator_root: root.as_path(),
+        ai_scripts_root: ai_scripts,
+        jobs: cmd.pvp_run.jobs,
+        show_progress: !cmd.pvp_run.no_progress,
+    };
+    let records = run_pvp_batch(&params, scenarios)?;
+    if cmd.pvp_run.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&records).map_err(|e| GenError::Message(e.to_string()))?
+        );
+    } else {
+        print_pvp_summary(&records, &label0, &label1);
+    }
+    Ok(())
+}
+
+fn cmd_pvp_compare(cmd: PvpCompareCmd) -> Result<(), GenError> {
+    let cfg = leek_wars_gen::config::resolve(cmd.pvp_run.root.clone())?;
+    let root = cfg.root;
+    let agent = meta_agent();
+    let retry = pvp_retry(&cmd.http);
+    let gap = Duration::from_millis(cmd.http.request_gap_ms);
+
+    let (row_opponent, label_opponent) = fetch_side_row(
+        &agent,
+        &cmd.http.api_base,
+        &cmd.opponent,
+        &retry,
+        gap,
+    )?;
+
+    let n = cmd.pvp_run.seeds.max(1) as usize;
+    let mut scenarios = Vec::with_capacity(cmd.candidates.len() * n);
+
+    for cand in &cmd.candidates {
+        if !gap.is_zero() {
+            thread::sleep(gap);
+        }
+        let (row0, label0) =
+            fetch_side_row(&agent, &cmd.http.api_base, cand, &retry, gap)?;
+        for i in 0..n {
+            let seed = cmd
+                .pvp_run
+                .seed_start
+                .saturating_add(i as i32);
+            let mut sc = build_pvp_scenario_value(
+                row0.clone(),
+                row_opponent.clone(),
+                &label0,
+                &label_opponent,
+                seed,
+            )?;
+            apply_pvp_ai_overrides(&mut sc, &cmd.pvp_run)?;
+            scenarios.push((format!("{label0} | seed={seed}"), sc));
+        }
+    }
+
+    let ai_scripts = cmd.pvp_run.ai_root.as_deref();
+    let params = PvpBenchParams {
+        generator_root: root.as_path(),
+        ai_scripts_root: ai_scripts,
+        jobs: cmd.pvp_run.jobs,
+        show_progress: !cmd.pvp_run.no_progress,
+    };
+    let records = run_pvp_batch(&params, scenarios)?;
+    if cmd.pvp_run.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&records).map_err(|e| GenError::Message(e.to_string()))?
+        );
+    } else {
+        print_pvp_summary(
+            &records,
+            "candidates (team 0)",
+            label_opponent.as_str(),
+        );
+    }
+    Ok(())
+}
+
+fn cmd_experiment_run(cmd: ExperimentRunCmd) -> Result<(), GenError> {
+    let has_cli_root = cmd.root.is_some();
+        let cfg = leek_wars_gen::config::resolve(cmd.root)?;
+    let spec = leek_wars_gen::experiment::ExperimentSpec::from_toml_path(cmd.spec.as_path())?;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = if has_cli_root {
+        cfg.root
+    } else if let Some(ref r) = spec.generator_root {
+        if r.is_absolute() {
+            r.clone()
+        } else {
+            cwd.join(r)
+        }
+    } else {
+        cfg.root
+    };
+    let spec_path =
+        std::fs::canonicalize(cmd.spec.as_path()).unwrap_or_else(|_| cmd.spec.clone());
+    leek_wars_gen::experiment::run_experiment(&spec, &spec_path, root, cmd.jobs)?;
+    Ok(())
+}
+
+fn cmd_meta_fetch(cmd: MetaFetchCmd) -> Result<(), GenError> {
+    leek_wars_gen::experiment::meta::write_meta_snapshot(cmd.output.as_path(), cmd.url.as_str())?;
+    eprintln!("wrote {}", cmd.output.display());
+    Ok(())
+}
+
+fn cmd_meta_entity(top: MetaEntityTop) -> Result<(), GenError> {
+    let http = meta_entity::EntityHttpParams {
+        api_base: top.http.api_base,
+        max_attempts: top.http.max_attempts,
+        backoff_initial_ms: top.http.backoff_initial_ms,
+        backoff_max_ms: top.http.backoff_max_ms,
+        request_gap_ms: top.http.request_gap_ms,
+    };
+    let out_disp = match &top.cmd {
+        MetaEntityCmd::Leek(c) => c.output.clone(),
+        MetaEntityCmd::Composition(c) => c.output.clone(),
+    };
+    match top.cmd {
+        MetaEntityCmd::Leek(c) => meta_entity::run_leek(
+            &http,
+            c.output.as_path(),
+            c.id,
+            c.profile_only,
+        )?,
+        MetaEntityCmd::Composition(c) => meta_entity::run_composition(
+            &http,
+            c.output.as_path(),
+            c.id,
+            c.summary_only,
+            c.profile_only,
+        )?,
+    }
+    eprintln!("wrote {}", out_disp.display());
+    Ok(())
+}
+
+fn cmd_meta_rankings(top: MetaRankingsTop) -> Result<(), GenError> {
+    let http = meta_rankings::LwHttpParams {
+        api_base: top.http.api_base,
+        token: top.http.token,
+        max_attempts: top.http.max_attempts,
+        backoff_initial_ms: top.http.backoff_initial_ms,
+        backoff_max_ms: top.http.backoff_max_ms,
+        request_gap_ms: top.http.request_gap_ms,
+    };
+    let out_disp = match &top.cmd {
+        MetaRankingsCmd::Leeks(c) => c.output.clone(),
+        MetaRankingsCmd::Teams(c) => c.output.clone(),
+        MetaRankingsCmd::Compositions(c) => c.output.clone(),
+        MetaRankingsCmd::All(c) => c.output.clone(),
+        MetaRankingsCmd::Services(c) => c.output.clone(),
+    };
+    match top.cmd {
+        MetaRankingsCmd::Leeks(c) => meta_rankings::run_leeks(
+            &http,
+            c.output.as_path(),
+            c.order,
+            c.leek_level,
+            c.top,
+            c.country,
+            c.include_inactive,
+        )?,
+        MetaRankingsCmd::Teams(c) => meta_rankings::run_teams(
+            &http,
+            c.output.as_path(),
+            c.order,
+            c.top,
+            c.country,
+            c.include_inactive,
+        )?,
+        MetaRankingsCmd::Compositions(c) => meta_rankings::run_compositions(
+            &http,
+            c.output.as_path(),
+            c.order,
+            c.top,
+            c.country,
+            c.include_inactive,
+        )?,
+        MetaRankingsCmd::All(c) => meta_rankings::run_all(
+            &http,
+            c.output.as_path(),
+            c.order,
+            c.leek_level,
+            c.top,
+            c.country,
+            c.include_inactive,
+        )?,
+        MetaRankingsCmd::Services(c) => {
+            meta_rankings::run_services(&http, c.output.as_path(), c.modules, c.raw)?;
+        }
+    }
+    eprintln!("wrote {}", out_disp.display());
+    Ok(())
+}
+
+fn cmd_trace_summarize(cmd: TraceSummarizeCmd) -> Result<(), GenError> {
+    let s =
+        leek_wars_gen::experiment::trace_summarize::summarize_trace_file(cmd.trace.as_path())?;
+    let text = if cmd.compact {
+        serde_json::to_string(&s).map_err(|e| GenError::Message(e.to_string()))?
+    } else {
+        serde_json::to_string_pretty(&s).map_err(|e| GenError::Message(e.to_string()))?
+    };
+    println!("{text}");
     Ok(())
 }
 
