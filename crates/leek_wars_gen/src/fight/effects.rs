@@ -82,7 +82,7 @@ fn critical_power(ctx: EffectContext) -> f64 {
 }
 
 fn caster_mult(stat: i32) -> f64 {
-    1.0 + (stat as f64) / 100.0
+    1.0 + f64::from(stat) / 100.0
 }
 
 fn ctx_attack_is_chip(ctx: EffectContext) -> bool {
@@ -127,7 +127,7 @@ fn aoe_multiplier(w: &FightWorld, area_shape: i32, center_cell: i32, entity_cell
                 return 1.0;
             }
             let d = map::case_distance(w.map_w, center_cell, entity_cell);
-            (1.0 - 0.2 * d as f64).max(0.0)
+            (1.0 - 0.2 * f64::from(d)).max(0.0)
         }
     }
 }
@@ -192,8 +192,7 @@ fn apply_stat_delta_local(e: &mut crate::fight::SimEntity, key: i32, delta: i32)
     }
 }
 
-fn apply_reversible_stat_effect(
-    w: &mut FightWorld,
+struct ReversibleStatEffectArgs {
     caster_fid: i32,
     target_fid: i32,
     turns: i32,
@@ -206,18 +205,33 @@ fn apply_reversible_stat_effect(
     value1: f64,
     value2: f64,
     ctx: EffectContext,
-) {
+}
+
+fn apply_reversible_stat_effect(w: &mut FightWorld, args: ReversibleStatEffectArgs) {
+    let ReversibleStatEffectArgs {
+        caster_fid,
+        target_fid,
+        turns,
+        key,
+        delta,
+        effect_id,
+        modifiers,
+        propagate,
+        propagate_modifiers,
+        value1,
+        value2,
+        ctx,
+    } = args;
     if delta == 0 {
         return;
     }
 
     // Not-replaceable: if any effect from the same item already exists, skip.
-    if (modifiers & 8) != 0 {
-        if w.entity(target_fid)
+    if (modifiers & 8) != 0
+        && w.entity(target_fid)
             .is_some_and(|e| e.effects.iter().any(|ef| ef.item_id == ctx.item_id))
-        {
-            return;
-        }
+    {
+        return;
     }
 
     let stackable = (modifiers & 1) != 0;
@@ -452,8 +466,8 @@ fn apply_damage_with_shields(
             absorbed += take;
         }
         if dmg > 0 && victim.relative_shield > 0 {
-            let rs = victim.relative_shield.max(0) as f64 / 100.0;
-            let reduced = (dmg as f64 * (1.0 - rs)).round() as i32;
+            let rs = f64::from(victim.relative_shield.max(0)) / 100.0;
+            let reduced = (f64::from(dmg) * (1.0 - rs)).round() as i32;
             dmg = reduced.max(0);
         }
         if dmg > 0 {
@@ -464,7 +478,7 @@ fn apply_damage_with_shields(
             } else {
                 0.05
             };
-            erosion = ((dmg as f64) * rate).round() as i32;
+            erosion = (f64::from(dmg) * rate).round() as i32;
             if erosion > 0 {
                 victim.total_life = (victim.total_life - erosion).max(1);
                 should_log_nova = true;
@@ -523,7 +537,7 @@ pub fn apply_effects_on_cells(
         }
     }
 
-    let caster_cell = w.entity(caster_fid).map(|e| e.cell).unwrap_or(-999);
+    let caster_cell = w.entity(caster_fid).map_or(-999, |e| e.cell);
     let mut previous_effect_total_value: i32 = 0;
 
     for eff in effects {
@@ -535,10 +549,10 @@ pub fn apply_effects_on_cells(
         if eff.id == EFFECT_ATTRACT {
             let focus = target_cells.first().copied().unwrap_or(caster_cell);
             for &tfid in &target_fids {
-                if !w.entity(tfid).is_some_and(|e| !e.dead) {
+                if w.entity(tfid).is_none_or(|e| e.dead) {
                     continue;
                 }
-                let tcell = w.entity(tfid).map(|e| e.cell).unwrap_or(-1);
+                let tcell = w.entity(tfid).map_or(-1, |e| e.cell);
                 let dest = attract_last_available_cell(w, tcell, focus, caster_cell, tfid);
                 slide_entity(w, caster_fid, tfid, dest);
             }
@@ -547,10 +561,10 @@ pub fn apply_effects_on_cells(
         if eff.id == EFFECT_PUSH {
             let focus = target_cells.first().copied().unwrap_or(caster_cell);
             for &tfid in &target_fids {
-                if !w.entity(tfid).is_some_and(|e| !e.dead) {
+                if w.entity(tfid).is_none_or(|e| e.dead) {
                     continue;
                 }
-                let tcell = w.entity(tfid).map(|e| e.cell).unwrap_or(-1);
+                let tcell = w.entity(tfid).map_or(-1, |e| e.cell);
                 let dest = push_last_available_cell(w, tcell, focus, caster_cell, tfid);
                 slide_entity(w, caster_fid, tfid, dest);
             }
@@ -598,7 +612,7 @@ pub fn apply_effects_on_cells(
         }
 
         for tfid in effect_targets {
-            let tcell = w.entity(tfid).map(|e| e.cell).unwrap_or(-999);
+            let tcell = w.entity(tfid).map_or(-999, |e| e.cell);
             let ap = if on_caster {
                 1.0
             } else {
@@ -607,20 +621,24 @@ pub fn apply_effects_on_cells(
 
             match eff.id {
                 EFFECT_DAMAGE => {
-                    let caster_str = w.entity(caster_fid).map(|e| e.strength).unwrap_or(0).max(0);
+                    let caster_str = w.entity(caster_fid).map_or(0, |e| e.strength).max(0);
                     let base = ((eff.value1 + ctx.jet * eff.value2)
-                        * (1.0 + (caster_str as f64) / 100.0)
+                        * (1.0 + f64::from(caster_str) / 100.0)
                         * critical_power(ctx)
                         * ap
-                        * (if multiplied { target_count as f64 } else { 1.0 }))
+                        * (if multiplied {
+                            f64::from(target_count)
+                        } else {
+                            1.0
+                        }))
                     .round() as i32;
                     if base <= 0 {
                         continue;
                     }
 
-                    let dmg_return_pct = w.entity(tfid).map(|e| e.damage_return).unwrap_or(0);
+                    let dmg_return_pct = w.entity(tfid).map_or(0, |e| e.damage_return);
                     let return_dmg = if tfid != caster_fid && dmg_return_pct > 0 {
-                        ((base as f64) * (dmg_return_pct as f64) / 100.0).round() as i32
+                        (f64::from(base) * f64::from(dmg_return_pct) / 100.0).round() as i32
                     } else {
                         0
                     };
@@ -630,8 +648,8 @@ pub fn apply_effects_on_cells(
                     effect_total_value += done;
 
                     if done > 0 && tfid != caster_fid && !has_state(w, caster_fid, 2) {
-                        let wis = w.entity(caster_fid).map(|e| e.wisdom).unwrap_or(0);
-                        let mut steal = ((done as f64) * (wis as f64) / 1000.0).round() as i32;
+                        let wis = w.entity(caster_fid).map_or(0, |e| e.wisdom);
+                        let mut steal = (f64::from(done) * f64::from(wis) / 1000.0).round() as i32;
                         if steal > 0 {
                             if let Some(caster_ent) = w.entity_mut(caster_fid) {
                                 if !caster_ent.dead && caster_ent.life < caster_ent.total_life {
@@ -659,12 +677,16 @@ pub fn apply_effects_on_cells(
                     if has_state(w, tfid, 2) {
                         continue;
                     }
-                    let caster_wis = w.entity(caster_fid).map(|e| e.wisdom).unwrap_or(0);
+                    let caster_wis = w.entity(caster_fid).map_or(0, |e| e.wisdom);
                     let per = ((eff.value1 + ctx.jet * eff.value2)
-                        * (1.0 + (caster_wis as f64) / 100.0)
+                        * (1.0 + f64::from(caster_wis) / 100.0)
                         * critical_power(ctx)
                         * ap
-                        * (if multiplied { target_count as f64 } else { 1.0 }))
+                        * (if multiplied {
+                            f64::from(target_count)
+                        } else {
+                            1.0
+                        }))
                     .round() as i32;
                     if per <= 0 {
                         continue;
@@ -753,7 +775,7 @@ pub fn apply_effects_on_cells(
                     }
                 }
                 EFFECT_RELATIVE_SHIELD => {
-                    let caster_res = w.entity(caster_fid).map(|e| e.resistance).unwrap_or(0);
+                    let caster_res = w.entity(caster_fid).map_or(0, |e| e.resistance);
                     let add = ((eff.value1 + eff.value2 * ctx.jet)
                         * caster_mult(caster_res)
                         * critical_power(ctx)
@@ -762,24 +784,26 @@ pub fn apply_effects_on_cells(
                     if add > 0 {
                         apply_reversible_stat_effect(
                             w,
-                            caster_fid,
-                            tfid,
-                            eff.turns,
-                            11,
-                            add,
-                            EFFECT_RELATIVE_SHIELD,
-                            eff.modifiers,
-                            propagate,
-                            propagate_modifiers,
-                            eff.value1,
-                            eff.value2,
-                            ctx,
+                            ReversibleStatEffectArgs {
+                                caster_fid,
+                                target_fid: tfid,
+                                turns: eff.turns,
+                                key: 11,
+                                delta: add,
+                                effect_id: EFFECT_RELATIVE_SHIELD,
+                                modifiers: eff.modifiers,
+                                propagate,
+                                propagate_modifiers,
+                                value1: eff.value1,
+                                value2: eff.value2,
+                                ctx,
+                            },
                         );
                         effect_total_value += add;
                     }
                 }
                 EFFECT_ABSOLUTE_SHIELD => {
-                    let caster_res = w.entity(caster_fid).map(|e| e.resistance).unwrap_or(0);
+                    let caster_res = w.entity(caster_fid).map_or(0, |e| e.resistance);
                     let add = ((eff.value1 + eff.value2 * ctx.jet)
                         * caster_mult(caster_res)
                         * critical_power(ctx)
@@ -788,18 +812,20 @@ pub fn apply_effects_on_cells(
                     if add > 0 {
                         apply_reversible_stat_effect(
                             w,
-                            caster_fid,
-                            tfid,
-                            eff.turns,
-                            10,
-                            add,
-                            EFFECT_ABSOLUTE_SHIELD,
-                            eff.modifiers,
-                            propagate,
-                            propagate_modifiers,
-                            eff.value1,
-                            eff.value2,
-                            ctx,
+                            ReversibleStatEffectArgs {
+                                caster_fid,
+                                target_fid: tfid,
+                                turns: eff.turns,
+                                key: 10,
+                                delta: add,
+                                effect_id: EFFECT_ABSOLUTE_SHIELD,
+                                modifiers: eff.modifiers,
+                                propagate,
+                                propagate_modifiers,
+                                value1: eff.value1,
+                                value2: eff.value2,
+                                ctx,
+                            },
                         );
                         effect_total_value += add;
                     }
@@ -809,9 +835,9 @@ pub fn apply_effects_on_cells(
                     if turns == 0 {
                         continue;
                     }
-                    let mag = w.entity(caster_fid).map(|e| e.magic).unwrap_or(0).max(0);
+                    let mag = w.entity(caster_fid).map_or(0, |e| e.magic).max(0);
                     let per_turn = ((eff.value1 + eff.value2 * ctx.jet)
-                        * (1.0 + mag as f64 / 100.0)
+                        * (1.0 + f64::from(mag) / 100.0)
                         * ap
                         * critical_power(ctx))
                     .round() as i32;
@@ -870,9 +896,9 @@ pub fn apply_effects_on_cells(
                     effect_total_value += per_turn;
                 }
                 EFFECT_VITALITY => {
-                    let caster_wis = w.entity(caster_fid).map(|e| e.wisdom).unwrap_or(0);
+                    let caster_wis = w.entity(caster_fid).map_or(0, |e| e.wisdom);
                     let add = ((eff.value1 + eff.value2 * ctx.jet)
-                        * (1.0 + caster_wis as f64 / 100.0)
+                        * (1.0 + f64::from(caster_wis) / 100.0)
                         * ap
                         * critical_power(ctx))
                     .round()
@@ -891,27 +917,29 @@ pub fn apply_effects_on_cells(
                     }
                 }
                 EFFECT_DAMAGE_RETURN => {
-                    let agi = w.entity(caster_fid).map(|e| e.agility).unwrap_or(0);
+                    let agi = w.entity(caster_fid).map_or(0, |e| e.agility);
                     let add = ((eff.value1 + eff.value2 * ctx.jet)
-                        * (1.0 + agi as f64 / 100.0)
+                        * (1.0 + f64::from(agi) / 100.0)
                         * ap
                         * critical_power(ctx))
                     .round() as i32;
                     if add > 0 {
                         apply_reversible_stat_effect(
                             w,
-                            caster_fid,
-                            tfid,
-                            eff.turns,
-                            9,
-                            add,
-                            EFFECT_DAMAGE_RETURN,
-                            eff.modifiers,
-                            propagate,
-                            propagate_modifiers,
-                            eff.value1,
-                            eff.value2,
-                            ctx,
+                            ReversibleStatEffectArgs {
+                                caster_fid,
+                                target_fid: tfid,
+                                turns: eff.turns,
+                                key: 9,
+                                delta: add,
+                                effect_id: EFFECT_DAMAGE_RETURN,
+                                modifiers: eff.modifiers,
+                                propagate,
+                                propagate_modifiers,
+                                value1: eff.value1,
+                                value2: eff.value2,
+                                ctx,
+                            },
                         );
                         effect_total_value += add;
                     }
@@ -920,10 +948,14 @@ pub fn apply_effects_on_cells(
                     let v = ((eff.value1 + eff.value2 * ctx.jet)
                         * ap
                         * critical_power(ctx)
-                        * (if multiplied { target_count as f64 } else { 1.0 }))
+                        * (if multiplied {
+                            f64::from(target_count)
+                        } else {
+                            1.0
+                        }))
                     .round() as i32;
                     if v > 0 {
-                        w.reduce_effects(tfid, (v as f64) / 100.0);
+                        w.reduce_effects(tfid, f64::from(v) / 100.0);
                         w.log_action(json!([ACTION_REDUCE_EFFECTS, tfid, v]));
                         effect_total_value += v;
                     }
@@ -932,10 +964,14 @@ pub fn apply_effects_on_cells(
                     let v = ((eff.value1 + eff.value2 * ctx.jet)
                         * ap
                         * critical_power(ctx)
-                        * (if multiplied { target_count as f64 } else { 1.0 }))
+                        * (if multiplied {
+                            f64::from(target_count)
+                        } else {
+                            1.0
+                        }))
                     .round() as i32;
                     if v > 0 {
-                        w.reduce_effects_total(tfid, (v as f64) / 100.0);
+                        w.reduce_effects_total(tfid, f64::from(v) / 100.0);
                         w.log_action(json!([ACTION_REDUCE_EFFECTS, tfid, v]));
                         effect_total_value += v;
                     }
@@ -952,8 +988,8 @@ pub fn apply_effects_on_cells(
                     if has_state(w, tfid, 3) {
                         continue;
                     }
-                    let life = w.entity(tfid).map(|e| e.life).unwrap_or(0);
-                    if life <= 0 || !w.entity(tfid).is_some_and(|e| !e.dead) {
+                    let life = w.entity(tfid).map_or(0, |e| e.life);
+                    if life <= 0 || w.entity(tfid).is_none_or(|e| e.dead) {
                         continue;
                     }
                     // Match official generator `ActionKill` JSON (both ids are the target due to a generator bug).
@@ -963,9 +999,9 @@ pub fn apply_effects_on_cells(
                     effect_total_value += done;
                 }
                 EFFECT_AFTEREFFECT => {
-                    let sci = w.entity(caster_fid).map(|e| e.science).unwrap_or(0);
+                    let sci = w.entity(caster_fid).map_or(0, |e| e.science);
                     let mut dmg = ((eff.value1 + eff.value2 * ctx.jet)
-                        * (1.0 + sci as f64 / 100.0)
+                        * (1.0 + f64::from(sci) / 100.0)
                         * ap
                         * critical_power(ctx))
                     .round() as i32;
@@ -1033,7 +1069,7 @@ pub fn apply_effects_on_cells(
                 }
                 EFFECT_ADD_STATE => {
                     let sid = eff.value1 as i32;
-                    if sid < 0 || !w.entity(tfid).is_some_and(|e| !e.dead) {
+                    if sid < 0 || w.entity(tfid).is_none_or(|e| e.dead) {
                         continue;
                     }
                     if eff.turns == 0 {
@@ -1093,9 +1129,9 @@ pub fn apply_effects_on_cells(
                 | EFFECT_BUFF_RESISTANCE
                 | EFFECT_BUFF_MP
                 | EFFECT_BUFF_TP => {
-                    let sci = w.entity(caster_fid).map(|e| e.science).unwrap_or(0);
+                    let sci = w.entity(caster_fid).map_or(0, |e| e.science);
                     let add = ((eff.value1 + eff.value2 * ctx.jet)
-                        * (1.0 + sci as f64 / 100.0)
+                        * (1.0 + f64::from(sci) / 100.0)
                         * ap
                         * critical_power(ctx))
                     .round() as i32;
@@ -1111,18 +1147,20 @@ pub fn apply_effects_on_cells(
                     if add > 0 {
                         apply_reversible_stat_effect(
                             w,
-                            caster_fid,
-                            tfid,
-                            eff.turns,
-                            key,
-                            add,
-                            eff.id,
-                            eff.modifiers,
-                            propagate,
-                            propagate_modifiers,
-                            eff.value1,
-                            eff.value2,
-                            ctx,
+                            ReversibleStatEffectArgs {
+                                caster_fid,
+                                target_fid: tfid,
+                                turns: eff.turns,
+                                key,
+                                delta: add,
+                                effect_id: eff.id,
+                                modifiers: eff.modifiers,
+                                propagate,
+                                propagate_modifiers,
+                                value1: eff.value1,
+                                value2: eff.value2,
+                                ctx,
+                            },
                         );
                         effect_total_value += add;
                     }
@@ -1133,9 +1171,9 @@ pub fn apply_effects_on_cells(
                 | EFFECT_SHACKLE_WISDOM
                 | EFFECT_SHACKLE_MP
                 | EFFECT_SHACKLE_TP => {
-                    let mag = w.entity(caster_fid).map(|e| e.magic).unwrap_or(0).max(0);
+                    let mag = w.entity(caster_fid).map_or(0, |e| e.magic).max(0);
                     let sub = ((eff.value1 + eff.value2 * ctx.jet)
-                        * (1.0 + mag as f64 / 100.0)
+                        * (1.0 + f64::from(mag) / 100.0)
                         * ap
                         * critical_power(ctx))
                     .round() as i32;
@@ -1151,18 +1189,20 @@ pub fn apply_effects_on_cells(
                     if sub > 0 {
                         apply_reversible_stat_effect(
                             w,
-                            caster_fid,
-                            tfid,
-                            eff.turns,
-                            key,
-                            -sub,
-                            eff.id,
-                            eff.modifiers,
-                            propagate,
-                            propagate_modifiers,
-                            eff.value1,
-                            eff.value2,
-                            ctx,
+                            ReversibleStatEffectArgs {
+                                caster_fid,
+                                target_fid: tfid,
+                                turns: eff.turns,
+                                key,
+                                delta: -sub,
+                                effect_id: eff.id,
+                                modifiers: eff.modifiers,
+                                propagate,
+                                propagate_modifiers,
+                                value1: eff.value1,
+                                value2: eff.value2,
+                                ctx,
+                            },
                         );
                         effect_total_value += sub;
                     }
@@ -1209,7 +1249,11 @@ pub fn apply_effects_on_cells(
                     let mut heal = ((eff.value1 + eff.value2 * ctx.jet)
                         * ap
                         * critical_power(ctx)
-                        * (if multiplied { target_count as f64 } else { 1.0 }))
+                        * (if multiplied {
+                            f64::from(target_count)
+                        } else {
+                            1.0
+                        }))
                     .round() as i32;
                     if heal <= 0 {
                         continue;
@@ -1256,10 +1300,7 @@ pub fn apply_start_turn_effects(w: &mut FightWorld, fid: i32) {
             apply_damage_with_shields(w, eff.caster_fid, fid, dmg, ACTION_POISON_DAMAGE);
         }
         if eff.id == EFFECT_AFTEREFFECT {
-            let dmg = eff
-                .value
-                .min(w.entity(fid).map(|e| e.life).unwrap_or(0))
-                .max(0);
+            let dmg = eff.value.min(w.entity(fid).map_or(0, |e| e.life)).max(0);
             apply_damage_with_shields(w, eff.caster_fid, fid, dmg, ACTION_AFTEREFFECT);
         }
         if eff.id == EFFECT_HEAL {

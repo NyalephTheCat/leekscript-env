@@ -48,6 +48,7 @@ pub const STAT_FIELDS: &[&str] = &[
 ];
 
 /// `winner` in outcome JSON is the winning **team index** (same convention as the Rust engine).
+#[must_use]
 pub fn fitness_team_win(metrics: &RunMetrics, my_team_index: i64) -> f64 {
     if metrics.error.is_some() {
         return f64::NEG_INFINITY;
@@ -60,7 +61,12 @@ pub fn fitness_team_win(metrics: &RunMetrics, my_team_index: i64) -> f64 {
 }
 
 /// Same as [`fitness_team_win`], with a small bonus for shorter fights when you win (tie-break only).
-pub fn fitness_team_win_fast(metrics: &RunMetrics, my_team_index: i64, duration_weight: f64) -> f64 {
+#[must_use]
+pub fn fitness_team_win_fast(
+    metrics: &RunMetrics,
+    my_team_index: i64,
+    duration_weight: f64,
+) -> f64 {
     let base = fitness_team_win(metrics, my_team_index);
     if base < 1.0 {
         return base;
@@ -69,11 +75,11 @@ pub fn fitness_team_win_fast(metrics: &RunMetrics, my_team_index: i64, duration_
     base + duration_weight / d
 }
 
-fn entity_value_mut<'a>(
-    scenario: &'a mut Value,
+fn entity_value_mut(
+    scenario: &mut Value,
     team: usize,
     slot: usize,
-) -> Result<&'a mut Value, GenError> {
+) -> Result<&mut Value, GenError> {
     let teams = scenario
         .get_mut("entities")
         .and_then(|e| e.as_array_mut())
@@ -101,7 +107,7 @@ pub fn add_entity_stat(
         .ok_or_else(|| GenError::Message("entity must be an object".into()))?;
     let cur = obj
         .get(field)
-        .and_then(|x| x.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(0);
     let next = (cur + delta).max(min_value);
     obj.insert(field.to_string(), json!(next));
@@ -172,14 +178,7 @@ where
             };
             for sign in [-1_i64, 1_i64] {
                 let mut trial = best.clone();
-                add_entity_stat(
-                    &mut trial,
-                    team,
-                    slot,
-                    field,
-                    sign * cfg.step,
-                    min_v,
-                )?;
+                add_entity_stat(&mut trial, team, slot, field, sign * cfg.step, min_v)?;
                 let score = eval(trial.clone())?;
                 if score > best_score + 1e-9 {
                     best_score = score;
@@ -264,6 +263,7 @@ where
 }
 
 /// Serialize best scenario + score for NDJSON logging from an external driver.
+#[must_use]
 pub fn best_to_record(best: &Value, score: f64, label: &str) -> Value {
     json!({
         "optimizer_record": label,
@@ -273,6 +273,7 @@ pub fn best_to_record(best: &Value, score: f64, label: &str) -> Value {
 }
 
 /// Histogram of win/loss from repeated noisy evaluations (Monte Carlo estimate of P(win)).
+#[must_use]
 pub fn win_rate_summary(scores: &[f64], win_threshold: f64) -> HashMap<&'static str, f64> {
     let n = scores.len().max(1) as f64;
     let wins = scores.iter().filter(|&&s| s >= win_threshold).count() as f64;

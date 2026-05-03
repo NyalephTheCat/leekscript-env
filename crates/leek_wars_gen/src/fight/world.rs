@@ -232,7 +232,13 @@ impl FightWorld {
     /// Official generator: `State.MAX_TURNS` (`Chip.getCooldown() == -1` → `MAX_TURNS + 2` turns).
     pub const JAVA_MAX_TURNS: i32 = 64;
 
-    pub fn trace_event(&mut self, turn: i32, fid: i32, kind: &str, detail: Option<serde_json::Value>) {
+    pub fn trace_event(
+        &mut self,
+        turn: i32,
+        fid: i32,
+        kind: &str,
+        detail: Option<serde_json::Value>,
+    ) {
         let Some(sink) = self.trace.as_mut() else {
             return;
         };
@@ -339,10 +345,10 @@ impl FightWorld {
                 } else {
                     (team_idx as i32) + 1
                 };
-                let (farmer_name, farmer_country) = farmer_by_id
-                    .get(&e.farmer)
-                    .map(|(n, c)| ((*n).to_string(), (*c).to_string()))
-                    .unwrap_or_else(|| ("".into(), "?".into()));
+                let (farmer_name, farmer_country) = farmer_by_id.get(&e.farmer).map_or_else(
+                    || (String::new(), "?".into()),
+                    |(n, c)| ((*n).to_string(), (*c).to_string()),
+                );
                 let team_name = team_name_by_id
                     .get(&team_id)
                     .map(|s| (*s).to_string())
@@ -418,62 +424,73 @@ impl FightWorld {
         }
 
         let team_cd_count = team_fids.len();
-        let seed = sc.random_seed.unwrap_or(1) as i64;
+        let seed = i64::from(sc.random_seed.unwrap_or(1));
         let (map_w, map_h) = sc.engine_map_size_java_main();
         let obstacles = sc.map_obstacles();
         let map_type = sc.map_type();
         let fight_id = sc
             .extra
             .get("fight_id")
-            .and_then(|v| v.as_i64())
-            .or_else(|| sc.extra.get("fightId").and_then(|v| v.as_i64()))
+            .and_then(serde_json::Value::as_i64)
+            .or_else(|| sc.extra.get("fightId").and_then(serde_json::Value::as_i64))
             .or_else(|| {
                 sc.extra
                     .get("fight")
                     .and_then(|v| v.get("id"))
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
             })
             .unwrap_or(0) as i32;
         let fight_type = sc
             .extra
             .get("fight_type")
-            .and_then(|v| v.as_i64())
-            .or_else(|| sc.extra.get("fightType").and_then(|v| v.as_i64()))
+            .and_then(serde_json::Value::as_i64)
+            .or_else(|| {
+                sc.extra
+                    .get("fightType")
+                    .and_then(serde_json::Value::as_i64)
+            })
             .or_else(|| {
                 sc.extra
                     .get("fight")
                     .and_then(|v| v.get("type"))
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
             })
             .unwrap_or(0) as i32;
         let fight_context = sc
             .extra
             .get("fight_context")
-            .and_then(|v| v.as_i64())
-            .or_else(|| sc.extra.get("fightContext").and_then(|v| v.as_i64()))
+            .and_then(serde_json::Value::as_i64)
+            .or_else(|| {
+                sc.extra
+                    .get("fightContext")
+                    .and_then(serde_json::Value::as_i64)
+            })
             .or_else(|| {
                 sc.extra
                     .get("fight")
                     .and_then(|v| v.get("context"))
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
             })
             .unwrap_or(0) as i32;
         let fight_boss = sc
             .extra
             .get("fight_boss")
-            .and_then(|v| v.as_i64())
-            .or_else(|| sc.extra.get("fightBoss").and_then(|v| v.as_i64()))
+            .and_then(serde_json::Value::as_i64)
+            .or_else(|| {
+                sc.extra
+                    .get("fightBoss")
+                    .and_then(serde_json::Value::as_i64)
+            })
             .or_else(|| {
                 sc.extra
                     .get("fight")
                     .and_then(|v| v.get("boss"))
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
             })
             .unwrap_or(0) as i32;
         let fight_start_unix_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs() as i64);
         let max_operations_per_entity = sc
             .extra
             .get("max_operations_per_entity")
@@ -485,9 +502,7 @@ impl FightWorld {
 
         let mut farmer_ai_logs: HashMap<i32, FarmerAiLog> = HashMap::new();
         for e in &entities {
-            farmer_ai_logs
-                .entry(e.log_bucket_owner)
-                .or_insert_with(FarmerAiLog::default);
+            farmer_ai_logs.entry(e.log_bucket_owner).or_default();
         }
 
         Self {
@@ -528,6 +543,7 @@ impl FightWorld {
     }
 
     /// Official generator: `Outcome.logs` object (`ai_owner` string keys → `FarmerLog.toJSON()`).
+    #[must_use]
     pub fn outcome_logs_json(&self) -> serde_json::Value {
         let mut owners: Vec<i32> = self.farmer_ai_logs.keys().copied().collect();
         owners.sort_unstable();
@@ -574,9 +590,10 @@ impl FightWorld {
     }
 
     /// Official generator: `Entity.hasCooldown` / `Team.hasCooldown` depending on `team_cooldown`.
+    #[must_use]
     pub fn chip_on_cooldown(&self, caster_fid: i32, cs: &ChipStats) -> bool {
         if cs.team_cooldown {
-            let team = self.entity(caster_fid).map(|e| e.team).unwrap_or(-1);
+            let team = self.entity(caster_fid).map_or(-1, |e| e.team);
             if team < 0 {
                 return false;
             }
@@ -600,7 +617,7 @@ impl FightWorld {
             cs.cooldown
         };
         if cs.team_cooldown {
-            let team = self.entity(caster_fid).map(|e| e.team).unwrap_or(0).max(0) as usize;
+            let team = self.entity(caster_fid).map_or(0, |e| e.team).max(0) as usize;
             if self.team_chip_cooldowns.len() <= team {
                 self.team_chip_cooldowns.resize_with(team + 1, HashMap::new);
             }
@@ -638,7 +655,7 @@ impl FightWorld {
         self.actions.push(action);
     }
 
-    /// Official generator: `FarmerLog.addLog` (AILog types1/2/3 + optional color for `debugC` + optional `[fileId, line]`).
+    /// Official generator: `FarmerLog.addLog` (`AILog` types1/2/3 + optional color for `debugC` + optional `[fileId, line]`).
     pub fn push_ai_debug_log(
         &mut self,
         log_owner: i32,
@@ -651,9 +668,7 @@ impl FightWorld {
         if message.is_empty() {
             return;
         }
-        self.farmer_ai_logs
-            .entry(log_owner)
-            .or_insert_with(FarmerAiLog::default);
+        self.farmer_ai_logs.entry(log_owner).or_default();
         let n = self.actions.len();
         let mut row = vec![json!(fid), json!(log_type), json!(message)];
         let java_color = color.unwrap_or(-1);
@@ -680,9 +695,7 @@ impl FightWorld {
         key: i32,
         parameters: Option<&[String]>,
     ) {
-        self.farmer_ai_logs
-            .entry(log_owner)
-            .or_insert_with(FarmerAiLog::default);
+        self.farmer_ai_logs.entry(log_owner).or_default();
         let n = self.actions.len();
         let mut row = vec![json!(fid), json!(log_type), json!(trace), json!(key)];
         if let Some(ps) = parameters {
@@ -698,11 +711,8 @@ impl FightWorld {
     pub fn add_summon_after(&mut self, owner_fid: i32, mut ent: SimEntity) -> i32 {
         let fid = self.entities.len() as i32;
         ent.fid = fid;
-        ent.team = self.entity(owner_fid).map(|e| e.team).unwrap_or(ent.team);
-        ent.team_id = self
-            .entity(owner_fid)
-            .map(|e| e.team_id)
-            .unwrap_or(ent.team_id);
+        ent.team = self.entity(owner_fid).map_or(ent.team, |e| e.team);
+        ent.team_id = self.entity(owner_fid).map_or(ent.team_id, |e| e.team_id);
         ent.is_summon = true;
         ent.summoner_fid = Some(owner_fid);
 
@@ -725,6 +735,7 @@ impl FightWorld {
     pub const SUMMON_LIMIT: i32 = 8;
 
     /// Living summons on a team (`Entity.isSummon` / same `team` index).
+    #[must_use]
     pub fn team_summon_count(&self, team: i32) -> i32 {
         self.entities
             .iter()
@@ -733,6 +744,7 @@ impl FightWorld {
     }
 
     /// Official generator: `Cell.available`: walkable, no living entity.
+    #[must_use]
     pub fn cell_available_for_summon(&self, cell: i32) -> bool {
         map::is_valid_cell(self.map_w, self.map_h, cell)
             && !self.is_obstacle_cell(cell)
@@ -741,9 +753,9 @@ impl FightWorld {
 
     /// Official generator: `BulbTemplate.base` scaling (`createInvocation`).
     fn bulb_invocation_stat(min_v: i32, max_v: i32, owner_level: i32, critical: bool) -> i32 {
-        let c = (owner_level.min(300) as f64) / 300.0;
+        let c = f64::from(owner_level.min(300)) / 300.0;
         let mult = if critical { 1.2 } else { 1.0 };
-        ((min_v as f64 + ((max_v - min_v) as f64 * c).floor()) * mult).round() as i32
+        ((f64::from(min_v) + (f64::from(max_v - min_v) * c).floor()) * mult).round() as i32
     }
 
     /// Spawn a bulb on `cell` after validations. Returns new `fid`, or `None` if owner dead / cell blocked / unknown template.
@@ -827,7 +839,7 @@ impl FightWorld {
             components: Vec::new(),
             equipped_weapon: None,
             ai_path: String::new(),
-            ai_id: self.entity(owner_fid).map(|o| o.ai_id).unwrap_or(0),
+            ai_id: self.entity(owner_fid).map_or(0, |o| o.ai_id),
             ai_name: self
                 .entity(owner_fid)
                 .map(|o| o.ai_name.clone())
@@ -837,19 +849,15 @@ impl FightWorld {
             birth_turn: self.active_turn,
             cores: 0,
             ram: 0,
-            farmer_id: self.entity(owner_fid).map(|o| o.farmer_id).unwrap_or(0),
+            farmer_id: self.entity(owner_fid).map_or(0, |o| o.farmer_id),
             farmer_name: self
                 .entity(owner_fid)
                 .map(|o| o.farmer_name.clone())
                 .unwrap_or_default(),
             farmer_country: self
                 .entity(owner_fid)
-                .map(|o| o.farmer_country.clone())
-                .unwrap_or_else(|| "?".into()),
-            log_bucket_owner: self
-                .entity(owner_fid)
-                .map(|o| o.log_bucket_owner)
-                .unwrap_or(0),
+                .map_or_else(|| "?".into(), |o| o.farmer_country.clone()),
+            log_bucket_owner: self.entity(owner_fid).map_or(0, |o| o.log_bucket_owner),
             team_name: self
                 .entity(owner_fid)
                 .map(|o| o.team_name.clone())
@@ -969,7 +977,7 @@ impl FightWorld {
                     continue;
                 }
                 let old = e.effects[i].value;
-                let newv = ((old as f64) * (1.0 - p)).round() as i32;
+                let newv = (f64::from(old) * (1.0 - p)).round() as i32;
                 let delta_change = newv - old;
                 if let Some(key) = e.effects[i].stat_key {
                     apply_stat_delta(e, key, delta_change);
@@ -1009,7 +1017,7 @@ impl FightWorld {
             let p = percent.clamp(0.0, 1.0);
             for i in (0..e.effects.len()).rev() {
                 let old = e.effects[i].value;
-                let newv = ((old as f64) * (1.0 - p)).round() as i32;
+                let newv = (f64::from(old) * (1.0 - p)).round() as i32;
                 let delta_change = newv - old;
                 if let Some(key) = e.effects[i].stat_key {
                     apply_stat_delta(e, key, delta_change);
@@ -1065,13 +1073,12 @@ impl FightWorld {
                 .collect();
             for tfid in around {
                 // not-replaceable propagation: if target already has an effect from this item, skip
-                if (eff.propagate_modifiers & 8) != 0 {
-                    if self
+                if (eff.propagate_modifiers & 8) != 0
+                    && self
                         .entity(tfid)
                         .is_some_and(|t| t.effects.iter().any(|te| te.item_id == eff.item_id))
-                    {
-                        continue;
-                    }
+                {
+                    continue;
                 }
 
                 // Re-apply same effect id with original parameters (aoe=1).
@@ -1084,7 +1091,7 @@ impl FightWorld {
                     modifiers: eff.modifiers,
                     r#type: 0,
                 };
-                let cell = self.entity(tfid).map(|e| e.cell).unwrap_or(-1);
+                let cell = self.entity(tfid).map_or(-1, |e| e.cell);
                 crate::fight::apply_effects_on_cells(
                     self,
                     eff.caster_fid,
@@ -1152,6 +1159,7 @@ impl FightWorld {
         }
     }
 
+    #[must_use]
     pub fn is_obstacle_cell(&self, cell: i32) -> bool {
         self.obstacles.contains_key(&cell)
     }
@@ -1160,11 +1168,13 @@ impl FightWorld {
         self.entities.get_mut(fid as usize)
     }
 
+    #[must_use]
     pub fn entity(&self, fid: i32) -> Option<&SimEntity> {
         self.entities.get(fid as usize)
     }
 
     /// First living entity standing on `cell`, excluding `except_fid` if set (`Map.getEntity`-style).
+    #[must_use]
     pub fn living_entity_on_cell(&self, cell: i32, except_fid: Option<i32>) -> Option<i32> {
         self.entities.iter().find_map(|e| {
             if e.dead || e.cell != cell {
@@ -1177,6 +1187,7 @@ impl FightWorld {
         })
     }
 
+    #[must_use]
     pub fn alive_team_count(&self) -> usize {
         let mut alive = vec![false; self.team_fids.len()];
         for e in &self.entities {
@@ -1187,6 +1198,7 @@ impl FightWorld {
         alive.into_iter().filter(|&x| x).count()
     }
 
+    #[must_use]
     pub fn compute_winner(&self) -> i32 {
         let alive_teams = self.alive_team_count();
         if alive_teams == 1 {
@@ -1219,6 +1231,7 @@ impl FightWorld {
         }
     }
 
+    #[must_use]
     pub fn is_finished(&self) -> bool {
         self.alive_team_count() <= 1
     }
@@ -1240,7 +1253,7 @@ impl FightWorld {
             if full_life {
                 e.life = e.total_life;
             } else {
-                let new_total = ((e.total_life as f64) * 0.5 * factor).round() as i32;
+                let new_total = (f64::from(e.total_life) * 0.5 * factor).round() as i32;
                 e.total_life = new_total.max(10);
                 e.life = e.total_life / 2;
             }
@@ -1252,8 +1265,7 @@ impl FightWorld {
 
         let (life, max_life) = self
             .entity(target_fid)
-            .map(|e| (e.life, e.total_life))
-            .unwrap_or((0, 0));
+            .map_or((0, 0), |e| (e.life, e.total_life));
         self.log_action(serde_json::json!([
             ACTION_RESURRECT,
             caster_fid,
@@ -1300,7 +1312,7 @@ impl FightWorld {
                 propagate: 0,
                 propagate_modifiers: 0,
                 base_turns: turns,
-                value1: sid as f64,
+                value1: f64::from(sid),
                 value2: 0.0,
                 critical,
                 state_id: Some(sid),

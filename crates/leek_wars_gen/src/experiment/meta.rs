@@ -26,8 +26,7 @@ pub fn load_meta_snapshot(path: &Path) -> Result<serde_json::Value, GenError> {
 pub fn write_lw_meta_snapshot(path: &Path, url_label: &str, body: &Value) -> Result<(), GenError> {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let doc = serde_json::json!({
         "fetched_at": ts,
         "url": url_label,
@@ -42,8 +41,7 @@ pub fn write_meta_snapshot(path: &Path, url: &str) -> Result<(), GenError> {
     let body = fetch_json(url)?;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_secs());
     let doc = serde_json::json!({
         "fetched_at": ts,
         "url": url,

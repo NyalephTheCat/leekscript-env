@@ -18,6 +18,7 @@ use std::sync::OnceLock;
 /// `data/signatures/*.sig.leek` use JavaDoc-style `/* … */` blocks; strip them so the normal lexer/HIR path can run.
 ///
 /// Does not try to model string literals (signature fixtures rarely embed `/*` inside strings).
+#[must_use]
 pub fn strip_block_comments_for_sig_parse(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut it = src.chars().peekable();
@@ -25,7 +26,7 @@ pub fn strip_block_comments_for_sig_parse(src: &str) -> String {
         if c == '/' && it.peek() == Some(&'*') {
             it.next();
             let mut prev_star = false;
-            while let Some(c2) = it.next() {
+            for c2 in it.by_ref() {
                 if prev_star && c2 == '/' {
                     break;
                 }
@@ -74,6 +75,7 @@ fn re_core_fn_name() -> &'static Regex {
 }
 
 /// Line-based extraction for `core.sig.leek` (multi-line `function` headers are not valid in one parse unit yet).
+#[must_use]
 pub fn extract_core_sig_line_based(cleaned: &str) -> SigLeekUnit {
     let mut names: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -122,6 +124,7 @@ fn parse_leekwars_embedded(path: &'static str, src: &'static str) -> SigLeekUnit
 }
 
 /// Merge order: **core** first (stdlib names + integer constants), then **leekwars** (append new names; integer map overwritten by leekwars on key clash).
+#[must_use]
 pub fn merge_sig_units(core: SigLeekUnit, leekwars: SigLeekUnit) -> SigLeekUnit {
     let mut seen: HashSet<String> = HashSet::new();
     let mut names: Vec<String> = Vec::new();
@@ -148,6 +151,7 @@ pub fn merge_sig_units(core: SigLeekUnit, leekwars: SigLeekUnit) -> SigLeekUnit 
 
 /// Parsed **`core.sig.leek` + `leekwars.sig.leek`**. Core uses line extraction; leekwars uses full HIR.
 /// Panics if `leekwars.sig.leek` fails to parse.
+#[must_use]
 pub fn merged_workspace_sig_bundle() -> SigLeekUnit {
     let core = extract_core_sig_line_based(&strip_block_comments_for_sig_parse(CORE_SIG_LEEK));
     let lw = parse_leekwars_embedded("data/signatures/leekwars.sig.leek", LEEKWARS_SIG_LEEK);

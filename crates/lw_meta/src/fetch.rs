@@ -9,15 +9,17 @@ use crate::api::{fetch_ranking_page, ApiError, RankingPageParams, RetryPolicy};
 
 pub const ROWS_PER_PAGE: usize = 50;
 
+#[must_use]
 pub fn pages_needed(top: usize) -> u32 {
     top.div_ceil(ROWS_PER_PAGE) as u32
 }
 
 /// Default ureq agent (timeouts suitable for Leek Wars API).
+#[must_use]
 pub fn meta_agent() -> Agent {
     ureq::AgentBuilder::new()
-        .timeout_read(Duration::from_secs(60))
-        .timeout_write(Duration::from_secs(60))
+        .timeout_read(Duration::from_mins(1))
+        .timeout_write(Duration::from_mins(1))
         .build()
 }
 

@@ -2,6 +2,7 @@
 
 /// Grid coordinates used by `Map.getDistance2(Cell, Cell)`.
 #[inline]
+#[must_use]
 pub fn cell_xy(map_width: i32, cell_id: i32) -> (i32, i32) {
     let w = map_width;
     let x_raw = cell_id % (w * 2 - 1);
@@ -13,12 +14,14 @@ pub fn cell_xy(map_width: i32, cell_id: i32) -> (i32, i32) {
 
 /// Inverse of [`cell_xy`] (`id = w * x + (w - 1) * y`).
 #[inline]
+#[must_use]
 pub fn cell_id_from_xy(map_width: i32, x: i32, y: i32) -> i32 {
     map_width * x + (map_width - 1) * y
 }
 
 /// Squared distance between two cells (Java `Map.getDistance2`).
 #[inline]
+#[must_use]
 pub fn distance2(map_width: i32, a: i32, b: i32) -> i32 {
     let (x1, y1) = cell_xy(map_width, a);
     let (x2, y2) = cell_xy(map_width, b);
@@ -29,17 +32,20 @@ pub fn distance2(map_width: i32, a: i32, b: i32) -> i32 {
 
 /// Cell count for a rhombus map (`Map` constructor in the Java generator).
 #[inline]
+#[must_use]
 pub fn nb_cells(map_width: i32, map_height: i32) -> i32 {
     (map_width * 2 - 1) * map_height - (map_width - 1)
 }
 
 #[inline]
+#[must_use]
 pub fn is_valid_cell(map_width: i32, map_height: i32, cell_id: i32) -> bool {
     cell_id >= 0 && cell_id < nb_cells(map_width, map_height)
 }
 
 /// Manhattan distance on internal `(x, y)` (`Pathfinding.getCaseDistance`).
 #[inline]
+#[must_use]
 pub fn case_distance(map_width: i32, a: i32, b: i32) -> i32 {
     let (x1, y1) = cell_xy(map_width, a);
     let (x2, y2) = cell_xy(map_width, b);

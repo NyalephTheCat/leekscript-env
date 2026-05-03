@@ -17,20 +17,24 @@ pub struct SourceFile {
 }
 
 impl SourceFile {
+    #[must_use]
     pub fn cast(node: SyntaxNode<LeekLanguage>) -> Option<Self> {
         (node.kind() == LeekSyntaxKind::SourceFile).then(|| Self { inner: node })
     }
 
+    #[must_use]
     pub fn syntax(&self) -> &SyntaxNode<LeekLanguage> {
         &self.inner
     }
 
     /// Full source text represented by this tree (lossless for token+trivia trees).
+    #[must_use]
     pub fn text(&self) -> rowan::SyntaxText {
         self.inner.text()
     }
 
     /// Direct children: trivia and lexical tokens (until nested grammar nodes exist).
+    #[must_use]
     pub fn children_with_tokens(&self) -> rowan::SyntaxElementChildren<LeekLanguage> {
         self.inner.children_with_tokens()
     }
@@ -38,6 +42,7 @@ impl SourceFile {
     /// Split the flat `SOURCE_FILE` into typed trivia pieces and lexical [`SyntaxToken`]s.
     ///
     /// Returns `None` if the tree contains nested nodes (future grammar) or malformed structure.
+    #[must_use]
     pub fn file_segments(&self) -> Option<FileSegments> {
         if self.inner.kind() != LeekSyntaxKind::SourceFile {
             return None;

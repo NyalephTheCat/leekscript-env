@@ -14,7 +14,7 @@ fn workspace_root() -> PathBuf {
 
 #[test]
 fn run_reports_return_value() {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let path = workspace_root().join("tests/fixtures/return_sum.leek");
     let out = Command::new(exe)
         .args(["run", path.to_str().unwrap()])
@@ -34,7 +34,7 @@ fn run_reports_return_value() {
 
 #[test]
 fn run_runtime_error_exits_nonzero() {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let dir = std::env::temp_dir().join(format!("lek-run-err-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let p = dir.join("bad.leek");

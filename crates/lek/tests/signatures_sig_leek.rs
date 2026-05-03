@@ -41,7 +41,7 @@ fn check_uses_sig_leek_via_collect() {
     std::fs::write(&path, src).unwrap();
     let src = std::fs::read_to_string(&path).unwrap();
 
-    let globals = collect_signature_globals(None, &[sig_path.clone()]).unwrap();
+    let globals = collect_signature_globals(None, std::slice::from_ref(&sig_path)).unwrap();
     let bad = check_one_file(
         &reg,
         &path,

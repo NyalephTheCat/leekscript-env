@@ -193,12 +193,7 @@ fn case_distance(w: i32, a: i32, b: i32) -> i32 {
     (x1 - x2).abs() + (y1 - y2).abs()
 }
 
-fn min_dist_team(
-    world: &FightWorld,
-    team: usize,
-    cell: i32,
-    placement: &HashMap<i32, i32>,
-) -> i32 {
+fn min_dist_team(world: &FightWorld, team: usize, cell: i32, placement: &HashMap<i32, i32>) -> i32 {
     let mut min = i32::MAX;
     let Some(fids) = world.team_fids.get(team) else {
         return min;
@@ -220,18 +215,13 @@ fn min_dist_team(
 }
 
 fn team_has_placed_cell(world: &FightWorld, team: usize, placement: &HashMap<i32, i32>) -> bool {
-    world
-        .team_fids
-        .get(team)
-        .map(|fids| {
-            fids.iter().any(|&fid| {
-                world
-                    .entity(fid)
-                    .map(|e| !e.dead && placement.contains_key(&fid))
-                    .unwrap_or(false)
-            })
+    world.team_fids.get(team).is_some_and(|fids| {
+        fids.iter().any(|&fid| {
+            world
+                .entity(fid)
+                .is_some_and(|e| !e.dead && placement.contains_key(&fid))
         })
-        .unwrap_or(false)
+    })
 }
 
 fn get_random_cell(g: &mut GenMap, rng: &mut JavaCompatRng) -> Option<i32> {
@@ -418,10 +408,10 @@ fn compute_composantes(g: &mut GenMap) {
                             cur_number = connexe[x][y - 1];
                         } else if cur_number != connexe[x][y - 1] {
                             let target_number = connexe[x][y - 1];
-                            for x2 in 0..sx {
-                                for y2 in 0..=y {
-                                    if connexe[x2][y2] == target_number {
-                                        connexe[x2][y2] = cur_number;
+                            for row in connexe.iter_mut().take(sx) {
+                                for cell in row.iter_mut().take(y + 1) {
+                                    if *cell == target_number {
+                                        *cell = cur_number;
                                     }
                                 }
                             }
@@ -476,12 +466,12 @@ fn try_procedural_attempt(
                                 let ok = g.cell_available(c2)
                                     && g.cell_available(c3)
                                     && g.cell_available(c4);
-                                if !ok {
-                                    size = 1;
-                                } else {
+                                if ok {
                                     g.set_obstacle_raw(c2, 0, -1);
                                     g.set_obstacle_raw(c3, 0, -2);
                                     g.set_obstacle_raw(c4, 0, -3);
+                                } else {
+                                    size = 1;
                                 }
                             } else {
                                 size = 1;
@@ -561,14 +551,8 @@ fn generate_procedural_map(
     let mut last_p = HashMap::new();
 
     while !valid && nb < 63 {
-        let (g, p, leeks) = try_procedural_attempt(
-            world,
-            state_type,
-            obstacle_count,
-            rng,
-            width,
-            height,
-        );
+        let (g, p, leeks) =
+            try_procedural_attempt(world, state_type, obstacle_count, rng, width, height);
         last_g = g;
         last_p = p;
         valid = true;
@@ -612,10 +596,10 @@ fn bootstrap_obstacle_stored_value(v: &Value) -> Option<i32> {
         return Some(i as i32);
     }
     if let Some(arr) = v.as_array() {
-        if let Some(s) = arr.get(1).and_then(|x| x.as_i64()) {
+        if let Some(s) = arr.get(1).and_then(serde_json::Value::as_i64) {
             return Some(s as i32);
         }
-        if let Some(s) = arr.get(0).and_then(|x| x.as_i64()) {
+        if let Some(s) = arr.first().and_then(serde_json::Value::as_i64) {
             return Some(s as i32);
         }
     }
@@ -673,6 +657,7 @@ fn build_obstacle_exports(g: &GenMap) -> (BTreeMap<i32, i32>, Value) {
 }
 
 /// Same post-`State.init` snapshot as [`crate::engine::dump_java_fight_bootstrap`], without spawning `DumpStateRng`.
+#[must_use]
 pub fn compute_java_fight_bootstrap(world: &FightWorld) -> JavaFightBootstrap {
     let mut rng = JavaCompatRng::new(world.seed);
     let obstacle_count = rng.next_int_inclusive(30, 80);
@@ -735,15 +720,18 @@ mod tests {
         ));
         let sc: Scenario = serde_json::from_str(j).expect("parse");
         let weapons = crate::fight::load_weapons_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/weapons.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/weapons.json"),
         )
         .expect("weapons");
         let chips = crate::fight::load_chips_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/chips.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/chips.json"),
         )
         .expect("chips");
         let summons = crate::fight::load_summons_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/summons.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/summons.json"),
         )
         .expect("summons");
         let world = FightWorld::from_scenario(&sc, weapons, chips, summons);
@@ -770,15 +758,18 @@ mod tests {
         ));
         let sc: Scenario = serde_json::from_str(j).expect("parse");
         let weapons = crate::fight::load_weapons_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/weapons.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/weapons.json"),
         )
         .expect("weapons");
         let chips = crate::fight::load_chips_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/chips.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/chips.json"),
         )
         .expect("chips");
         let summons = crate::fight::load_summons_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/summons.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/summons.json"),
         )
         .expect("summons");
         let world = FightWorld::from_scenario(&sc, weapons, chips, summons);
@@ -797,22 +788,24 @@ mod tests {
         ));
         let sc: Scenario = serde_json::from_str(j).expect("parse");
         let weapons = crate::fight::load_weapons_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/weapons.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/weapons.json"),
         )
         .expect("weapons");
         let chips = crate::fight::load_chips_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/chips.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/chips.json"),
         )
         .expect("chips");
         let summons = crate::fight::load_summons_json(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../leek-wars-generator/data/summons.json"),
+            &Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../leek-wars-generator/data/summons.json"),
         )
         .expect("summons");
         let world = FightWorld::from_scenario(&sc, weapons, chips, summons);
         let boot = compute_java_fight_bootstrap(&world);
         assert_eq!(
-            boot.rng_internal_n,
-            -5_933_333_234_847_835_179_i64,
+            boot.rng_internal_n, -5_933_333_234_847_835_179_i64,
             "Rust bootstrap RNG state must match DumpStateRng from the official generator line 1"
         );
         assert_eq!(boot.initial_fids, vec![0, 3, 1, 2]);

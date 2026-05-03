@@ -36,7 +36,8 @@ pub use spec::ExperimentSpec;
 pub use trace_summarize::{summarize_trace_events, summarize_trace_file, TraceSummary};
 
 pub use bench::{
-    apply_all_ai_override, apply_team0_ai_override, apply_team1_ai_override, apply_team_ai_override,
-    build_pvp_scenario_value, farmer_inner, fetch_side_row, list_farmer_leeks, list_team_compositions,
-    print_pvp_summary, run_pvp_batch, BenchFightRecord, BenchSide, PvpBenchParams,
+    apply_all_ai_override, apply_team0_ai_override, apply_team1_ai_override,
+    apply_team_ai_override, build_pvp_scenario_value, farmer_inner, fetch_side_row,
+    list_farmer_leeks, list_team_compositions, print_pvp_summary, run_pvp_batch, BenchFightRecord,
+    BenchSide, PvpBenchParams,
 };

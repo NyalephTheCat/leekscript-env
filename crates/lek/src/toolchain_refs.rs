@@ -4,6 +4,7 @@
 use leekscript_diagnostics::Registry;
 
 /// All Java-style `reference` ids the current `lek check` / `lek run` can emit (compile + run).
+#[must_use]
 pub fn all_emitted_references() -> Vec<&'static str> {
     leekscript_hir::refs::EMITTED_REFERENCES
         .iter()

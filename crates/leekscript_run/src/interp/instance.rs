@@ -337,14 +337,20 @@ pub(super) fn enforce_instance_field_visibility(
     match vis {
         HirFieldVisibility::Public => Ok(()),
         HirFieldVisibility::Private => {
-            let enc = cx.enclosing_class_stack.last().map(|s| s.as_str());
+            let enc = cx
+                .enclosing_class_stack
+                .last()
+                .map(std::string::String::as_str);
             if enc != Some(decl.as_str()) {
                 return Err(InterpretError::private_field());
             }
             Ok(())
         }
         HirFieldVisibility::Protected => {
-            let enc = cx.enclosing_class_stack.last().map(|s| s.as_str());
+            let enc = cx
+                .enclosing_class_stack
+                .last()
+                .map(std::string::String::as_str);
             if enc == Some(decl.as_str()) {
                 return Ok(());
             }
@@ -363,7 +369,10 @@ pub(super) fn enforce_instance_field_visibility(
 }
 
 fn static_field_visible_for_read(cx: &InterpCx, decl_class: &str, vis: HirFieldVisibility) -> bool {
-    let enc = cx.enclosing_class_stack.last().map(|s| s.as_str());
+    let enc = cx
+        .enclosing_class_stack
+        .last()
+        .map(std::string::String::as_str);
     match vis {
         HirFieldVisibility::Public => true,
         HirFieldVisibility::Private => enc == Some(decl_class),
@@ -456,8 +465,7 @@ pub(super) fn read_visible_class_static_field(
     let decl = def
         .static_field_decl_class
         .get(field)
-        .map(|s| s.as_str())
-        .unwrap_or(owner.as_str());
+        .map_or(owner.as_str(), std::string::String::as_str);
     let vis = def
         .static_field_visibility
         .get(field)
@@ -512,14 +520,20 @@ pub(super) fn enforce_static_field_visibility(
     match vis {
         HirFieldVisibility::Public => Ok(()),
         HirFieldVisibility::Private => {
-            let enc = cx.enclosing_class_stack.last().map(|s| s.as_str());
+            let enc = cx
+                .enclosing_class_stack
+                .last()
+                .map(std::string::String::as_str);
             if enc != Some(decl.as_str()) {
                 return Err(InterpretError::private_field());
             }
             Ok(())
         }
         HirFieldVisibility::Protected => {
-            let enc = cx.enclosing_class_stack.last().map(|s| s.as_str());
+            let enc = cx
+                .enclosing_class_stack
+                .last()
+                .map(std::string::String::as_str);
             if enc == Some(decl.as_str()) {
                 return Ok(());
             }

@@ -66,13 +66,7 @@ fn json_as_f64(v: &serde_json::Value) -> f64 {
     match v {
         serde_json::Value::Number(n) => n.as_f64().unwrap_or(0.0),
         serde_json::Value::String(s) => s.parse::<f64>().unwrap_or(0.0),
-        serde_json::Value::Bool(b) => {
-            if *b {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        serde_json::Value::Bool(b) if *b => 1.0,
         _ => 0.0,
     }
 }
@@ -81,10 +75,7 @@ fn json_as_bool(v: &serde_json::Value) -> bool {
     match v {
         serde_json::Value::Bool(b) => *b,
         serde_json::Value::Number(n) => n.as_i64().unwrap_or(0) != 0,
-        serde_json::Value::String(s) => match s.as_str() {
-            "true" | "True" | "1" => true,
-            _ => false,
-        },
+        serde_json::Value::String(s) => matches!(s.as_str(), "true" | "True" | "1"),
         _ => false,
     }
 }

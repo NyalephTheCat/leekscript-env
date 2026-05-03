@@ -18,9 +18,10 @@ impl RunMetrics {
         Ok(Self::from_outcome_value(&v))
     }
 
+    #[must_use]
     pub fn from_outcome_value(v: &serde_json::Value) -> Self {
-        let winner = v.get("winner").and_then(|x| x.as_i64());
-        let duration = v.get("duration").and_then(|x| x.as_i64());
+        let winner = v.get("winner").and_then(serde_json::Value::as_i64);
+        let duration = v.get("duration").and_then(serde_json::Value::as_i64);
         Self {
             winner,
             duration,
@@ -28,6 +29,7 @@ impl RunMetrics {
         }
     }
 
+    #[must_use]
     pub fn with_error(e: String) -> Self {
         Self {
             winner: None,
@@ -36,4 +38,3 @@ impl RunMetrics {
         }
     }
 }
-

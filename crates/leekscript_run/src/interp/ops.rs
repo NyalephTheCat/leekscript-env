@@ -119,7 +119,11 @@ pub(super) fn eval_binary(
     right: Value,
     language_version: u8,
 ) -> Result<Value, InterpretError> {
-    use HirBinOp::*;
+    use HirBinOp::{
+        Add, BitAnd, BitOr, BitXor, Div, Eq, Ge, Gt, In, Instanceof, IntDiv, Le, LogicalAnd,
+        LogicalOr, Lt, Mul, Ne, NotIn, NullishCoalesce, Pow, Rem, Shl, Shr, StrictEq, StrictNe,
+        Sub, UShr,
+    };
     match op {
         Add | Sub | Mul | Div | Rem => eval_arithmetic(op, left, right, language_version),
         Pow => eval_pow(left, right, language_version),
@@ -149,7 +153,7 @@ fn bitwise_operand_i64(v: &Value) -> Result<i64, InterpretError> {
 }
 
 fn eval_bitwise_int(op: HirBinOp, left: Value, right: Value) -> Result<Value, InterpretError> {
-    use HirBinOp::*;
+    use HirBinOp::{BitAnd, BitOr, BitXor};
     let a = bitwise_operand_i64(&left)?;
     let b = bitwise_operand_i64(&right)?;
     let o = match op {
@@ -162,7 +166,7 @@ fn eval_bitwise_int(op: HirBinOp, left: Value, right: Value) -> Result<Value, In
 }
 
 fn eval_shift(op: HirBinOp, left: Value, right: Value) -> Result<Value, InterpretError> {
-    use HirBinOp::*;
+    use HirBinOp::{Shl, Shr, UShr};
     let a = bitwise_operand_i64(&left)?;
     let b = (bitwise_operand_i64(&right)? as u32) & 0x3f;
     let o = match op {
@@ -175,7 +179,7 @@ fn eval_shift(op: HirBinOp, left: Value, right: Value) -> Result<Value, Interpre
 }
 
 pub(super) fn eval_bitxor(left: Value, right: Value) -> Result<Value, InterpretError> {
-    use Value::*;
+    use Value::Bool;
     match (&left, &right) {
         (Bool(a), Bool(b)) => Ok(Bool(a ^ b)),
         _ => eval_bitwise_int(HirBinOp::BitXor, left, right),
@@ -193,7 +197,7 @@ pub(super) fn eval_add(
     right: Value,
     language_version: u8,
 ) -> Result<Value, InterpretError> {
-    use Value::*;
+    use Value::{Array, Integer, Map, Real, RealDotZero, String};
     match (&left, &right) {
         (Integer(a), Integer(b)) => Ok(Integer(a.wrapping_add(*b))),
         _ if matches!(left, String(_)) || matches!(right, String(_)) => {
@@ -244,7 +248,7 @@ pub(super) fn eval_add(
 }
 
 fn normalize_add_sub_mul_result(left: Value, right: Value, x: f64, language_version: u8) -> Value {
-    use Value::*;
+    use Value::{Integer, Real};
     let integral =
         x.is_finite() && x.fract() == 0.0 && x >= i64::MIN as f64 && x <= i64::MAX as f64;
     if language_version == 1 && integral {
@@ -264,7 +268,7 @@ fn normalize_add_sub_mul_result(left: Value, right: Value, x: f64, language_vers
 
 /// Java `pow`: `null` operands are treated like `0` (see `LeekExpression` `POWER` codegen).
 fn pow_operand_as_f64(v: &Value) -> Result<f64, InterpretError> {
-    use Value::*;
+    use Value::{Bool, Integer, Null, Real};
     match v {
         Null => Ok(0.0),
         Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
@@ -279,7 +283,7 @@ pub(super) fn eval_pow(
     right: Value,
     _language_version: u8,
 ) -> Result<Value, InterpretError> {
-    use Value::*;
+    use Value::{Integer, Real};
     let a = pow_operand_as_f64(&left)?;
     let b = pow_operand_as_f64(&right)?;
     let x = a.powf(b);
@@ -316,8 +320,8 @@ fn eval_arithmetic(
     right: Value,
     language_version: u8,
 ) -> Result<Value, InterpretError> {
-    use HirBinOp::*;
-    use Value::*;
+    use HirBinOp::{Add, Div, Mul, Rem, Sub};
+    use Value::{Integer, Null, Real, RealDotZero};
     if matches!(op, Add) {
         return eval_add(left, right, language_version);
     }
@@ -460,20 +464,18 @@ fn eq_v1_3_coerce(left: &Value, right: &Value, language_version: u8) -> bool {
     // - v1 only: `[x] == y` compares `x == y` (only when the LHS is a singleton array).
     // - v1–v3: `bool == other` performs some coercions (notably string `"true"`/`"false"`).
     match (left, right) {
-        (Value::Array(a), other) if !matches!(other, Value::Array(_)) => {
-            if language_version == 1 {
-                let ab = a.borrow();
-                if ab.len() == 1 {
-                    // Prevent degenerate self-peel `[a]` where `a` is the array itself.
-                    if let Value::Array(inner) = &ab[0] {
-                        if std::rc::Rc::ptr_eq(a, inner) {
-                            // fall through
-                        } else {
-                            return values_equal_for_compare(&ab[0], other);
-                        }
+        (Value::Array(a), other) if !matches!(other, Value::Array(_)) && language_version == 1 => {
+            let ab = a.borrow();
+            if ab.len() == 1 {
+                // Prevent degenerate self-peel `[a]` where `a` is the array itself.
+                if let Value::Array(inner) = &ab[0] {
+                    if std::rc::Rc::ptr_eq(a, inner) {
+                        // fall through
                     } else {
                         return values_equal_for_compare(&ab[0], other);
                     }
+                } else {
+                    return values_equal_for_compare(&ab[0], other);
                 }
             }
         }
@@ -562,7 +564,7 @@ fn eq_v1_3_coerce(left: &Value, right: &Value, language_version: u8) -> bool {
                             return Some(n);
                         }
                     }
-                    Some(if !ab.is_empty() { 1.0 } else { 0.0 })
+                    Some(if ab.is_empty() { 0.0 } else { 1.0 })
                 }
                 Value::Map(_) | Value::Object(_) | Value::Set(_) | Value::Interval(_) => {
                     Some(if value_truthy(v) { 1.0 } else { 0.0 })
@@ -593,8 +595,8 @@ fn eval_equality(
     right: Value,
     language_version: u8,
 ) -> Result<Value, InterpretError> {
-    use HirBinOp::*;
-    use Value::*;
+    use HirBinOp::{Eq, Ne, StrictEq, StrictNe};
+    use Value::Bool;
     let eq = match op {
         // `===` / `!==` is strict (no v1–v3 weak coercions).
         StrictEq | StrictNe => values_equal_for_compare(&left, &right),
@@ -616,8 +618,8 @@ fn eval_equality(
 
 fn eval_ordering(op: HirBinOp, left: Value, right: Value) -> Result<Value, InterpretError> {
     use std::cmp::Ordering;
-    use HirBinOp::*;
-    use Value::*;
+    use HirBinOp::{Ge, Gt, Le, Lt};
+    use Value::{Bool, Integer, Null, String};
     // Java Leek: `null` orders like `0` for comparisons (`null < 3` is true; `null < 0` is false).
     let left = match left {
         Null => Integer(0),

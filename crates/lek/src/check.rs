@@ -83,24 +83,13 @@ pub fn expand_check_targets(
     Ok(targets)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CheckOptions {
     pub manifest: Option<PathBuf>,
     pub cli_language_version: Option<u8>,
     pub cli_strict: Option<bool>,
     /// Names from signature TOML (`[signatures]` / `--signatures`) for the resolve pass.
     pub signature_globals: Vec<String>,
-}
-
-impl Default for CheckOptions {
-    fn default() -> Self {
-        Self {
-            manifest: None,
-            cli_language_version: None,
-            cli_strict: None,
-            signature_globals: Vec::new(),
-        }
-    }
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -147,6 +136,7 @@ pub enum CheckedFile {
     Failed(Vec<DiagnosticRecord>),
 }
 
+#[must_use]
 pub fn default_registry_path() -> PathBuf {
     if let Ok(p) = std::env::var("LEEK_REGISTRY") {
         return PathBuf::from(p);
@@ -159,6 +149,7 @@ pub fn default_registry_path() -> PathBuf {
 }
 
 /// `Leek.toml` language fields when present.
+#[must_use]
 pub fn manifest_language_settings(manifest: Option<&PathBuf>) -> (Option<u8>, Option<bool>) {
     let path = manifest.cloned().or_else(|| {
         std::env::current_dir()
@@ -193,11 +184,10 @@ fn registry_code_for_compile(
         | CompilePhase::Parser
         | CompilePhase::Hir
         | CompilePhase::Resolve
-        | CompilePhase::Types => {
-            reg.code_for_reference(&d.reference)
-                .unwrap_or("E????")
-                .to_string()
-        }
+        | CompilePhase::Types => reg
+            .code_for_reference(&d.reference)
+            .unwrap_or("E????")
+            .to_string(),
     }
 }
 
@@ -231,7 +221,11 @@ pub(crate) fn diagnostic_record_from_compile_with_cache(
         let arc = snippet_cache
             .entry(po.clone())
             .or_insert_with(|| {
-                Arc::from(std::fs::read_to_string(po).unwrap_or_default().into_boxed_str())
+                Arc::from(
+                    std::fs::read_to_string(po)
+                        .unwrap_or_default()
+                        .into_boxed_str(),
+                )
             })
             .clone();
         let (l, c) = line_col_at(arc.as_ref(), d.span.start as usize);
@@ -254,6 +248,7 @@ pub(crate) fn diagnostic_record_from_compile_with_cache(
 }
 
 /// Full compile pipeline on one source (same as [`leekscript_run::compile_source`]); resolves version/strict from `opts` + preamble + manifest.
+#[must_use]
 pub fn check_one_file(
     registry: &leekscript_diagnostics::Registry,
     path: &Path,

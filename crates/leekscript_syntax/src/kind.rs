@@ -1,6 +1,6 @@
 //! Stable `SyntaxKind` tags for rowan (nodes + tokens + trivia).
 
-/// Kind for every green node and leaf in the LeekScript syntax tree.
+/// Kind for every green node and leaf in the `LeekScript` syntax tree.
 ///
 /// Values are stable `u16` discriminants for [`rowan::SyntaxKind`].
 #[repr(u16)]
@@ -248,6 +248,7 @@ impl LeekSyntaxKind {
         }
     }
 
+    #[must_use]
     pub fn is_trivia(self) -> bool {
         matches!(
             self,

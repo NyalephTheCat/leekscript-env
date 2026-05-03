@@ -1,4 +1,4 @@
-//! LeekScript parser: delimiter validation, then a growing **statement / expression** grammar lowered
+//! `LeekScript` parser: delimiter validation, then a growing **statement / expression** grammar lowered
 //! to a rowan tree ([`leekscript_syntax`]).
 //!
 //! When the grammar does not apply (or you only need trivia-preserving token soup), use
@@ -31,6 +31,7 @@ enum Delim {
 }
 
 /// Match `()`, `[]`, `{}` across the token stream (comments already skipped by lexer).
+#[must_use]
 pub fn validate_delimiters(tokens: &[Token]) -> Vec<ParseDiagnostic> {
     let mut stack: Vec<(leekscript_span::Span, Delim)> = Vec::new();
     let mut out = Vec::new();
@@ -150,7 +151,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(
             tree.contains("BinaryExpr"),
             "expected BinaryExpr in tree: {tree}"
@@ -192,7 +193,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("NewExpr"), "{tree}");
     }
 
@@ -217,7 +218,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("MapLiteralExpr"), "{tree}");
         assert!(tree.contains("IntervalLiteralExpr"), "{tree}");
         assert!(tree.contains("SetLiteralExpr"), "{tree}");
@@ -225,14 +226,12 @@ mod tests {
 
     #[test]
     fn parse_function_value_expr_in_map_roundtrip() {
-        let src = concat!(
-            "var m = [1: function(integer a, integer b) => integer { return a + b }];\n",
-        );
+        let src = "var m = [1: function(integer a, integer b) => integer { return a + b }];\n";
         let (tokens, err) = Lexer::new(src, LexerConfig::default()).tokenize();
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("FunctionValueExpr"), "{tree}");
     }
 
@@ -249,7 +248,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("ObjectLiteralExpr"), "{tree}");
     }
 
@@ -260,7 +259,7 @@ mod tests {
         let (tokens, err) = Lexer::new(src, LexerConfig::default()).tokenize();
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("MapLiteralExpr"), "{tree}");
         assert!(tree.contains("ObjectLiteralExpr"), "{tree}");
     }
@@ -272,7 +271,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("UnaryExpr"), "{tree}");
     }
 
@@ -283,7 +282,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("ForInStmt"), "{tree}");
         assert!(tree.contains("ArrayLiteralExpr"), "{tree}");
     }
@@ -295,7 +294,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("ForInKeyValueStmt"), "{tree}");
     }
 
@@ -307,7 +306,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("ForInTypeAnn"), "{tree}");
     }
 
@@ -318,7 +317,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("ForStmt"), "{tree}");
         assert!(tree.contains("ForInitVar"), "{tree}");
         assert!(tree.contains("ForAssign"), "{tree}");
@@ -351,7 +350,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("WordOp"), "{tree}");
         assert!(tree.contains("EmptyStmt"), "{tree}");
     }
@@ -382,7 +381,7 @@ mod tests {
         assert!(err.is_empty(), "{err:?}");
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("PostUpdateExpr"), "{tree}");
     }
 
@@ -390,12 +389,13 @@ mod tests {
     /// (Java VM `TestArray.partition`), not user-type `name` + field `part`.
     #[test]
     fn class_two_untyped_fields_before_constructor_roundtrip() {
-        let src = "class A { name part constructor(name, part) { this.name = name this.part = part } }\n";
+        let src =
+            "class A { name part constructor(name, part) { this.name = name this.part = part } }\n";
         let (tokens, err) = Lexer::new(src, LexerConfig::default()).tokenize();
         assert!(err.is_empty(), "{err:?}");
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(
             tree.matches("ClassFieldDecl").count() >= 2,
             "expected two ClassFieldDecl, got:\n{tree}"
@@ -420,7 +420,7 @@ mod tests {
         let (tokens, err) = Lexer::new(src, LexerConfig::default()).tokenize();
         assert!(err.is_empty(), "{err:?}");
         let root = parse_file_green(src, &tokens).expect("parse");
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("ClassFieldDecl"), "{tree}");
         assert!(tree.contains("FunctionDecl"), "{tree}");
     }
@@ -432,7 +432,7 @@ mod tests {
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("FunctionDecl"), "{tree}");
         assert!(tree.contains("CallExpr"), "{tree}");
     }
@@ -489,7 +489,7 @@ mod tests {
         assert!(err.is_empty(), "{err:?}");
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("GlobalLeadingType"), "{tree}");
     }
 
@@ -510,7 +510,7 @@ switch (0) {\n  case 0:\n  case 1:\n    break;\n  default:\n    break;\n}\n";
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("DoWhileStmt"), "{tree}");
         assert!(tree.contains("SwitchStmt"), "{tree}");
         assert!(tree.contains("CaseLabel"), "{tree}");
@@ -523,7 +523,7 @@ switch (0) {\n  case 0:\n  case 1:\n    break;\n  default:\n    break;\n}\n";
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         assert!(tree.contains("IfStmt"), "{tree}");
         assert!(tree.contains("WhileStmt"), "{tree}");
     }
@@ -535,7 +535,7 @@ switch (0) {\n  case 0:\n  case 1:\n    break;\n  default:\n    break;\n}\n";
         assert!(err.is_empty());
         let root = parse_file_green(src, &tokens).expect("parse");
         assert_eq!(root.text().to_string(), src);
-        let tree = format!("{:#?}", root);
+        let tree = format!("{root:#?}");
         // `x = 2;` parses as an expression-statement with `AssignExpr` (same as Java expression grammar).
         assert!(tree.contains("AssignExpr"), "{tree}");
         assert!(tree.contains("BreakStmt"), "{tree}");
@@ -579,7 +579,7 @@ switch (0) {\n  case 0:\n  case 1:\n    break;\n  default:\n    break;\n}\n";
         assert!(err.is_empty(), "{err:?}");
         // Debug: the Java suite generator flattens newlines; this case relies on implicit stmt separators.
         // If this test fails, inspect token stream around `return acc push(...)`.
-        for t in tokens.iter() {
+        for t in &tokens {
             if t.span.start >= 35 && t.span.start <= 90 {
                 eprintln!(
                     "{:>3}..{:>3} {:?} {:?}",
@@ -600,8 +600,10 @@ switch (0) {\n  case 0:\n  case 1:\n    break;\n  default:\n    break;\n}\n";
         let src = "function search(depth, alpha, beta, isMax) { if (depth == 0) return randInt(-100, 100) for (var i = 0; i < 3; i++) { var score = search(depth - 1, alpha, beta, !isMax) if (isMax) { alpha = max(alpha, score) } else { beta = min(beta, score) } if (beta <= alpha) break } return isMax ? alpha : beta } return search(5, -1000, 1000, true) >= -1000\n";
         let (tokens, err) = Lexer::new(src, LexerConfig { version: 4 }).tokenize();
         assert!(err.is_empty(), "{err:?}");
-        for t in tokens.iter() {
-            if (t.span.start >= 180 && t.span.start <= 230) || (t.span.start >= 275 && t.span.start <= 305) {
+        for t in &tokens {
+            if (t.span.start >= 180 && t.span.start <= 230)
+                || (t.span.start >= 275 && t.span.start <= 305)
+            {
                 eprintln!(
                     "{:>3}..{:>3} {:?} {:?}",
                     t.span.start,
@@ -621,7 +623,7 @@ switch (0) {\n  case 0:\n  case 1:\n    break;\n  default:\n    break;\n}\n";
         let src = "return isMax ? alpha : beta\n";
         let (tokens, err) = Lexer::new(src, LexerConfig { version: 4 }).tokenize();
         assert!(err.is_empty(), "{err:?}");
-        for t in tokens.iter() {
+        for t in &tokens {
             eprintln!(
                 "{:>3}..{:>3} {:?} {:?}",
                 t.span.start,

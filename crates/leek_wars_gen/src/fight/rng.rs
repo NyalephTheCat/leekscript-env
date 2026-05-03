@@ -12,16 +12,19 @@ pub struct JavaCompatRng {
 }
 
 impl JavaCompatRng {
+    #[must_use]
     pub fn new(seed: i64) -> Self {
         Self { n: seed }
     }
 
     /// Internal LCG state after the last [`Self::step_double`] (matches Official generator `State` anonymous `RandomGenerator.n`).
+    #[must_use]
     pub fn internal_n(&self) -> i64 {
         self.n
     }
 
     /// Resume the generator-compatible stream from a captured post-`State.init()` value (see `com.leekwars.DumpStateRng`).
+    #[must_use]
     pub fn from_internal_n(n: i64) -> Self {
         Self { n }
     }
@@ -39,10 +42,10 @@ impl JavaCompatRng {
 
     /// Official generator: `getInt(min, max)` inclusive.
     pub fn next_int_inclusive(&mut self, min: i32, max: i32) -> i32 {
-        if max - min + 1 <= 0 {
+        if max - min < 0 {
             return 0;
         }
-        min + (self.step_double() * (max - min + 1) as f64) as i32
+        min + (self.step_double() * f64::from(max - min + 1)) as i32
     }
 }
 
@@ -75,7 +78,7 @@ mod tests {
         let mut g = JavaCompatRng::new(1_234_567);
         for (i, exp) in EXPECTED.iter().enumerate() {
             let v = g.next_double01();
-            assert!((v - *exp).abs() < 1e-15, "i={} got {} want {}", i, v, exp);
+            assert!((v - *exp).abs() < 1e-15, "i={i} got {v} want {exp}");
         }
     }
 

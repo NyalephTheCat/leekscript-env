@@ -4,9 +4,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use lw_meta::{
-    fetch_ranking_rows, fetch_service_catalog, filter_catalog, meta_agent,
-    CompositionRankingRow, LeekRankingRow, MetaExport, RankingRowsJob, RetryPolicy,
-    ServiceCatalogExport, TeamRankingRow,
+    fetch_ranking_rows, fetch_service_catalog, filter_catalog, meta_agent, CompositionRankingRow,
+    LeekRankingRow, MetaExport, RankingRowsJob, RetryPolicy, ServiceCatalogExport, TeamRankingRow,
 };
 
 use leek_wars_gen::experiment::meta::write_lw_meta_snapshot;
@@ -80,9 +79,7 @@ pub fn run_leeks(
 ) -> Result<(), GenError> {
     let agent = meta_agent();
     let (retry, gap) = retry_gap(http);
-    let category = leek_level
-        .map(|l| format!("level-{}", l))
-        .unwrap_or_else(|| "leek".into());
+    let category = leek_level.map_or_else(|| "leek".into(), |l| format!("level-{l}"));
     let job = RankingRowsJob {
         api_base: &http.api_base,
         active_only: !include_inactive,
@@ -115,7 +112,11 @@ pub fn run_leeks(
     let body = serde_json::to_value(&export).map_err(GenError::ScenarioJson)?;
     let label = format!(
         "lw-meta:rankings/leeks/{}/{}/top-{}",
-        if include_inactive { "get" } else { "get-active" },
+        if include_inactive {
+            "get"
+        } else {
+            "get-active"
+        },
         order,
         top
     );
@@ -165,7 +166,11 @@ pub fn run_teams(
     let body = serde_json::to_value(&export).map_err(GenError::ScenarioJson)?;
     let label = format!(
         "lw-meta:rankings/teams/{}/{}/top-{}",
-        if include_inactive { "get" } else { "get-active" },
+        if include_inactive {
+            "get"
+        } else {
+            "get-active"
+        },
         order,
         top
     );
@@ -215,7 +220,11 @@ pub fn run_compositions(
     let body = serde_json::to_value(&export).map_err(GenError::ScenarioJson)?;
     let label = format!(
         "lw-meta:rankings/compositions/{}/{}/top-{}",
-        if include_inactive { "get" } else { "get-active" },
+        if include_inactive {
+            "get"
+        } else {
+            "get-active"
+        },
         order,
         top
     );
@@ -236,9 +245,7 @@ pub fn run_all(
     let (retry, gap) = retry_gap(http);
     let c = country.as_deref();
     let active_only = !include_inactive;
-    let leek_cat = leek_level
-        .map(|l| format!("level-{}", l))
-        .unwrap_or_else(|| "leek".into());
+    let leek_cat = leek_level.map_or_else(|| "leek".into(), |l| format!("level-{l}"));
 
     let job_leeks = RankingRowsJob {
         api_base: &http.api_base,
@@ -318,7 +325,11 @@ pub fn run_all(
     });
     let label = format!(
         "lw-meta:rankings/all/{}/{}/top-{}",
-        if include_inactive { "get" } else { "get-active" },
+        if include_inactive {
+            "get"
+        } else {
+            "get-active"
+        },
         order,
         top
     );

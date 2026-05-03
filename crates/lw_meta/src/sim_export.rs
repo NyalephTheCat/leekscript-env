@@ -14,7 +14,7 @@ fn hat_template_from_api(v: Option<&Value>) -> i32 {
         Some(Value::Number(n)) => n.as_i64().unwrap_or(0) as i32,
         Some(Value::Object(o)) => o
             .get("template")
-            .and_then(|x| x.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(0) as i32,
         _ => 0,
     }
@@ -22,11 +22,7 @@ fn hat_template_from_api(v: Option<&Value>) -> i32 {
 
 fn item_ids_from_api(arr: Option<&Value>) -> Vec<Value> {
     arr.and_then(|x| x.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|ent| ent.get("id").cloned())
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(|ent| ent.get("id").cloned()).collect())
         .unwrap_or_default()
 }
 
@@ -43,11 +39,12 @@ fn component_templates_from_api(arr: Option<&Value>) -> Vec<Value> {
 /// One `scenario.entities[row][col]` object compatible with `leek_wars_gen`’s entity schema, derived from public `leek/get` JSON.
 ///
 /// Uses **item** `id`s for `weapons` / `chips` (matches the fight DB), **template** ids for `components`, and copies base + `total_*` stats when present.
+#[must_use]
 pub fn scenario_entity_from_leek_get(raw: &Value) -> Value {
     let farmer_id = raw
         .get("farmer")
         .and_then(|f| f.get("id"))
-        .and_then(|x| x.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(0);
 
     let ai_path = raw
@@ -60,14 +57,17 @@ pub fn scenario_entity_from_leek_get(raw: &Value) -> Value {
     let ai_version = raw
         .get("ai")
         .and_then(|a| a.get("version"))
-        .and_then(|x| x.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(0) as i32;
 
     let mut ent = Map::new();
     ent.insert("id".into(), raw.get("id").cloned().unwrap_or(json!(0)));
     ent.insert("name".into(), raw.get("name").cloned().unwrap_or(json!("")));
     ent.insert("type".into(), json!(1));
-    ent.insert("level".into(), raw.get("level").cloned().unwrap_or(json!(1)));
+    ent.insert(
+        "level".into(),
+        raw.get("level").cloned().unwrap_or(json!(1)),
+    );
     ent.insert("life".into(), raw.get("life").cloned().unwrap_or(json!(1)));
     ent.insert("tp".into(), raw.get("tp").cloned().unwrap_or(json!(0)));
     ent.insert("mp".into(), raw.get("mp").cloned().unwrap_or(json!(0)));
@@ -91,12 +91,18 @@ pub fn scenario_entity_from_leek_get(raw: &Value) -> Value {
         "science".into(),
         raw.get("science").cloned().unwrap_or(json!(0)),
     );
-    ent.insert("magic".into(), raw.get("magic").cloned().unwrap_or(json!(0)));
+    ent.insert(
+        "magic".into(),
+        raw.get("magic").cloned().unwrap_or(json!(0)),
+    );
     ent.insert(
         "frequency".into(),
         raw.get("frequency").cloned().unwrap_or(json!(0)),
     );
-    ent.insert("cores".into(), raw.get("cores").cloned().unwrap_or(json!(0)));
+    ent.insert(
+        "cores".into(),
+        raw.get("cores").cloned().unwrap_or(json!(0)),
+    );
     ent.insert("ram".into(), raw.get("ram").cloned().unwrap_or(json!(0)));
     for key in [
         "total_life",
@@ -122,10 +128,7 @@ pub fn scenario_entity_from_leek_get(raw: &Value) -> Value {
     ent.insert("team".into(), json!(0));
     ent.insert("dead".into(), json!(false));
     ent.insert("skin".into(), raw.get("skin").cloned().unwrap_or(json!(0)));
-    ent.insert(
-        "hat".into(),
-        json!(hat_template_from_api(raw.get("hat"))),
-    );
+    ent.insert("hat".into(), json!(hat_template_from_api(raw.get("hat"))));
     ent.insert(
         "metal".into(),
         raw.get("metal").cloned().unwrap_or(json!(false)),
@@ -143,7 +146,10 @@ pub fn scenario_entity_from_leek_get(raw: &Value) -> Value {
     ent.insert("ai_version".into(), json!(ai_version));
     ent.insert("ai_strict".into(), json!(false));
     ent.insert("ai_owner".into(), json!(0));
-    ent.insert("weapons".into(), json!(item_ids_from_api(raw.get("weapons"))));
+    ent.insert(
+        "weapons".into(),
+        json!(item_ids_from_api(raw.get("weapons"))),
+    );
     ent.insert("chips".into(), json!(item_ids_from_api(raw.get("chips"))));
     ent.insert(
         "components".into(),
@@ -153,6 +159,7 @@ pub fn scenario_entity_from_leek_get(raw: &Value) -> Value {
 }
 
 /// Subset of `leek/get` useful for building scenarios / tuning AIs against meta opponents.
+#[must_use]
 pub fn leek_sim_profile(raw: &Value) -> Value {
     let weapon_templates = raw
         .get("weapons")
@@ -245,6 +252,7 @@ pub fn leek_sim_profile(raw: &Value) -> Value {
 }
 
 /// One leek: optional full `leek/get` plus derived profile.
+#[must_use]
 pub fn leek_sim_export_body(raw: &Value, profile_only: bool) -> Value {
     if profile_only {
         leek_sim_profile(raw)
@@ -263,7 +271,7 @@ fn composition_leek_ids(summary: &Value) -> Vec<u64> {
         .and_then(|l| l.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|x| x.get("id").and_then(|v| v.as_u64()))
+                .filter_map(|x| x.get("id").and_then(serde_json::Value::as_u64))
                 .collect()
         })
         .unwrap_or_default()

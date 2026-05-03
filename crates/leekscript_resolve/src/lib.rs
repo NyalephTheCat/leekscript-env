@@ -1,11 +1,15 @@
 //! Lexical name resolution over [`HirFile`](leekscript_hir::HirFile) (no types yet).
 
 use leekscript_hir::{
-    HirBinOp, HirClassMember, HirExpr, HirFieldVisibility, HirFile, HirStmt, HirSwitchClause, NameDef,
+    HirBinOp, HirClassMember, HirExpr, HirFieldVisibility, HirFile, HirStmt, HirSwitchClause,
+    NameDef,
 };
 use leekscript_span::Span;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+type StaticMethodOverloadKey = (bool, String);
+type StaticMethodOverloadVariants = Vec<(usize, bool, Span)>;
 
 /// Static resolution issue (unknown name, duplicate binding).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,11 +223,13 @@ pub const STDLIB_GLOBAL_IDENTIFIERS: &[&str] = &[
 /// `hir.stmt_sources` is empty or after `include` expansion for attribution).
 ///
 /// [`resolve_hir_with_extra_globals`] adds names from a signature file (Leek Wars natives, etc.).
+#[must_use]
 pub fn resolve_hir(hir: &HirFile, main_source: &Path) -> Vec<ResolveDiagnostic> {
     resolve_hir_with_extra_globals(hir, main_source, &[], 3)
 }
 
 /// Like [`resolve_hir`], but pre-declare additional global names (from `*.toml` signature bundles).
+#[must_use]
 pub fn resolve_hir_with_extra_globals(
     hir: &HirFile,
     main_source: &Path,
@@ -321,7 +327,10 @@ pub fn resolve_hir_with_extra_globals(
                     r.diags.push(ResolveDiagnostic {
                         reference: "VARIABLE_NAME_UNAVAILABLE",
                         span: name.span,
-                        message: format!("variable `{}` is already defined in this scope", name.name),
+                        message: format!(
+                            "variable `{}` is already defined in this scope",
+                            name.name
+                        ),
                         source_file: source_file.to_path_buf(),
                     });
                 }
@@ -337,7 +346,10 @@ pub fn resolve_hir_with_extra_globals(
                     r.diags.push(ResolveDiagnostic {
                         reference: "VARIABLE_NAME_UNAVAILABLE",
                         span: name.span,
-                        message: format!("function `{}` is already defined in this scope", name.name),
+                        message: format!(
+                            "function `{}` is already defined in this scope",
+                            name.name
+                        ),
                         source_file: source_file.to_path_buf(),
                     });
                 }
@@ -392,10 +404,7 @@ fn build_class_merged_instance_fields(hir: &HirFile) -> HashMap<String, Vec<Stri
         }
         raw.insert(
             name.name.clone(),
-            (
-                extends.as_ref().map(|e| e.name.clone()),
-                own,
-            ),
+            (extends.as_ref().map(|e| e.name.clone()), own),
         );
     }
     let mut memo: HashMap<String, Vec<String>> = HashMap::new();
@@ -462,10 +471,7 @@ fn build_class_merged_static_fields(hir: &HirFile) -> HashMap<String, Vec<String
         }
         raw.insert(
             name.name.clone(),
-            (
-                extends.as_ref().map(|e| e.name.clone()),
-                own,
-            ),
+            (extends.as_ref().map(|e| e.name.clone()), own),
         );
     }
     let mut memo: HashMap<String, Vec<String>> = HashMap::new();
@@ -537,10 +543,7 @@ fn build_class_merged_static_member_names(hir: &HirFile) -> HashMap<String, Hash
         }
         raw.insert(
             name.name.clone(),
-            (
-                extends.as_ref().map(|e| e.name.clone()),
-                own,
-            ),
+            (extends.as_ref().map(|e| e.name.clone()), own),
         );
     }
     let mut memo: HashMap<String, HashSet<String>> = HashMap::new();
@@ -721,7 +724,9 @@ fn build_class_merged_instance_method_arities(
 
 type FieldAccessInfo = (String, HirFieldVisibility);
 
-fn build_class_merged_field_access(hir: &HirFile) -> HashMap<String, HashMap<String, FieldAccessInfo>> {
+fn build_class_merged_field_access(
+    hir: &HirFile,
+) -> HashMap<String, HashMap<String, FieldAccessInfo>> {
     #[derive(Clone)]
     struct Raw {
         extends: Option<String>,
@@ -746,11 +751,7 @@ fn build_class_merged_field_access(hir: &HirFile) -> HashMap<String, HashMap<Str
                 ..
             } = m
             {
-                own.push((
-                    fnm.name.clone(),
-                    name.name.clone(),
-                    *visibility,
-                ));
+                own.push((fnm.name.clone(), name.name.clone(), *visibility));
             }
         }
         raw.insert(
@@ -896,9 +897,17 @@ impl Resolver {
 
     fn walk_stmt(&mut self, s: &HirStmt, include_allowed: bool, source_file: &Path) {
         match s {
-            HirStmt::Var { name, init, decl_ty: _ } => {
+            HirStmt::Var {
+                name,
+                init,
+                decl_ty: _,
+            } => {
                 // May have been hoisted for this scope already.
-                if !self.scopes.last().is_some_and(|m| m.contains_key(&name.name)) {
+                if !self
+                    .scopes
+                    .last()
+                    .is_some_and(|m| m.contains_key(&name.name))
+                {
                     self.try_define(name, "variable", source_file);
                 }
                 if let Some(init) = init {
@@ -915,7 +924,10 @@ impl Resolver {
                         self.diags.push(ResolveDiagnostic {
                             reference: "VARIABLE_NAME_UNAVAILABLE",
                             span: name.span,
-                            message: format!("global `{}` conflicts with an existing binding", name.name),
+                            message: format!(
+                                "global `{}` conflicts with an existing binding",
+                                name.name
+                            ),
                             source_file: source_file.to_path_buf(),
                         });
                     }
@@ -961,7 +973,10 @@ impl Resolver {
                                     self.diags.push(ResolveDiagnostic {
                                         reference: "VARIABLE_NAME_UNAVAILABLE",
                                         span: name.span,
-                                        message: format!("variable `{}` is already defined in this block", name.name),
+                                        message: format!(
+                                            "variable `{}` is already defined in this block",
+                                            name.name
+                                        ),
                                         source_file: source_file.to_path_buf(),
                                     });
                                 }
@@ -976,7 +991,10 @@ impl Resolver {
                                     self.diags.push(ResolveDiagnostic {
                                         reference: "VARIABLE_NAME_UNAVAILABLE",
                                         span: name.span,
-                                        message: format!("function `{}` is already defined in this block", name.name),
+                                        message: format!(
+                                            "function `{}` is already defined in this block",
+                                            name.name
+                                        ),
                                         source_file: source_file.to_path_buf(),
                                     });
                                 }
@@ -1016,7 +1034,11 @@ impl Resolver {
                         });
                     }
                     // May have been hoisted for this scope already.
-                    if !self.scopes.last().is_some_and(|m| m.contains_key(&name.name)) {
+                    if !self
+                        .scopes
+                        .last()
+                        .is_some_and(|m| m.contains_key(&name.name))
+                    {
                         self.try_define(name, "function", source_file);
                     }
                 }
@@ -1274,7 +1296,15 @@ impl Resolver {
                     })
                     .collect();
                 // Java reserves some pseudo static members on class values.
-                for reserved in ["name", "fields", "staticFields", "methods", "staticMethods", "class", "super"] {
+                for reserved in [
+                    "name",
+                    "fields",
+                    "staticFields",
+                    "methods",
+                    "staticMethods",
+                    "class",
+                    "super",
+                ] {
                     if own_static_fields.contains(reserved) {
                         self.diags.push(ResolveDiagnostic {
                             reference: "VARIABLE_NAME_UNAVAILABLE",
@@ -1299,7 +1329,15 @@ impl Resolver {
                         }
                     })
                     .collect();
-                for reserved in ["name", "fields", "staticFields", "methods", "staticMethods", "class", "super"] {
+                for reserved in [
+                    "name",
+                    "fields",
+                    "staticFields",
+                    "methods",
+                    "staticMethods",
+                    "class",
+                    "super",
+                ] {
                     if own_static_methods.contains(reserved) {
                         self.diags.push(ResolveDiagnostic {
                             reference: "VARIABLE_NAME_UNAVAILABLE",
@@ -1327,7 +1365,10 @@ impl Resolver {
                 }
                 let mut method_arities: HashMap<String, HashSet<usize>> = HashMap::new();
                 for m in members {
-                    if let HirClassMember::Method { name: mn, params, .. } = m {
+                    if let HirClassMember::Method {
+                        name: mn, params, ..
+                    } = m
+                    {
                         let set = method_arities.entry(mn.name.clone()).or_default();
                         if !set.insert(params.len()) {
                             self.diags.push(ResolveDiagnostic {
@@ -1345,8 +1386,10 @@ impl Resolver {
                 // Java VM: a class with **no** `extends` cannot declare arity overloads when every
                 // overload body is empty (`m() {} m(x) {}`). Subclasses may (`extends B { b() {} b(x) {} }`).
                 if extends.is_none() {
-                    let mut by_static_name: HashMap<(bool, String), Vec<(usize, bool, Span)>> =
-                        HashMap::new();
+                    let mut by_static_name: HashMap<
+                        StaticMethodOverloadKey,
+                        StaticMethodOverloadVariants,
+                    > = HashMap::new();
                     for m in members {
                         if let HirClassMember::Method {
                             name: mn,
@@ -1363,10 +1406,9 @@ impl Resolver {
                         }
                     }
                     for ((_is_static, mname), variants) in by_static_name {
-                        let arity_count = variants.iter().map(|(a, _, _)| *a).collect::<HashSet<_>>();
-                        if arity_count.len() > 1
-                            && variants.iter().all(|(_, empty, _)| *empty)
-                        {
+                        let arity_count =
+                            variants.iter().map(|(a, _, _)| *a).collect::<HashSet<_>>();
+                        if arity_count.len() > 1 && variants.iter().all(|(_, empty, _)| *empty) {
                             let span = variants
                                 .iter()
                                 .map(|(_, _, sp)| *sp)
@@ -1376,8 +1418,7 @@ impl Resolver {
                                 reference: "VARIABLE_NAME_UNAVAILABLE",
                                 span,
                                 message: format!(
-                                    "invalid overloads of `{}`: empty bodies require a superclass",
-                                    mname
+                                    "invalid overloads of `{mname}`: empty bodies require a superclass"
                                 ),
                                 source_file: source_file.to_path_buf(),
                             });
@@ -1484,7 +1525,13 @@ impl Resolver {
                 self.walk_expr(base, source_file);
                 self.walk_expr(index, source_file);
             }
-            HirExpr::ArraySlice { base, start, end, step, .. } => {
+            HirExpr::ArraySlice {
+                base,
+                start,
+                end,
+                step,
+                ..
+            } => {
                 self.walk_expr(base, source_file);
                 if let Some(s) = start {
                     self.walk_expr(s, source_file);
@@ -1496,31 +1543,27 @@ impl Resolver {
                     self.walk_expr(st, source_file);
                 }
             }
-            HirExpr::Member {
-                base,
-                field,
-                span,
-            } => {
+            HirExpr::Member { base, field, span } => {
                 if let HirExpr::ClassSelf { .. } = base.as_ref() {
                     if let Some(cur_class) = self.current_class_name.as_deref() {
                         // `class.name` and `class.class` are built-in pseudo static members.
                         if field == "name" || field == "class" {
                             // still walk the base expression for any nested diagnostics
                         } else {
-                        let ok = self
-                            .class_static_member_names
-                            .get(cur_class)
-                            .is_some_and(|s| s.contains(field as &str));
-                        if !ok {
-                            self.diags.push(ResolveDiagnostic {
-                                reference: "CLASS_STATIC_MEMBER_DOES_NOT_EXIST",
-                                span: *span,
-                                message: format!(
+                            let ok = self
+                                .class_static_member_names
+                                .get(cur_class)
+                                .is_some_and(|s| s.contains(field as &str));
+                            if !ok {
+                                self.diags.push(ResolveDiagnostic {
+                                    reference: "CLASS_STATIC_MEMBER_DOES_NOT_EXIST",
+                                    span: *span,
+                                    message: format!(
                                     "static member `{field}` does not exist on class `{cur_class}`"
                                 ),
-                                source_file: source_file.to_path_buf(),
-                            });
-                        }
+                                    source_file: source_file.to_path_buf(),
+                                });
+                            }
                         }
                     }
                 }
@@ -1528,7 +1571,8 @@ impl Resolver {
                     if let Some(cur_class) = self.current_class_name.as_deref() {
                         if let Some(access) = self.class_field_access.get(cur_class) {
                             if let Some((decl, vis)) = access.get(field) {
-                                if *vis == HirFieldVisibility::Private && decl.as_str() != cur_class {
+                                if *vis == HirFieldVisibility::Private && decl.as_str() != cur_class
+                                {
                                     self.diags.push(ResolveDiagnostic {
                                         reference: "PRIVATE_FIELD",
                                         span: *span,
@@ -1558,8 +1602,7 @@ impl Resolver {
                                     reference: "INVALID_PARAMETER_COUNT",
                                     span: *span,
                                     message: format!(
-                                        "invalid parameter count for static method `{}`",
-                                        field
+                                        "invalid parameter count for static method `{field}`"
                                     ),
                                     source_file: source_file.to_path_buf(),
                                 });
@@ -1577,8 +1620,7 @@ impl Resolver {
                                     reference: "INVALID_PARAMETER_COUNT",
                                     span: *span,
                                     message: format!(
-                                        "invalid parameter count for method `{}`",
-                                        field
+                                        "invalid parameter count for method `{field}`"
                                     ),
                                     source_file: source_file.to_path_buf(),
                                 });
@@ -1603,8 +1645,7 @@ impl Resolver {
                                     reference: "INVALID_PARAMETER_COUNT",
                                     span: *span,
                                     message: format!(
-                                        "invalid parameter count for static method `{}`",
-                                        name
+                                        "invalid parameter count for static method `{name}`"
                                     ),
                                     source_file: source_file.to_path_buf(),
                                 });
@@ -1628,10 +1669,7 @@ impl Resolver {
                                 self.diags.push(ResolveDiagnostic {
                                     reference: "INVALID_PARAMETER_COUNT",
                                     span: *span,
-                                    message: format!(
-                                        "invalid parameter count for method `{}`",
-                                        name
-                                    ),
+                                    message: format!("invalid parameter count for method `{name}`"),
                                     source_file: source_file.to_path_buf(),
                                 });
                             }
@@ -1862,13 +1900,8 @@ mod tests {
         };
         assert_eq!(resolve_hir(&hir, Path::new("t.leek")).len(), 1);
         assert!(
-            resolve_hir_with_extra_globals(
-                &hir,
-                Path::new("t.leek"),
-                &["useChip".into()],
-                3,
-            )
-            .is_empty()
+            resolve_hir_with_extra_globals(&hir, Path::new("t.leek"), &["useChip".into()], 3,)
+                .is_empty()
         );
     }
 

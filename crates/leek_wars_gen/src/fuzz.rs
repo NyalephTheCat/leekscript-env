@@ -133,10 +133,7 @@ fn external_ai_rel_paths(cfg: &FuzzConfig) -> Vec<String> {
 }
 
 fn external_ai_dir_prefix(dir: &Path) -> String {
-    let name = dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("dir");
+    let name = dir.file_name().and_then(|s| s.to_str()).unwrap_or("dir");
     format!("_external_ai/{name}")
 }
 
@@ -153,8 +150,9 @@ fn materialize_external_ai_files(
         }
         let prefix = external_ai_dir_prefix(d);
         let dst = dst_root.join(&prefix);
-        copy_dir_recursive(d.as_path(), dst.as_path())
-            .map_err(|e| GenError::Message(format!("fuzz: mirror external AI dir {}: {e}", d.display())))?;
+        copy_dir_recursive(d.as_path(), dst.as_path()).map_err(|e| {
+            GenError::Message(format!("fuzz: mirror external AI dir {}: {e}", d.display()))
+        })?;
 
         // Collect .leek paths under the mirrored dir for shuffling.
         let mut files = Vec::new();
@@ -196,39 +194,46 @@ fn materialize_external_ai_files(
     Ok(out_rels)
 }
 
-fn generate_scenario_from_scratch(cfg: &FuzzConfig, rng: &mut StdRng, ai_pool: &[String], seed: u64) -> Value {
+fn generate_scenario_from_scratch(
+    cfg: &FuzzConfig,
+    rng: &mut StdRng,
+    ai_pool: &[String],
+    seed: u64,
+) -> Value {
     // Keep the shape close to existing fixtures, but allow wide exploration.
-    let min_map = cfg.gen_min_map.max(5).min(40);
-    let max_map = cfg.gen_max_map.max(min_map).min(40);
-    let w: i64 = rng.gen_range(min_map as i64..=max_map as i64);
+    let min_map = cfg.gen_min_map.clamp(5, 40);
+    let max_map = cfg.gen_max_map.clamp(min_map, 40);
+    let w: i64 = rng.gen_range(i64::from(min_map)..=i64::from(max_map));
     let h: i64 = w;
     let map_cells = (w * h).max(1);
 
     let mut obstacles: Vec<i64> = Vec::new();
     // Density: 0..~12% of cells.
     let max_obs = ((map_cells as f64) * 0.12) as usize;
-    let obstacle_n = rng.gen_range(0..=max_obs.max(1)).min(map_cells as usize);
+    let obstacle_n = rng
+        .gen_range(0..=max_obs.max(1))
+        .clamp(0, map_cells as usize);
     for _ in 0..obstacle_n {
-        obstacles.push(rng.gen_range(0..map_cells) as i64);
+        obstacles.push(rng.gen_range(0..map_cells));
     }
-    obstacles.sort();
+    obstacles.sort_unstable();
     obstacles.dedup();
 
     // 2 teams, 1..=4 entities per team.
-    let min_e = cfg.gen_min_entities_per_team.max(1).min(8);
-    let max_e = cfg.gen_max_entities_per_team.max(min_e).min(8);
+    let min_e = cfg.gen_min_entities_per_team.clamp(1, 8);
+    let max_e = cfg.gen_max_entities_per_team.clamp(min_e, 8);
     let n1 = rng.gen_range(min_e..=max_e) as usize;
     let n2 = rng.gen_range(min_e..=max_e) as usize;
 
     let pick_cell = |rng: &mut StdRng| -> i64 {
         // Best-effort avoid obstacles; if we fail, just return whatever.
         for _ in 0..8 {
-            let c = rng.gen_range(0..map_cells) as i64;
+            let c = rng.gen_range(0..map_cells);
             if !obstacles.contains(&c) {
                 return c;
             }
         }
-        rng.gen_range(0..map_cells) as i64
+        rng.gen_range(0..map_cells)
     };
 
     let mut next_entity_id: i64 = 1;
@@ -256,9 +261,9 @@ fn generate_scenario_from_scratch(cfg: &FuzzConfig, rng: &mut StdRng, ai_pool: &
             let n = rng.gen_range(0..=2);
             let mut out: Vec<i64> = Vec::new();
             for _ in 0..n {
-                out.push(candidates[rng.gen_range(0..candidates.len())] as i64);
+                out.push(i64::from(candidates[rng.gen_range(0..candidates.len())]));
             }
-            out.sort();
+            out.sort_unstable();
             out.dedup();
             out
         } else {
@@ -269,9 +274,9 @@ fn generate_scenario_from_scratch(cfg: &FuzzConfig, rng: &mut StdRng, ai_pool: &
             let n = rng.gen_range(0..=3);
             let mut out: Vec<i64> = Vec::new();
             for _ in 0..n {
-                out.push(candidates[rng.gen_range(0..candidates.len())] as i64);
+                out.push(i64::from(candidates[rng.gen_range(0..candidates.len())]));
             }
-            out.sort();
+            out.sort_unstable();
             out.dedup();
             out
         } else {
@@ -337,7 +342,11 @@ pub const FUZZ_PARITY_SCENARIO_CORPUS: &[&str] = &[
 ];
 
 /// Insert paths from [`FUZZ_PARITY_SCENARIO_CORPUS`] that exist under `root` and are not already in `seen`.
-pub fn merge_parity_corpus_scenarios(root: &Path, scenario_rels: &mut Vec<PathBuf>, seen: &mut std::collections::HashSet<PathBuf>) {
+pub fn merge_parity_corpus_scenarios(
+    root: &Path,
+    scenario_rels: &mut Vec<PathBuf>,
+    seen: &mut std::collections::HashSet<PathBuf>,
+) {
     for rel in FUZZ_PARITY_SCENARIO_CORPUS {
         let p = PathBuf::from(*rel);
         if root.join(&p).is_file() && seen.insert(p.clone()) {
@@ -365,6 +374,7 @@ pub struct FuzzSummary {
 }
 
 impl FuzzSummary {
+    #[must_use]
     pub fn ok(&self) -> bool {
         self.failures.is_empty()
     }
@@ -380,10 +390,12 @@ pub struct FuzzBenchSummary {
 }
 
 impl FuzzBenchSummary {
+    #[must_use]
     pub fn fight_ok(&self) -> bool {
         self.summary.ok()
     }
 
+    #[must_use]
     pub fn compare_ok(&self) -> bool {
         self.parity_mismatches == 0
     }
@@ -409,7 +421,11 @@ fn fuzz_input_from_cfg(cfg: &FuzzConfig, iter_seed: u64) -> FuzzInput {
     inpt.mutate_ai_inject_complexity = cfg.mutate_ai_inject_complexity;
     inpt.mutate_ai_inject_wrap_percent = cfg.mutate_ai_inject_wrap_percent.min(100);
     inpt.mutate_ai_inject_max_stmts = cfg.mutate_ai_inject_max_stmts.clamp(1, 16);
-    inpt.mutate_ai_require_parseable = if cfg.mutate_ai_require_parseable { 255 } else { 0 };
+    inpt.mutate_ai_require_parseable = if cfg.mutate_ai_require_parseable {
+        255
+    } else {
+        0
+    };
 
     if cfg.fuzz_parity {
         // Documented `--fuzz-parity` profile: no inject-wrap (known Java vs Rust `fight.actions` desync).
@@ -440,8 +456,7 @@ fn collect_leek_files(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
         } else if p
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("leek"))
-            == Some(true)
+            .is_some_and(|e| e.eq_ignore_ascii_case("leek"))
         {
             out.push(p);
         }
@@ -501,6 +516,7 @@ fn is_leek_ai_path(s: &str) -> bool {
 ///
 /// If none are found, returns `fallback` (e.g. all files under `test/ai`), so seed-only fixtures
 /// can still opt into `--no-shuffle-ai` or accept broader assignment.
+#[must_use]
 pub fn ai_pool_from_document(doc: &Value, fallback: &[String]) -> Vec<String> {
     let mut from_doc: Vec<String> = Vec::new();
     if let Some(entities) = doc.get("entities").and_then(|e| e.as_array()) {
@@ -520,10 +536,10 @@ pub fn ai_pool_from_document(doc: &Value, fallback: &[String]) -> Vec<String> {
     }
     from_doc.sort();
     from_doc.dedup();
-    if !from_doc.is_empty() {
-        from_doc
-    } else {
+    if from_doc.is_empty() {
         fallback.to_vec()
+    } else {
+        from_doc
     }
 }
 
@@ -560,6 +576,7 @@ pub fn apply_fuzz_variants(
 }
 
 /// Collect distinct `.leek` `ai` paths from `entities` after other fuzz edits.
+#[must_use]
 pub fn collect_leek_ai_paths_from_entities(doc: &Value) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let Some(entities) = doc.get("entities").and_then(|e| e.as_array()) else {
@@ -589,10 +606,7 @@ fn jitter_i64_for_stats(n: i64, rng: &mut StdRng, mag: u8) -> i64 {
         return rng.gen_range(1..=48_i64.saturating_mul(scale));
     }
     let lo = (n / (2 * scale)).max(1);
-    let hi = n
-        .saturating_mul(2 * scale)
-        .min(50_000 * scale)
-        .max(lo);
+    let hi = n.saturating_mul(2 * scale).min(50_000 * scale).max(lo);
     rng.gen_range(lo..=hi)
 }
 
@@ -643,7 +657,10 @@ pub fn apply_fuzz_entity_stats(doc: &mut Value, rng: &mut StdRng, mag: u8) {
 
 /// Nudge `max_turns` (default baseline64 if missing).
 pub fn apply_fuzz_max_turns(doc: &mut Value, rng: &mut StdRng, mag: u8) {
-    let base = doc.get("max_turns").and_then(|v| v.as_i64()).unwrap_or(64) as i32;
+    let base = doc
+        .get("max_turns")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(64) as i32;
     let scale = FuzzInput::mag_scale(mag).clamp(1, 4) as i32;
     let max_delta = 12 * scale;
     let delta = rng.gen_range(-max_delta..=max_delta);
@@ -659,12 +676,17 @@ pub fn apply_fuzz_draw_check_life(doc: &mut Value, rng: &mut StdRng) {
 fn map_dimensions(doc: &Value) -> (i64, i64) {
     doc.get("map")
         .and_then(|m| m.as_object())
-        .map(|m| {
-            let w = m.get("width").and_then(|v| v.as_i64()).unwrap_or(17);
-            let h = m.get("height").and_then(|v| v.as_i64()).unwrap_or(17);
+        .map_or((17, 17), |m| {
+            let w = m
+                .get("width")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(17);
+            let h = m
+                .get("height")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(17);
             (w, h)
         })
-        .unwrap_or((17, 17))
 }
 
 /// Add / remove / shuffle `map.obstacles` cell ids (clamped to the map area when dimensions exist).
@@ -722,11 +744,11 @@ pub fn apply_fuzz_entity_cells(doc: &mut Value, rng: &mut StdRng) {
     }
 }
 
-/// Nudge `max_operations_per_entity` (default 20_000_000 if absent) within a bounded range.
+/// Nudge `max_operations_per_entity` (default `20_000_000` if absent) within a bounded range.
 pub fn apply_fuzz_max_operations_per_entity(doc: &mut Value, rng: &mut StdRng) {
     let base = doc
         .get("max_operations_per_entity")
-        .and_then(|v| v.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(20_000_000);
     let lo = (base / 2).max(50_000);
     let hi = base.saturating_mul(2).min(500_000_000).max(lo);
@@ -806,11 +828,16 @@ pub fn apply_fuzz_entity_loadouts(doc: &mut Value, rng: &mut StdRng) {
 
 /// Deterministic, seed-driven edits to `.leek` source for crash / robustness fuzzing.
 ///
-/// Level `1` only appends comments. Levels `2`–`4` use the LeekScript parser for syntax-preserving mutations; level `4` applies a second full pass for deeper diffs. See `fuzz_mutate_leek`.
+/// Level `1` only appends comments. Levels `2`–`4` use the `LeekScript` parser for syntax-preserving mutations; level `4` applies a second full pass for deeper diffs. See `fuzz_mutate_leek`.
 pub fn mutate_leek_source(src: &str, rng: &mut StdRng, level: u8) -> String {
-    leekscript_fuzz::mutate_leek_source(src, rng, level, &leekscript_fuzz::MutateSettings::accept_all())
-        .expect("MutateSettings::accept_all is always valid")
-        .source
+    leekscript_fuzz::mutate_leek_source(
+        src,
+        rng,
+        level,
+        &leekscript_fuzz::MutateSettings::accept_all(),
+    )
+    .expect("MutateSettings::accept_all is always valid")
+    .source
 }
 
 /// Same resolve / globals as [`crate::fight::run_scenario_path_inner`] so `compile_source` during fuzz
@@ -985,36 +1012,46 @@ fn fuzz_artifact_subdir(
         .take(64)
         .collect::<String>();
     base.join(format!(
-        "fuzz_{:016x}_{:06}_{}_{}__{}",
-        master_seed, attempt_i, kind, stem, tail
+        "fuzz_{master_seed:016x}_{attempt_i:06}_{kind}_{stem}__{tail}"
     ))
 }
 
 /// Persist repro data for debugging (parity mismatch, harness error, Rust engine error).
 /// Returns the bundle directory when `scenario.json` was written successfully.
-fn try_save_fuzz_artifact(
-    cfg: &FuzzConfig,
+struct FuzzArtifactArgs<'a> {
+    cfg: &'a FuzzConfig,
     attempt_i: u64,
-    kind: &str,
-    template: &Path,
-    doc: &Value,
-    input: &FuzzInput,
+    kind: &'a str,
+    template: &'a Path,
+    doc: &'a Value,
+    input: &'a FuzzInput,
     iter_seed: u64,
     ai_seed: Option<u64>,
     benchmark_java: bool,
-    report: Option<&ScenarioHarnessReport>,
-    error: Option<&GenError>,
-    sandbox_src: Option<&Path>,
-) -> Option<PathBuf> {
-    let Some(base) = cfg.artifacts_dir.as_ref() else {
-        return None;
-    };
+    report: Option<&'a ScenarioHarnessReport>,
+    error: Option<&'a GenError>,
+    sandbox_src: Option<&'a Path>,
+}
+
+fn try_save_fuzz_artifact(args: FuzzArtifactArgs<'_>) -> Option<PathBuf> {
+    let FuzzArtifactArgs {
+        cfg,
+        attempt_i,
+        kind,
+        template,
+        doc,
+        input,
+        iter_seed,
+        ai_seed,
+        benchmark_java,
+        report,
+        error,
+        sandbox_src,
+    } = args;
+    let base = cfg.artifacts_dir.as_ref()?;
     let dir = fuzz_artifact_subdir(base, cfg.master_seed, attempt_i, kind, template);
     if let Err(e) = fs::create_dir_all(&dir) {
-        eprintln!(
-            "[fuzz] artifacts: could not create {}: {e}",
-            dir.display()
-        );
+        eprintln!("[fuzz] artifacts: could not create {}: {e}", dir.display());
         return None;
     }
     let scenario_json = match serde_json::to_string_pretty(doc) {
@@ -1132,7 +1169,7 @@ fn try_save_fuzz_artifact(
         "mutate_ai_require_parseable_p": input.mutate_ai_require_parseable,
         "mutate_ai_require_compilable": cfg.fuzz_parity,
         "mutator_parity_safe": cfg.fuzz_parity,
-        "error": error.map(|e| e.to_string()),
+        "error": error.map(std::string::ToString::to_string),
     });
     if let Some(r) = report {
         if let Some(obj) = meta.as_object_mut() {
@@ -1142,10 +1179,7 @@ fn try_save_fuzz_artifact(
     if sandbox_src.is_some() {
         if let Some(obj) = meta.as_object_mut() {
             obj.insert("sandbox_layout".into(), serde_json::json!("minimal"));
-            obj.insert(
-                "sandbox_excludes_data_dir".into(),
-                serde_json::json!(true),
-            );
+            obj.insert("sandbox_excludes_data_dir".into(), serde_json::json!(true));
             obj.insert(
                 "sandbox_omits_java_ai_output".into(),
                 serde_json::json!(true),
@@ -1191,7 +1225,7 @@ fn fuzz_attempt_done_bump_progress(
     if cfg.progress_report_every == 0 {
         return;
     }
-    if *i % cfg.progress_report_every != 0 {
+    if !(*i).is_multiple_of(cfg.progress_report_every) {
         return;
     }
     eprintln!(
@@ -1332,6 +1366,7 @@ fn write_minimal_fuzz_sandbox_artifact(
 
 /// Run the Rust fight engine on `iterations` randomized variants.
 /// With `fail_fast`, stops after the first run failure (fixture read/parse errors always stop).
+#[must_use]
 pub fn run_fuzz(cfg: &FuzzConfig, fail_fast: bool) -> FuzzSummary {
     assert_ne!(
         cfg.iterations, 0,
@@ -1347,7 +1382,7 @@ pub fn run_fuzz(cfg: &FuzzConfig, fail_fast: bool) -> FuzzSummary {
 /// - **`harness: Some`**: runs [`run_scenario_harness`] (compare mode comes from CLI: e.g. `--fuzz-benchmark-java`
 ///   defaults to full normalized official generator vs Rust parity, including `fight.actions` and `fight.ops`). With
 ///   [`FuzzConfig::mutate_ai_level`] > 0, builds a temp **sandbox** (copies `data/` + `--fuzz-ai-dir` tree,
-///   mutates every `*.leek` under that mirror (levels `2`–`4`: CST-aware edits when the LeekScript parser accepts the file; `4` runs two rounds),
+///   mutates every `*.leek` under that mirror (levels `2`–`4`: CST-aware edits when the `LeekScript` parser accepts the file; `4` runs two rounds),
 ///   writes `_fuzz/scenario.json`) and sets [`HarnessRunConfig::runtime_cwd`]
 ///   so the official generator and Rust both load the same mutated AI tree.
 pub fn run_fuzz_timed(
@@ -1360,9 +1395,10 @@ pub fn run_fuzz_timed(
         !cfg.scenario_rels.is_empty(),
         "fuzz: need at least one scenario"
     );
-    if cfg.iterations == 0 && stop_requested.is_none() {
-        panic!("fuzz: iterations == 0 requires a stop flag (Ctrl+C handler)");
-    }
+    assert!(
+        !(cfg.iterations == 0 && stop_requested.is_none()),
+        "fuzz: iterations == 0 requires a stop flag (Ctrl+C handler)"
+    );
     let mut rng = StdRng::seed_from_u64(cfg.master_seed);
     let mut ok: u64 = 0;
     let mut failures: Vec<FuzzFailure> = Vec::new();
@@ -1408,10 +1444,7 @@ pub fn run_fuzz_timed(
                         scenario_template: template.clone(),
                         temp_path: PathBuf::new(),
                         artifact_dir: None,
-                        error: GenError::Message(format!(
-                            "read {}: {e}",
-                            full.display()
-                        )),
+                        error: GenError::Message(format!("read {}: {e}", full.display())),
                     });
                     break;
                 }
@@ -1444,8 +1477,10 @@ pub fn run_fuzz_timed(
             let step = (i / cfg.mutate_ramp_every.max(1)).min(10) as u8;
             input.mutate_ai_inject_complexity =
                 (input.mutate_ai_inject_complexity.saturating_add(step)).min(8);
-            input.mutate_ai_inject_wrap_percent =
-                (input.mutate_ai_inject_wrap_percent.saturating_add(step.saturating_mul(5))).min(100);
+            input.mutate_ai_inject_wrap_percent = (input
+                .mutate_ai_inject_wrap_percent
+                .saturating_add(step.saturating_mul(5)))
+            .min(100);
             input.mutate_ai_inject_max_stmts =
                 (input.mutate_ai_inject_max_stmts.saturating_add(step / 2)).clamp(1, 16);
         }
@@ -1456,12 +1491,7 @@ pub fn run_fuzz_timed(
         if cfg.fuzz_parity {
             doc["max_operations_per_entity"] = json!(1_000_000_000i64);
         }
-        apply_fuzz_variants(
-            &mut doc,
-            &mut iter_rng,
-            &ai_pool,
-            &input,
-        );
+        apply_fuzz_variants(&mut doc, &mut iter_rng, &ai_pool, &input);
         if input.roll(&mut iter_rng, input.p_jitter_entity_stats) {
             apply_fuzz_entity_stats(&mut doc, &mut iter_rng, input.mag_entity_stats);
         }
@@ -1490,20 +1520,20 @@ pub fn run_fuzz_timed(
             let sand = match build_harness_mutate_sandbox(cfg, &doc, i, &mut ai_rng, &input) {
                 Ok(p) => p,
                 Err(e) => {
-                    let artifact_dir = try_save_fuzz_artifact(
+                    let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                         cfg,
-                        i,
-                        "sandbox_build",
-                        template.as_path(),
-                        &doc,
-                        &input,
+                        attempt_i: i,
+                        kind: "sandbox_build",
+                        template: template.as_path(),
+                        doc: &doc,
+                        input: &input,
                         iter_seed,
                         ai_seed,
                         benchmark_java,
-                        None,
-                        Some(&e),
-                        None,
-                    );
+                        report: None,
+                        error: Some(&e),
+                        sandbox_src: None,
+                    });
                     failures.push(FuzzFailure {
                         iteration: i,
                         scenario_template: template.clone(),
@@ -1534,28 +1564,24 @@ pub fn run_fuzz_timed(
             match run_scenario_harness(&req, &hcfg) {
                 Ok(report) => {
                     if report.engine_run_failed() {
-                        let err = report
-                            .engine_errors_display()
-                            .map(GenError::Message)
-                            .unwrap_or_else(|| {
-                                GenError::Message(
-                                    "harness: engine failed (no error text)".into(),
-                                )
-                            });
-                        let artifact_dir = try_save_fuzz_artifact(
+                        let err = report.engine_errors_display().map_or_else(
+                            || GenError::Message("harness: engine failed (no error text)".into()),
+                            GenError::Message,
+                        );
+                        let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                             cfg,
-                            i,
-                            "harness_error",
-                            template.as_path(),
-                            &doc,
-                            &input,
+                            attempt_i: i,
+                            kind: "harness_error",
+                            template: template.as_path(),
+                            doc: &doc,
+                            input: &input,
                             iter_seed,
                             ai_seed,
                             benchmark_java,
-                            Some(&report),
-                            Some(&err),
-                            Some(sand.as_path()),
-                        );
+                            report: Some(&report),
+                            error: Some(&err),
+                            sandbox_src: Some(sand.as_path()),
+                        });
                         failures.push(FuzzFailure {
                             iteration: i,
                             scenario_template: template.clone(),
@@ -1584,37 +1610,37 @@ pub fn run_fuzz_timed(
                     }
                     if report.comparison_failed() {
                         parity_mismatches += 1;
-                        try_save_fuzz_artifact(
+                        try_save_fuzz_artifact(FuzzArtifactArgs {
                             cfg,
-                            i,
-                            "parity",
-                            template.as_path(),
-                            &doc,
-                            &input,
+                            attempt_i: i,
+                            kind: "parity",
+                            template: template.as_path(),
+                            doc: &doc,
+                            input: &input,
                             iter_seed,
                             ai_seed,
                             benchmark_java,
-                            Some(&report),
-                            None,
-                            Some(sand.as_path()),
-                        );
+                            report: Some(&report),
+                            error: None,
+                            sandbox_src: Some(sand.as_path()),
+                        });
                     }
                 }
                 Err(e) => {
-                    let artifact_dir = try_save_fuzz_artifact(
+                    let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                         cfg,
-                        i,
-                        "harness_error",
-                        template.as_path(),
-                        &doc,
-                        &input,
+                        attempt_i: i,
+                        kind: "harness_error",
+                        template: template.as_path(),
+                        doc: &doc,
+                        input: &input,
                         iter_seed,
                         ai_seed,
                         benchmark_java,
-                        None,
-                        Some(&e),
-                        Some(sand.as_path()),
-                    );
+                        report: None,
+                        error: Some(&e),
+                        sandbox_src: Some(sand.as_path()),
+                    });
                     failures.push(FuzzFailure {
                         iteration: i,
                         scenario_template: template.clone(),
@@ -1691,20 +1717,20 @@ pub fn run_fuzz_timed(
                     "fuzz: create overlay {}: {e}",
                     overlay_dir.display()
                 ));
-                let artifact_dir = try_save_fuzz_artifact(
+                let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                     cfg,
-                    i,
-                    "overlay_dir",
-                    template.as_path(),
-                    &doc,
-                    &input,
+                    attempt_i: i,
+                    kind: "overlay_dir",
+                    template: template.as_path(),
+                    doc: &doc,
+                    input: &input,
                     iter_seed,
                     ai_seed,
                     benchmark_java,
-                    None,
-                    Some(&err),
-                    None,
-                );
+                    report: None,
+                    error: Some(&err),
+                    sandbox_src: None,
+                });
                 failures.push(FuzzFailure {
                     iteration: i,
                     scenario_template: template.clone(),
@@ -1729,20 +1755,20 @@ pub fn run_fuzz_timed(
                 Ok(r) => r,
                 Err(e) => {
                     cleanup_overlay(&overlay_dir, cfg.keep_temps);
-                    let artifact_dir = try_save_fuzz_artifact(
+                    let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                         cfg,
-                        i,
-                        "external_ai",
-                        template.as_path(),
-                        &doc,
-                        &input,
+                        attempt_i: i,
+                        kind: "external_ai",
+                        template: template.as_path(),
+                        doc: &doc,
+                        input: &input,
                         iter_seed,
                         ai_seed,
                         benchmark_java,
-                        None,
-                        Some(&e),
-                        None,
-                    );
+                        report: None,
+                        error: Some(&e),
+                        sandbox_src: None,
+                    });
                     failures.push(FuzzFailure {
                         iteration: i,
                         scenario_template: template.clone(),
@@ -1775,20 +1801,20 @@ pub fn run_fuzz_timed(
                             "fuzz: mirror AI tree {}: {e}",
                             mirror_src.display()
                         ));
-                        let artifact_dir = try_save_fuzz_artifact(
+                        let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                             cfg,
-                            i,
-                            "ai_mirror",
-                            template.as_path(),
-                            &doc,
-                            &input,
+                            attempt_i: i,
+                            kind: "ai_mirror",
+                            template: template.as_path(),
+                            doc: &doc,
+                            input: &input,
                             iter_seed,
                             ai_seed,
                             benchmark_java,
-                            None,
-                            Some(&err),
-                            None,
-                        );
+                            report: None,
+                            error: Some(&err),
+                            sandbox_src: None,
+                        });
                         failures.push(FuzzFailure {
                             iteration: i,
                             scenario_template: template.clone(),
@@ -1824,20 +1850,20 @@ pub fn run_fuzz_timed(
                             "fuzz: list .leek under {}: {e}",
                             mirror_src.display()
                         ));
-                        let artifact_dir = try_save_fuzz_artifact(
+                        let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                             cfg,
-                            i,
-                            "mutate_ai",
-                            template.as_path(),
-                            &doc,
-                            &input,
+                            attempt_i: i,
+                            kind: "mutate_ai",
+                            template: template.as_path(),
+                            doc: &doc,
+                            input: &input,
                             iter_seed,
                             ai_seed,
                             benchmark_java,
-                            None,
-                            Some(&err),
-                            None,
-                        );
+                            report: None,
+                            error: Some(&err),
+                            sandbox_src: None,
+                        });
                         failures.push(FuzzFailure {
                             iteration: i,
                             scenario_template: template.clone(),
@@ -1863,25 +1889,30 @@ pub fn run_fuzz_timed(
                     cleanup_overlay(&overlay_dir, cfg.keep_temps);
                     None
                 } else {
-                    match apply_mutations_to_leek_files(&overlay_dir, &rels, &mut ai_rng, &input, cfg)
-                    {
+                    match apply_mutations_to_leek_files(
+                        &overlay_dir,
+                        &rels,
+                        &mut ai_rng,
+                        &input,
+                        cfg,
+                    ) {
                         Ok(()) => Some(overlay_dir),
                         Err(e) => {
                             cleanup_overlay(&overlay_dir, cfg.keep_temps);
-                            let artifact_dir = try_save_fuzz_artifact(
+                            let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                                 cfg,
-                                i,
-                                "mutate_ai",
-                                template.as_path(),
-                                &doc,
-                                &input,
+                                attempt_i: i,
+                                kind: "mutate_ai",
+                                template: template.as_path(),
+                                doc: &doc,
+                                input: &input,
                                 iter_seed,
                                 ai_seed,
                                 benchmark_java,
-                                None,
-                                Some(&e),
-                                None,
-                            );
+                                report: None,
+                                error: Some(&e),
+                                sandbox_src: None,
+                            });
                             failures.push(FuzzFailure {
                                 iteration: i,
                                 scenario_template: template.clone(),
@@ -1929,20 +1960,20 @@ pub fn run_fuzz_timed(
                         }
                     }
                     Err(e) => {
-                        let artifact_dir = try_save_fuzz_artifact(
+                        let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                             cfg,
-                            i,
-                            "rust_engine",
-                            template.as_path(),
-                            &doc,
-                            &input,
+                            attempt_i: i,
+                            kind: "rust_engine",
+                            template: template.as_path(),
+                            doc: &doc,
+                            input: &input,
                             iter_seed,
                             ai_seed,
                             benchmark_java,
-                            None,
-                            Some(&e),
-                            overlay_for_run.as_deref(),
-                        );
+                            report: None,
+                            error: Some(&e),
+                            sandbox_src: overlay_for_run.as_deref(),
+                        });
                         failures.push(FuzzFailure {
                             iteration: i,
                             scenario_template: template.clone(),
@@ -1971,28 +2002,24 @@ pub fn run_fuzz_timed(
             ) {
                 Ok(report) => {
                     if report.engine_run_failed() {
-                        let err = report
-                            .engine_errors_display()
-                            .map(GenError::Message)
-                            .unwrap_or_else(|| {
-                                GenError::Message(
-                                    "harness: engine failed (no error text)".into(),
-                                )
-                            });
-                        let artifact_dir = try_save_fuzz_artifact(
+                        let err = report.engine_errors_display().map_or_else(
+                            || GenError::Message("harness: engine failed (no error text)".into()),
+                            GenError::Message,
+                        );
+                        let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                             cfg,
-                            i,
-                            "harness_error",
-                            template.as_path(),
-                            &doc,
-                            &input,
+                            attempt_i: i,
+                            kind: "harness_error",
+                            template: template.as_path(),
+                            doc: &doc,
+                            input: &input,
                             iter_seed,
                             ai_seed,
                             benchmark_java,
-                            Some(&report),
-                            Some(&err),
-                            None,
-                        );
+                            report: Some(&report),
+                            error: Some(&err),
+                            sandbox_src: None,
+                        });
                         failures.push(FuzzFailure {
                             iteration: i,
                             scenario_template: template.clone(),
@@ -2011,20 +2038,20 @@ pub fn run_fuzz_timed(
                         }
                         if report.comparison_failed() {
                             parity_mismatches += 1;
-                            try_save_fuzz_artifact(
+                            try_save_fuzz_artifact(FuzzArtifactArgs {
                                 cfg,
-                                i,
-                                "parity",
-                                template.as_path(),
-                                &doc,
-                                &input,
+                                attempt_i: i,
+                                kind: "parity",
+                                template: template.as_path(),
+                                doc: &doc,
+                                input: &input,
                                 iter_seed,
                                 ai_seed,
                                 benchmark_java,
-                                Some(&report),
-                                None,
-                                None,
-                            );
+                                report: Some(&report),
+                                error: None,
+                                sandbox_src: None,
+                            });
                         }
                     }
                     if !cfg.keep_temps {
@@ -2032,20 +2059,20 @@ pub fn run_fuzz_timed(
                     }
                 }
                 Err(e) => {
-                    let artifact_dir = try_save_fuzz_artifact(
+                    let artifact_dir = try_save_fuzz_artifact(FuzzArtifactArgs {
                         cfg,
-                        i,
-                        "harness_error",
-                        template.as_path(),
-                        &doc,
-                        &input,
+                        attempt_i: i,
+                        kind: "harness_error",
+                        template: template.as_path(),
+                        doc: &doc,
+                        input: &input,
                         iter_seed,
                         ai_seed,
                         benchmark_java,
-                        None,
-                        Some(&e),
-                        None,
-                    );
+                        report: None,
+                        error: Some(&e),
+                        sandbox_src: None,
+                    });
                     failures.push(FuzzFailure {
                         iteration: i,
                         scenario_template: template.clone(),
@@ -2133,25 +2160,27 @@ pub fn replay_fuzz_artifact_dir_with_input(
     };
     let ai_seed = meta
         .get("ai_seed")
-        .and_then(|v| v.as_u64())
-        .or_else(|| meta.get("iteration_seed").and_then(|v| v.as_u64()))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            meta.get("iteration_seed")
+                .and_then(serde_json::Value::as_u64)
+        })
         .unwrap_or(input.seed);
 
     let ai_mirror_rel = meta
         .get("ai_mirror_rel")
         .and_then(|v| v.as_str())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("test/ai"));
+        .map_or_else(|| PathBuf::from("test/ai"), PathBuf::from);
 
     let benchmark_java = meta
         .get("benchmark_java")
-        .and_then(|v| v.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
     let fuzz_parity = meta
         .get("fuzz_parity")
         .or_else(|| meta.get("mutate_ai_require_compilable"))
-        .and_then(|v| v.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
 
     if fuzz_parity {
@@ -2167,7 +2196,7 @@ pub fn replay_fuzz_artifact_dir_with_input(
         iterations: 1,
         master_seed: meta
             .get("master_seed")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0),
         fuzz_random_seed: true,
         shuffle_ais: true,
@@ -2241,13 +2270,16 @@ pub fn replay_fuzz_artifact_dir_with_input(
         return Ok(());
     }
 
-    let overlay_dir = std::env::temp_dir().join(format!("leekgen_replay_ai_{:016x}", ai_seed));
+    let overlay_dir = std::env::temp_dir().join(format!("leekgen_replay_ai_{ai_seed:016x}"));
     if overlay_dir.is_dir() {
         let _ = fs::remove_dir_all(&overlay_dir);
     }
     let mirror_src = generator_root.join(&ai_mirror_rel);
     copy_dir_recursive(&mirror_src, &overlay_dir.join(&ai_mirror_rel)).map_err(|e| {
-        GenError::Message(format!("replay: mirror AI tree {}: {e}", mirror_src.display()))
+        GenError::Message(format!(
+            "replay: mirror AI tree {}: {e}",
+            mirror_src.display()
+        ))
     })?;
     let rels = discover_ai_rel_paths(&overlay_dir, ai_mirror_rel.as_path()).map_err(|e| {
         GenError::Message(format!(
@@ -2257,7 +2289,8 @@ pub fn replay_fuzz_artifact_dir_with_input(
     })?;
     let mut ai_rng = StdRng::seed_from_u64(ai_seed);
     apply_mutations_to_leek_files(&overlay_dir, &rels, &mut ai_rng, &input, &replay_fuzz_cfg)?;
-    let res = run_scenario_path_with_ai_overlay(&scen_path, generator_root, Some(overlay_dir.as_path()));
+    let res =
+        run_scenario_path_with_ai_overlay(&scen_path, generator_root, Some(overlay_dir.as_path()));
     cleanup_overlay(&overlay_dir, keep_temps);
     res.map(|_| ())
 }
@@ -2280,7 +2313,7 @@ pub fn replay_fuzz_artifact_dir_rust_outcome(
 
     let benchmark_java = meta
         .get("benchmark_java")
-        .and_then(|v| v.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     if benchmark_java {
         return Err(GenError::Message(
@@ -2297,15 +2330,17 @@ pub fn replay_fuzz_artifact_dir_rust_outcome(
 
     let ai_seed = meta
         .get("ai_seed")
-        .and_then(|v| v.as_u64())
-        .or_else(|| meta.get("iteration_seed").and_then(|v| v.as_u64()))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            meta.get("iteration_seed")
+                .and_then(serde_json::Value::as_u64)
+        })
         .unwrap_or(input.seed);
 
     let ai_mirror_rel = meta
         .get("ai_mirror_rel")
         .and_then(|v| v.as_str())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("test/ai"));
+        .map_or_else(|| PathBuf::from("test/ai"), PathBuf::from);
 
     // Rust-only replay.
     if input.mutate_ai_level == 0 {
@@ -2320,7 +2355,7 @@ pub fn replay_fuzz_artifact_dir_rust_outcome(
         iterations: 1,
         master_seed: meta
             .get("master_seed")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(0),
         fuzz_random_seed: true,
         shuffle_ais: true,
@@ -2356,13 +2391,16 @@ pub fn replay_fuzz_artifact_dir_rust_outcome(
         mutate_ramp_every: 200,
     };
 
-    let overlay_dir = std::env::temp_dir().join(format!("leekgen_replay_ai_{:016x}", ai_seed));
+    let overlay_dir = std::env::temp_dir().join(format!("leekgen_replay_ai_{ai_seed:016x}"));
     if overlay_dir.is_dir() {
         let _ = fs::remove_dir_all(&overlay_dir);
     }
     let mirror_src = generator_root.join(&ai_mirror_rel);
     copy_dir_recursive(&mirror_src, &overlay_dir.join(&ai_mirror_rel)).map_err(|e| {
-        GenError::Message(format!("replay: mirror AI tree {}: {e}", mirror_src.display()))
+        GenError::Message(format!(
+            "replay: mirror AI tree {}: {e}",
+            mirror_src.display()
+        ))
     })?;
     let rels = discover_ai_rel_paths(&overlay_dir, ai_mirror_rel.as_path()).map_err(|e| {
         GenError::Message(format!(
@@ -2391,11 +2429,16 @@ mod tests {
         });
         let pool = vec!["x.leek".to_string(), "y.leek".to_string()];
         let mut rng = StdRng::seed_from_u64(42);
-        let mut input = FuzzInput::default();
-        input.p_fuzz_random_seed = 255;
-        input.p_shuffle_ais = 255;
+        let input = FuzzInput {
+            p_fuzz_random_seed: 255,
+            p_shuffle_ais: 255,
+            ..FuzzInput::default()
+        };
         apply_fuzz_variants(&mut doc, &mut rng, &pool, &input);
-        assert!(doc.get("random_seed").and_then(|v| v.as_i64()).is_some());
+        assert!(doc
+            .get("random_seed")
+            .and_then(serde_json::Value::as_i64)
+            .is_some());
         let ai = doc["entities"][0][0]["ai"].as_str().unwrap();
         assert!(ai == "x.leek" || ai == "y.leek");
     }
@@ -2489,14 +2532,17 @@ mod tests {
         });
         let mut rng = StdRng::seed_from_u64(7);
         apply_fuzz_map_obstacles(&mut doc, &mut rng);
-        assert!(doc["map"]["obstacles"].as_array().unwrap().len() >= 1);
+        assert!(!doc["map"]["obstacles"].as_array().unwrap().is_empty());
         apply_fuzz_entity_cells(&mut doc, &mut rng);
         let c = doc["entities"][0][0]["cell"].as_i64().unwrap();
         assert!((0..9).contains(&c));
         apply_fuzz_max_operations_per_entity(&mut doc, &mut rng);
         assert!(doc["max_operations_per_entity"].as_i64().unwrap() >= 50_000);
         apply_fuzz_entity_loadouts(&mut doc, &mut rng);
-        assert!(doc["entities"][0][0]["weapons"].as_array().unwrap().len() >= 1);
+        assert!(!doc["entities"][0][0]["weapons"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -2550,7 +2596,10 @@ mod tests {
         assert!(doc.get("teams").is_some());
         assert!(doc.get("entities").is_some());
         assert!(doc.get("map").is_some());
-        assert_eq!(doc.get("random_seed").and_then(|v| v.as_i64()), Some(424242));
+        assert_eq!(
+            doc.get("random_seed").and_then(serde_json::Value::as_i64),
+            Some(424242)
+        );
 
         let entities = doc
             .get("entities")
@@ -2559,7 +2608,7 @@ mod tests {
         assert_eq!(entities.len(), 2, "2 teams");
         let n_total: usize = entities
             .iter()
-            .map(|team| team.as_array().map(|a| a.len()).unwrap_or(0))
+            .map(|team| team.as_array().map_or(0, std::vec::Vec::len))
             .sum();
         assert!(n_total >= 2, "at least 1 entity per team");
     }

@@ -20978,7 +20978,7 @@ pub static VM_JAVA_CASES_TEST_NUMBER__TESTSPECIALCHARACTERS: &[JavaVmCase] = &[
         kind: SourceKind::Snippet,
         source: "return π",
         expect: ExpectKind::Almost {
-            value: 3.141592653589793,
+            value: std::f64::consts::PI,
             delta: 1e-10,
         },
         version_min: 2,
@@ -22402,7 +22402,7 @@ pub static VM_JAVA_CASES_TEST_NUMBER__TESTCONSTANTS: &[JavaVmCase] = &[
         kind: SourceKind::Snippet,
         source: "return PI",
         expect: ExpectKind::Almost {
-            value: 3.141592653589793,
+            value: std::f64::consts::PI,
             delta: 1e-10,
         },
         version_min: 2,
@@ -22455,7 +22455,7 @@ pub static VM_JAVA_CASES_TEST_NUMBER__TESTCONSTANTS: &[JavaVmCase] = &[
         kind: SourceKind::Snippet,
         source: "return 2 * PI",
         expect: ExpectKind::Almost {
-            value: 6.283185307179586,
+            value: std::f64::consts::TAU,
             delta: 1e-10,
         },
         version_min: 2,
@@ -22482,7 +22482,7 @@ pub static VM_JAVA_CASES_TEST_NUMBER__TESTCONSTANTS: &[JavaVmCase] = &[
         kind: SourceKind::Snippet,
         source: "return E",
         expect: ExpectKind::Almost {
-            value: 2.718281828459045,
+            value: std::f64::consts::E,
             delta: 1e-10,
         },
         version_min: 2,
@@ -35178,12 +35178,7 @@ pub static VM_JAVA_CASES_TEST_SYSTEM__RUN: &[JavaVmCase] = &[JavaVmCase {
 pub const VM_JAVA_SUITE_TOTAL_CASES: usize = 3809;
 
 /// `(java_filename, java_test_method, group_ident, cases)`.
-pub static VM_JAVA_GROUPS: &[(
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static [JavaVmCase],
-)] = &[
+pub static VM_JAVA_GROUPS: &[(&str, &str, &str, &[JavaVmCase])] = &[
     (
         "TestArray.java",
         "testArray_constructor",

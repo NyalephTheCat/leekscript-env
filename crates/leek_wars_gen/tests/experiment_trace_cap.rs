@@ -1,4 +1,4 @@
-//! Trace respects max_events cap (Rust-only sidecar path).
+//! Trace respects `max_events` cap (Rust-only sidecar path).
 
 use leek_wars_gen::fight::{run_scenario_path_with_options, FightRunOptions, TraceConfig};
 use std::path::PathBuf;

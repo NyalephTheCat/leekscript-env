@@ -116,7 +116,10 @@ pub(super) fn combine_assign_old_rhs(
     rhs: Value,
 ) -> Result<Value, InterpretError> {
     let language_version = cx.language_version;
-    use HirAssignOp::*;
+    use HirAssignOp::{
+        AddAssign, Assign, BitAndAssign, BitOrAssign, BitXorAssign, DivAssign, IntDivAssign,
+        MulAssign, PowAssign, RemAssign, ShlAssign, ShrAssign, SubAssign, UShrAssign,
+    };
     match op {
         Assign => Ok(rhs),
         AddAssign => {
@@ -265,10 +268,11 @@ pub(super) fn assign_place(
                         let c = combine_assign_old_rhs(cx, op, old.clone(), rhs)?;
                         maybe_strict_integer_coerce(cx, None, &old, c, op)
                     };
-                    let decl = cx
-                        .classes
-                        .get(&owner)
-                        .and_then(|d| d.static_field_decl_tys.get(name).map(|s| s.as_str()));
+                    let decl = cx.classes.get(&owner).and_then(|d| {
+                        d.static_field_decl_tys
+                            .get(name)
+                            .map(std::string::String::as_str)
+                    });
                     let newv = coerce_var_init_value(newv, decl, cx.language_version)?;
                     let Some(def) = cx.classes.get_mut(&owner) else {
                         return Err(InterpretError::variable_not_exists(name.as_str()).into());
@@ -346,13 +350,13 @@ pub(super) fn assign_place(
                         if cur_tag == "null" {
                             if new_tag != "null" {
                                 cx.binding_decl_ty
-                                    .insert(name.to_string(), Some(format!("#infer:{new_tag}")));
+                                    .insert(name.clone(), Some(format!("#infer:{new_tag}")));
                             }
                         } else if new_tag != "null" && new_tag != cur_tag {
                             return Err(InterpretError::assignment_incompatible_type().into());
                         }
                     }
-                };
+                }
             }
             cx.last_assign_value = Some(newv.clone());
             // Leek v1: assigning to a captured outer variable inside a `function(){...}` creates a
@@ -364,7 +368,7 @@ pub(super) fn assign_place(
                 && cx.env.callable_outer_lexical_is_array_ref(name.as_str())
                 && !cx.env.is_aliased(name.as_str())
             {
-                cx.env.insert(name.to_string(), newv);
+                cx.env.insert(name.clone(), newv);
             } else {
                 cx.assign_with_ram(name, newv)?;
             }
@@ -494,10 +498,11 @@ fn assign_walk_value(
                         let c = combine_assign_old_rhs(cx, op, old.clone(), rhs)?;
                         maybe_strict_integer_coerce(cx, None, &old, c, op)
                     };
-                    let decl = cx
-                        .classes
-                        .get(data.class_name.as_str())
-                        .and_then(|def| def.field_decl_tys.get(field).map(|s| s.as_str()));
+                    let decl = cx.classes.get(data.class_name.as_str()).and_then(|def| {
+                        def.field_decl_tys
+                            .get(field)
+                            .map(std::string::String::as_str)
+                    });
                     let newv = coerce_var_init_value(newv, decl, cx.language_version)?;
                     let new_slot = !data.fields.contains_key(field.as_str());
                     data.fields.insert(field.clone(), newv.clone());
@@ -544,10 +549,11 @@ fn assign_walk_value(
                         let c = combine_assign_old_rhs(cx, op, old.clone(), rhs)?;
                         maybe_strict_integer_coerce(cx, None, &old, c, op)
                     };
-                    let decl = cx
-                        .classes
-                        .get(&owner)
-                        .and_then(|d| d.static_field_decl_tys.get(field).map(|s| s.as_str()));
+                    let decl = cx.classes.get(&owner).and_then(|d| {
+                        d.static_field_decl_tys
+                            .get(field)
+                            .map(std::string::String::as_str)
+                    });
                     let newv = coerce_var_init_value(newv, decl, cx.language_version)?;
                     let Some(def) = cx.classes.get_mut(&owner) else {
                         return Err(InterpretError::member_requires_instance().into());
@@ -558,9 +564,7 @@ fn assign_walk_value(
                 Value::Map(m) | Value::Object(m) => {
                     let key = Value::String(field.clone());
                     let mut bm = m.borrow_mut();
-                    let old = map_find_key(&bm, &key)
-                        .map(|p| bm[p].1.clone())
-                        .unwrap_or(Value::Null);
+                    let old = map_find_key(&bm, &key).map_or(Value::Null, |p| bm[p].1.clone());
                     let newv = if matches!(op, HirAssignOp::Assign) {
                         rhs
                     } else {
@@ -647,13 +651,13 @@ fn assign_walk_value(
                         };
                         assign_walk_value(cx, &mut child, segs, idx + 1, op, rhs)?;
                         let mut b = m.borrow_mut();
-                        if p != usize::MAX {
-                            b[p].1 = child;
-                        } else {
+                        if p == usize::MAX {
                             cx.charge_ram_quads(MAP_RAM_QUADS_PER_ENTRY)
                                 .map_err(ExecAbort::Error)?;
                             charge_legacy_keyed_insert_ops(cx)?;
                             b.push_kv(key.clone(), child);
+                        } else {
+                            b[p].1 = child;
                         }
                         ram::note_keyed_container_ram_peak(cx, b.len())
                             .map_err(ExecAbort::Error)?;
@@ -710,13 +714,13 @@ fn assign_walk_value(
                 };
                 assign_walk_value(cx, &mut child, segs, idx + 1, op, rhs)?;
                 let mut b = m.borrow_mut();
-                if p != usize::MAX {
-                    b[p].1 = child;
-                } else {
+                if p == usize::MAX {
                     cx.charge_ram_quads(MAP_RAM_QUADS_PER_ENTRY)
                         .map_err(ExecAbort::Error)?;
                     charge_legacy_keyed_insert_ops(cx)?;
                     b.push_kv(key, child);
+                } else {
+                    b[p].1 = child;
                 }
                 ram::note_keyed_container_ram_peak(cx, b.len()).map_err(ExecAbort::Error)?;
             }
@@ -865,9 +869,7 @@ fn index_assign_on_value(
                 key.clone()
             };
             let mut bm = m.borrow_mut();
-            let old = map_find_key(&bm, &eff_key)
-                .map(|p| bm[p].1.clone())
-                .unwrap_or(Value::Null);
+            let old = map_find_key(&bm, &eff_key).map_or(Value::Null, |p| bm[p].1.clone());
             if cx.language_version >= 4
                 && cx.strict == Some(true)
                 && !matches!(op, HirAssignOp::Assign)
@@ -924,10 +926,11 @@ fn index_assign_on_value(
                 let c = combine_assign_old_rhs(cx, op, old.clone(), rhs)?;
                 maybe_strict_integer_coerce(cx, None, &old, c, op)
             };
-            let decl = cx
-                .classes
-                .get(data.class_name.as_str())
-                .and_then(|def| def.field_decl_tys.get(&field).map(|s| s.as_str()));
+            let decl = cx.classes.get(data.class_name.as_str()).and_then(|def| {
+                def.field_decl_tys
+                    .get(&field)
+                    .map(std::string::String::as_str)
+            });
             let newv = coerce_var_init_value(newv, decl, cx.language_version)?;
             let new_slot = !data.fields.contains_key(field.as_str());
             data.fields.insert(field, newv.clone());
@@ -966,10 +969,11 @@ fn index_assign_on_value(
                 let c = combine_assign_old_rhs(cx, op, old.clone(), rhs)?;
                 maybe_strict_integer_coerce(cx, None, &old, c, op)
             };
-            let decl = cx
-                .classes
-                .get(&owner)
-                .and_then(|d| d.static_field_decl_tys.get(&field).map(|s| s.as_str()));
+            let decl = cx.classes.get(&owner).and_then(|d| {
+                d.static_field_decl_tys
+                    .get(&field)
+                    .map(std::string::String::as_str)
+            });
             let newv = coerce_var_init_value(newv, decl, cx.language_version)?;
             let Some(def) = cx.classes.get_mut(&owner) else {
                 return Err(InterpretError::not_indexable().into());

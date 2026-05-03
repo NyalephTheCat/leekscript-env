@@ -89,16 +89,16 @@ fn strict_scan_stmts_for_infer_assignment_errors(
             | HirStmt::For { body, .. }
             | HirStmt::ForIn { body, .. }
             | HirStmt::ForInKeyValue { body, .. } => {
-                strict_scan_stmts_for_infer_assignment_errors(cx, body)?
+                strict_scan_stmts_for_infer_assignment_errors(cx, body)?;
             }
             HirStmt::Switch { clauses, .. } => {
                 for cl in clauses {
                     match cl {
                         HirSwitchClause::Case { body, .. } => {
-                            strict_scan_stmts_for_infer_assignment_errors(cx, body)?
+                            strict_scan_stmts_for_infer_assignment_errors(cx, body)?;
                         }
                         HirSwitchClause::Default { body } => {
-                            strict_scan_stmts_for_infer_assignment_errors(cx, body)?
+                            strict_scan_stmts_for_infer_assignment_errors(cx, body)?;
                         }
                     }
                 }
@@ -361,8 +361,7 @@ pub(super) fn exec_stmt(
         } => {
             let init_ops = init
                 .as_ref()
-                .map(super::java_ops_budget::hir_java_expr_ops_budget)
-                .unwrap_or(0);
+                .map_or(0, super::java_ops_budget::hir_java_expr_ops_budget);
             cx.charge_ops(1u64.saturating_add(init_ops))
                 .map_err(ExecAbort::Error)?;
             let v = match init {
@@ -401,8 +400,7 @@ pub(super) fn exec_stmt(
             for (name, init) in entries {
                 let init_ops = init
                     .as_ref()
-                    .map(super::java_ops_budget::hir_java_expr_ops_budget)
-                    .unwrap_or(0);
+                    .map_or(0, super::java_ops_budget::hir_java_expr_ops_budget);
                 cx.charge_ops(1u64.saturating_add(init_ops))
                     .map_err(ExecAbort::Error)?;
                 let v = match init {
@@ -502,7 +500,7 @@ pub(super) fn exec_stmt(
                 for fname in order {
                     if let Some(expr) = inits.get(&fname) {
                         let raw = eval_expr(cx, expr)?;
-                        let decl = decl_tys.get(&fname).map(|s| s.as_str());
+                        let decl = decl_tys.get(&fname).map(std::string::String::as_str);
                         let v = super::util::coerce_var_init_value(raw, decl, cx.language_version)?;
                         if let Some(def) = cx.classes.get_mut(&cn) {
                             def.static_fields.insert(fname.clone(), v.clone());
@@ -756,8 +754,7 @@ pub(super) fn exec_stmt(
             loop {
                 let co = cond
                     .as_ref()
-                    .map(super::java_ops_budget::hir_java_loop_cond_outer_charge)
-                    .unwrap_or(0);
+                    .map_or(0, super::java_ops_budget::hir_java_loop_cond_outer_charge);
                 if co > 0 {
                     cx.charge_ops(co).map_err(ExecAbort::Error)?;
                 }

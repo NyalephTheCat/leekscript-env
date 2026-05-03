@@ -1,4 +1,4 @@
-//! Syntax-tree-aware mutation of LeekScript sources for fuzzing and differential testing.
+//! Syntax-tree-aware mutation of `LeekScript` sources for fuzzing and differential testing.
 //!
 //! ## Acceptance policies
 //!
@@ -13,8 +13,8 @@
 mod mutate;
 
 pub use mutate::{
-    generate_mutant_candidate, generate_mutant_candidate_with_settings, mutate_leek_source, parse_best,
-    source_parses_any_version,
+    generate_mutant_candidate, generate_mutant_candidate_with_settings, mutate_leek_source,
+    parse_best, source_parses_any_version,
 };
 
 use leekscript_run::CompileOptions;
@@ -95,10 +95,12 @@ impl Default for MutateSettings {
 }
 
 impl MutateSettings {
+    #[must_use]
     pub fn accept_all() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn require_parseable() -> Self {
         Self {
             acceptance: MutantAcceptance::RequireParseable,

@@ -145,7 +145,10 @@ pub(super) fn hir_java_loop_cond_outer_charge(cond: &HirExpr) -> u64 {
 
 /// `=` / `+=` / … — mirrors `LeekExpression` assignment `getOperations()` (place + value + assign + compound op).
 pub(super) fn hir_java_assign_ops(place: &HirExpr, op: HirAssignOp, value: &HirExpr) -> u64 {
-    use HirAssignOp::*;
+    use HirAssignOp::{
+        AddAssign, Assign, BitAndAssign, BitOrAssign, BitXorAssign, DivAssign, IntDivAssign,
+        MulAssign, PowAssign, RemAssign, ShlAssign, ShrAssign, SubAssign, UShrAssign,
+    };
     let p = hir_java_expr_ops_budget(place);
     let v = hir_java_expr_ops_budget(value);
     let compound = match op {
@@ -177,14 +180,18 @@ pub(super) fn hir_java_for_step_ops(step: &HirForStep) -> u64 {
 }
 
 fn unary_op_budget(op: HirUnaryOp) -> u64 {
-    use HirUnaryOp::*;
+    use HirUnaryOp::{BitNot, Neg, Not, Typeof};
     match op {
         Neg | Not | BitNot | Typeof => 1,
     }
 }
 
 fn binary_op_budget(op: HirBinOp) -> u64 {
-    use HirBinOp::*;
+    use HirBinOp::{
+        Add, BitAnd, BitOr, BitXor, Div, Eq, Ge, Gt, In, Instanceof, IntDiv, Le, LogicalAnd,
+        LogicalOr, Lt, Mul, Ne, NotIn, NullishCoalesce, Pow, Rem, Shl, Shr, StrictEq, StrictNe,
+        Sub, UShr,
+    };
     match op {
         Add | Sub | Eq | Ne | StrictEq | StrictNe | Lt | Le | Gt | Ge | BitAnd | BitOr | BitXor
         | Shl | Shr | UShr | NotIn | In | Instanceof => 1,

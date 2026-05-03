@@ -28,7 +28,7 @@ pub(super) fn coerce_var_init_value(
         "integer" | "int" | "long" => match v {
             Value::Integer(i) => Ok(Value::Integer(i)),
             Value::Real(r) => Ok(Value::Integer(r as i64)),
-            Value::Bool(b) => Ok(Value::Integer(if b { 1 } else { 0 })),
+            Value::Bool(b) => Ok(Value::Integer(i64::from(b))),
             Value::Null if language_version == 1 => Err(InterpretError {
                 reference: "IMPOSSIBLE_CAST",
                 message: "impossible cast to integer".into(),
@@ -89,13 +89,7 @@ pub(super) fn java_longint(v: &Value) -> i64 {
     match v {
         Value::Integer(i) => *i,
         Value::Real(r) | Value::RealDotZero(r) => *r as i64,
-        Value::Bool(b) => {
-            if *b {
-                1
-            } else {
-                0
-            }
-        }
+        Value::Bool(b) => i64::from(*b),
         Value::Null => 0,
         Value::String(s) => {
             if s == "true" {
@@ -407,10 +401,8 @@ fn interval_contains_scalar(x: f64, iv: &IntervalValue) -> bool {
         } else {
             x > iv.min
         }
-    } else if iv.min.is_sign_negative() {
-        true
     } else {
-        false
+        iv.min.is_sign_negative()
     };
     let le_max = if iv.max.is_finite() {
         if iv.max_closed {
@@ -418,10 +410,8 @@ fn interval_contains_scalar(x: f64, iv: &IntervalValue) -> bool {
         } else {
             x < iv.max
         }
-    } else if iv.max.is_sign_positive() {
-        true
     } else {
-        false
+        iv.max.is_sign_positive()
     };
     ge_min && le_max
 }
@@ -468,7 +458,10 @@ fn values_equal_for_compare_inner(
     b: &Value,
     active: &mut HashSet<(usize, usize)>,
 ) -> bool {
-    use Value::*;
+    use Value::{
+        Array, Bool, Function, Instance, Integer, Interval, Map, Native, Null, Object, Real, Set,
+        String,
+    };
     match (a, b) {
         (Integer(x), Integer(y)) => x == y,
         (Real(x), Real(y)) => x == y,
@@ -542,7 +535,7 @@ fn values_equal_for_compare_inner(
                 return false;
             }
             // Order-insensitive structural equality.
-            for x in ab.elems.iter() {
+            for x in &ab.elems {
                 if !bb
                     .elems
                     .iter()
@@ -576,7 +569,7 @@ fn index_i64_for_read(v: &Value) -> Option<i64> {
     match v {
         Value::Integer(n) => Some(*n),
         Value::Real(r) if r.is_finite() => Some(r.trunc() as i64),
-        Value::Bool(b) => Some(if *b { 1 } else { 0 }),
+        Value::Bool(b) => Some(i64::from(*b)),
         Value::Null => Some(0),
         _ => None,
     }
@@ -722,7 +715,7 @@ pub(super) fn neg_slice_end(key: Option<&Value>, len: usize) -> Result<i64, Exec
 pub(super) fn java_string_hash_code(s: &str) -> i32 {
     let mut h: i32 = 0;
     for &b in s.as_bytes() {
-        h = h.wrapping_mul(31).wrapping_add(b as i32);
+        h = h.wrapping_mul(31).wrapping_add(i32::from(b));
     }
     h
 }
@@ -731,7 +724,7 @@ pub(super) fn java_string_hash_code(s: &str) -> i32 {
 fn leek_java_hash_code(v: &Value) -> i32 {
     match v {
         Value::Integer(i) => {
-            let x = *i as i64;
+            let x = *i;
             (x ^ (x >> 32)) as i32
         }
         Value::Real(r) => {

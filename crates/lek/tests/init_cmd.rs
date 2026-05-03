@@ -2,7 +2,7 @@ use std::process::Command;
 
 #[test]
 fn init_writes_valid_manifest_and_example() {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let dir = std::env::temp_dir().join(format!("lek-init-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -16,7 +16,8 @@ fn init_writes_valid_manifest_and_example() {
 
     let manifest = dir.join("Leek.toml");
     let s = std::fs::read_to_string(&manifest).unwrap();
-    leekscript_config::LeekManifest::from_str(&s).expect("valid Leek.toml");
+    s.parse::<leekscript_config::LeekManifest>()
+        .expect("valid Leek.toml");
 
     let example = dir.join("example.leek");
     assert!(example.is_file());
@@ -28,7 +29,7 @@ fn init_writes_valid_manifest_and_example() {
 
 #[test]
 fn init_no_example_skips_leek_file() {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let dir = std::env::temp_dir().join(format!("lek-init-noex-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -45,7 +46,7 @@ fn init_no_example_skips_leek_file() {
 
 #[test]
 fn init_refuses_existing_without_force() {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let dir = std::env::temp_dir().join(format!("lek-init-exists-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

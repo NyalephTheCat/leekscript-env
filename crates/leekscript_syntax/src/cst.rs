@@ -7,11 +7,13 @@ use leekscript_lexer::{Token, TokenKind};
 use rowan::{GreenNodeBuilder, SyntaxNode};
 
 /// Lexical tokens only (no `Eof`), in order.
+#[must_use]
 pub fn non_eof_tokens(tokens: &[Token]) -> Vec<&Token> {
     tokens.iter().filter(|t| t.kind != TokenKind::Eof).collect()
 }
 
 /// Lossless green tree: `SOURCE_FILE` → trivia + lexical tokens, covering all of `src`.
+#[must_use]
 pub fn build_source_file_tree(src: &str, tokens: &[Token]) -> SyntaxNode<LeekLanguage> {
     let lex = non_eof_tokens(tokens);
     let mut builder = GreenNodeBuilder::new();
@@ -44,6 +46,7 @@ pub fn build_source_file_tree(src: &str, tokens: &[Token]) -> SyntaxNode<LeekLan
 }
 
 /// Extract prefix, between-token gaps, and suffix from a flat `SOURCE_FILE` (same layout as [`build_source_file_tree`]).
+#[must_use]
 pub fn gaps_from_source_file(
     root: &SyntaxNode<LeekLanguage>,
 ) -> Option<(String, Vec<String>, String)> {

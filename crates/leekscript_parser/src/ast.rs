@@ -23,7 +23,7 @@ pub enum Stmt {
     /// `switch` `(` expr `)` `{` … `}`
     Switch(SwitchStmt),
     /// `for` `(` init `;` cond `;` update `)` `{` … `}`
-    For(ForStmt),
+    For(Box<ForStmt>),
     /// `for` `(` (`var`)? ident `in` expr `)` `{` … `}`
     ForIn(ForInStmt),
     /// `for` `(` key `:` value `in` expr `)` `{` … `}` (`key` / `value`: `ident` or `var` `ident`).
@@ -140,7 +140,9 @@ pub struct ParamDefault {
 pub enum FunctionBody {
     Block(Block),
     /// `;` after optional `=>` return type (declaration-only).
-    SignatureStub { semi: usize },
+    SignatureStub {
+        semi: usize,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,6 +299,7 @@ pub struct ForInBinding {
 
 impl ForInBinding {
     /// Java: `var` keyword or a type prefix introduces a new local.
+    #[must_use]
     pub fn is_declaration(&self) -> bool {
         self.var_kw.is_some() || self.type_tokens.is_some()
     }
@@ -640,9 +643,15 @@ pub enum TypeExpr {
     /// `integer`, `real`, `string`, `boolean`, `any`, `Object`, `Class`, or a user class identifier.
     Named { name: usize },
     /// `T?`
-    Nullable { inner: Box<TypeExpr>, question: usize },
+    Nullable {
+        inner: Box<TypeExpr>,
+        question: usize,
+    },
     /// `A | B | C`
-    Union { first: Box<TypeExpr>, rest: Vec<(usize, TypeExpr)> },
+    Union {
+        first: Box<TypeExpr>,
+        rest: Vec<(usize, TypeExpr)>,
+    },
     /// `Base<...>` for `Array`, `Set`, `Map`, `Function`, and generic class types.
     ///
     /// For `Function<...>`, the optional return type is represented by `arrow_ret`.

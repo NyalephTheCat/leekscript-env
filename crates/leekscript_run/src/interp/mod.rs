@@ -57,7 +57,7 @@ fn seed_leekwars_workspace_integer_globals(env: &mut env::Env) {
             .integer_globals
             .clone()
     });
-    for (name, v) in ints.iter() {
+    for (name, v) in ints {
         env.insert_global(name.clone(), Value::Integer(*v));
     }
 }
@@ -74,6 +74,14 @@ pub struct InterpretSession {
 pub struct InterpretStats {
     pub operations_used: u64,
     pub ram_quads_used: u64,
+}
+
+/// Resource limits and source mapping for [`InterpretSession::from_hir_leek_wars_ai_with_extra_natives`].
+pub struct LeekWarsAiInitParams {
+    pub operations_limit: Option<u64>,
+    pub ram_quads_limit: Option<u64>,
+    pub debug_sources: Option<context::DebugSourceContext>,
+    pub default_ai_path: std::path::PathBuf,
 }
 
 impl InterpretSession {
@@ -152,6 +160,7 @@ impl InterpretSession {
 
     /// Split a Leek Wars AI file for Java-style execution: declarations run once (like `staticInit`),
     /// everything else runs each turn (the body of compiled `runIA`).
+    #[must_use]
     pub fn split_leek_wars_ai_stmts(
         hir: &HirFile,
     ) -> (
@@ -188,11 +197,14 @@ impl InterpretSession {
         language_version: u8,
         host: Option<Box<dyn InterpreterHost>>,
         extra_natives: &[&'static str],
-        operations_limit: Option<u64>,
-        ram_quads_limit: Option<u64>,
-        debug_sources: Option<context::DebugSourceContext>,
-        default_ai_path: std::path::PathBuf,
+        params: LeekWarsAiInitParams,
     ) -> Result<(Self, Vec<HirStmt>, Vec<std::path::PathBuf>), InterpretError> {
+        let LeekWarsAiInitParams {
+            operations_limit,
+            ram_quads_limit,
+            debug_sources,
+            default_ai_path,
+        } = params;
         let (init_stmts, mut init_files, turn_stmts, mut turn_files) =
             Self::split_leek_wars_ai_stmts(hir);
         let default_ai_path = std::fs::canonicalize(&default_ai_path).unwrap_or(default_ai_path);
@@ -280,6 +292,7 @@ impl InterpretSession {
     }
 
     /// Cumulative VM operations (Java `EntityAI.operations()` after each turn / for outcome `fight.ops`).
+    #[must_use]
     pub fn operations_used(&self) -> u64 {
         self.cx.operations_used
     }

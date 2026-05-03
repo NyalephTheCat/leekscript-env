@@ -1,4 +1,4 @@
-//! Compile and (eventually) execute LeekScript.
+//! Compile and (eventually) execute `LeekScript`.
 //!
 //! Today this crate drives **directives → lexer → delimiter check → grammar parse → HIR lowering** and returns a
 //! lossless rowan [`SyntaxNode`](rowan::SyntaxNode) plus [`HirFile`](leekscript_hir::HirFile). A future phase can emit bytecode or call a VM.
@@ -9,13 +9,14 @@ pub mod sig_workspace;
 
 pub use interp::{
     interpret_hir, interpret_hir_with_host, interpret_hir_with_limits_and_stats,
-    interpret_hir_with_strict, value_java_export, DebugLogHandled, DebugLogKind, DebugSourceContext,
-    ExecAbort, InstanceData, InterpretError, InterpretSession, InterpretStats, InterpreterHost, Value,
-    STDLIB_GLOBAL_IDENTIFIERS,
+    interpret_hir_with_strict, value_java_export, DebugLogHandled, DebugLogKind,
+    DebugSourceContext, ExecAbort, InstanceData, InterpretError, InterpretSession, InterpretStats,
+    InterpreterHost, LeekWarsAiInitParams, Value, STDLIB_GLOBAL_IDENTIFIERS,
 };
 pub use leekscript_hir::{HirBinOp, HirExpr, HirFile, HirStmt, HirSwitchClause, HirUnaryOp};
 
 /// Human-readable copy for lexer [`leekscript_lexer::LexError::reference`] values (`lek check`, `lek fmt`, `lek run` compile failures).
+#[must_use]
 pub fn lexer_reference_display_message(reference: &str) -> &'static str {
     match reference {
         "INVALID_CHAR" => "invalid character",
@@ -25,6 +26,7 @@ pub fn lexer_reference_display_message(reference: &str) -> &'static str {
 }
 
 /// Stable CLI copy for interpreter [`InterpretError::reference`] values. [`None`] means use [`InterpretError::message`].
+#[must_use]
 pub fn interpret_reference_display_message(reference: &str) -> Option<&'static str> {
     match reference {
         "NOT_ITERABLE" => Some("value is not iterable"),

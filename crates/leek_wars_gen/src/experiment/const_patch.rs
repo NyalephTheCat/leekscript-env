@@ -46,7 +46,10 @@ fn value_to_leek_literal(v: &Value) -> Result<String, GenError> {
 }
 
 /// Apply replacements to `const` declarations matching `name` (first match per name wins per line scan).
-pub fn patch_leek_constants(source: &str, replacements: &HashMap<String, Value>) -> Result<String, GenError> {
+pub fn patch_leek_constants(
+    source: &str,
+    replacements: &HashMap<String, Value>,
+) -> Result<String, GenError> {
     if replacements.is_empty() {
         return Ok(source.to_string());
     }
@@ -57,15 +60,13 @@ pub fn patch_leek_constants(source: &str, replacements: &HashMap<String, Value>)
             if let Some(val) = replacements.get(name) {
                 let indent = caps.name("indent").unwrap().as_str();
                 let lit = value_to_leek_literal(val)?;
-                let trail = caps.name("trail").map(|m| m.as_str()).unwrap_or("");
+                let trail = caps.name("trail").map_or("", |m| m.as_str());
                 let trail_part = if trail.is_empty() {
                     String::new()
                 } else {
                     format!(" {trail}")
                 };
-                out_lines.push(format!(
-                    "{indent}const {name} = {lit};{trail_part}"
-                ));
+                out_lines.push(format!("{indent}const {name} = {lit};{trail_part}"));
                 continue;
             }
         }

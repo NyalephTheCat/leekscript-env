@@ -207,7 +207,8 @@ pub fn run_compile(
                 let hir_n = unit.hir.stmts.len();
                 match interpret_hir(&unit.hir, unit.language_version) {
                     Ok(outcome) => {
-                        let result_str = outcome.map(|v| value_java_export(&v, unit.language_version));
+                        let result_str =
+                            outcome.map(|v| value_java_export(&v, unit.language_version));
                         match message_format {
                             RunMessageFormat::Human => {
                                 let strict_note = match unit.strict {
@@ -243,7 +244,7 @@ pub fn run_compile(
                     Err(e) => {
                         exit = 1;
                         let code = registry_e_code(registry, e.reference);
-                        let msg = interpret_reference_display_message(&e.reference)
+                        let msg = interpret_reference_display_message(e.reference)
                             .map(str::to_string)
                             .unwrap_or(e.message);
                         match message_format {

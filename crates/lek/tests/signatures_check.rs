@@ -1,18 +1,17 @@
 //! `signature_globals` on [`lek::check::CheckOptions`] feeds the resolve pass.
 
-use lek::check::{check_one_file, default_registry_path, CheckOptions, CheckedFile};
 use leekscript_signatures::SignatureFile;
+use lek::check::{check_one_file, default_registry_path, CheckOptions, CheckedFile};
 
 #[test]
 fn check_uses_signature_globals_for_resolve() {
     let reg = leekscript_diagnostics::Registry::load_path(default_registry_path()).unwrap();
-    let sig = SignatureFile::from_str(
-        r#"
+    let sig: SignatureFile = r#"
 schema_version = 1
 functions = ["lwOnlyFn"]
 globals = ["LW_ONLY_GLOBAL"]
-"#,
-    )
+"#
+    .parse()
     .unwrap();
     let src = concat!(
         "function turn() {\n",

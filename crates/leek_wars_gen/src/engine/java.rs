@@ -105,14 +105,17 @@ pub fn dump_java_fight_bootstrap(
 
     let map_w =
         tail.get("width")
-            .and_then(|x| x.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .ok_or_else(|| GenError::Message("DumpStateRng: missing width".into()))? as i32;
     let map_h = tail
         .get("height")
-        .and_then(|x| x.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .ok_or_else(|| GenError::Message("DumpStateRng: missing height".into()))?
         as i32;
-    let map_type = tail.get("mapType").and_then(|x| x.as_i64()).unwrap_or(0) as i32;
+    let map_type = tail
+        .get("mapType")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0) as i32;
 
     let outcome_obstacles = tail.get("outcomeObstacles").cloned();
 
@@ -133,10 +136,10 @@ fn bootstrap_obstacle_stored_value(v: &Value) -> Result<i32, GenError> {
         return Ok(i as i32);
     }
     if let Some(arr) = v.as_array() {
-        if let Some(s) = arr.get(1).and_then(|x| x.as_i64()) {
+        if let Some(s) = arr.get(1).and_then(serde_json::Value::as_i64) {
             return Ok(s as i32);
         }
-        if let Some(s) = arr.get(0).and_then(|x| x.as_i64()) {
+        if let Some(s) = arr.first().and_then(serde_json::Value::as_i64) {
             return Ok(s as i32);
         }
     }
@@ -184,6 +187,7 @@ pub struct JavaEngine {
 }
 
 impl JavaEngine {
+    #[must_use]
     pub fn new(cfg: JavaEngineConfig) -> Self {
         Self { cfg }
     }
@@ -217,6 +221,5 @@ pub fn default_java_cwd(jar: &Path) -> PathBuf {
         return PathBuf::from(c);
     }
     jar.parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."))
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
 }

@@ -34,7 +34,7 @@ define_java_export_class_natives! {
     pub NULL_CLASS_EXPORT_NATIVE => "Null",
 }
 
-/// Extra `(sentinel, exported)` pairs for product-specific natives (e.g. LeekWars).
+/// Extra `(sentinel, exported)` pairs for product-specific natives (e.g. `LeekWars`).
 ///
 /// Codegen can replace this with `include!(concat!(env!("OUT_DIR"), "/java_export_extras.rs"))`
 /// from a build script, or patch this slice in-tree.
@@ -65,6 +65,7 @@ use super::util::interval_is_empty;
 use super::value::{InstanceData, IntervalValue, SharedArray, SharedMap, SharedSet, Value};
 
 /// Serialize `value` the way the reference runner’s `AI.export` does (observable `runIA` result).
+#[must_use]
 pub fn value_java_export(value: &Value, language_version: u8) -> String {
     let mut visited = HashSet::new();
     let mut map_self_depth = HashMap::new();
@@ -267,8 +268,7 @@ fn export_inner(
         Value::Interval(iv) => export_interval(iv, visited, ver, root_array_ptr, map_self_depth),
         Value::Function(_) => "#Anonymous Function".into(),
         Value::Native(name) => java_export_lookup_native_literal(name)
-            .map(str::to_string)
-            .unwrap_or_else(|| (*name).to_string()),
+            .map_or_else(|| (*name).to_string(), str::to_string),
         Value::UserClass(n) => format!("<class {n}>"),
         Value::Super => "<super>".into(),
         Value::Instance(rc) => export_instance(rc, visited, ver, root_array_ptr, map_self_depth),
@@ -319,7 +319,7 @@ fn export_double(v: f64, ver: u8) -> String {
         }
         let av = v.abs();
         // Match Java `Double.toString` for many magnitudes: scientific when |v| is huge or tiny.
-        if av >= 1e7 || av < 1e-6 {
+        if !(1e-6..1e7).contains(&av) {
             return normalize_java_scientific(format!("{v:.16e}"));
         }
         let mut buf = ryu::Buffer::new();
@@ -365,7 +365,7 @@ fn export_double_dot_zero(v: f64, ver: u8) -> String {
     export_double_leek_v1(v)
 }
 
-/// LeekScript 1 `AI.doubleToString`: `new DecimalFormat()` + `setMinimumFractionDigits(0)` on JVM default locale (fr).
+/// `LeekScript` 1 `AI.doubleToString`: `new DecimalFormat()` + `setMinimumFractionDigits(0)` on JVM default locale (fr).
 fn export_double_leek_v1(v: f64) -> String {
     use num_format::{Buffer, Locale};
     if v.is_nan() {
@@ -440,10 +440,8 @@ fn export_element(
     }
     if let Some(eptr) = value_nonprimitive_ptr(elem) {
         if visited.contains(&eptr) {
-            if ver == 1 {
-                if root_array_ptr == Some(eptr) {
-                    return "[]".into();
-                }
+            if ver == 1 && root_array_ptr == Some(eptr) {
+                return "[]".into();
             }
             return "<...>".into();
         }
@@ -892,7 +890,7 @@ fn export_instance(
     sb.push(' ');
     sb.push('{');
     let mut first = true;
-    for (k, fv) in b.fields.iter() {
+    for (k, fv) in &b.fields {
         if first {
             first = false;
         } else {
@@ -1063,7 +1061,7 @@ fn charge_java_set_string_ops(
     let p = Rc::as_ptr(s) as usize;
     visited.insert(p);
     cx.charge_ops(1)?;
-    for v in s.borrow().elems.iter() {
+    for v in &s.borrow().elems {
         if let Some(ep) = value_nonprimitive_ptr(v) {
             if visited.contains(&ep) {
                 continue;

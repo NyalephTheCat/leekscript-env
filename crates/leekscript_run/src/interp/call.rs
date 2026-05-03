@@ -17,6 +17,22 @@ use super::value::{SharedArray, Value};
 use leekscript_hir::{HirExpr, HirFieldVisibility};
 use leekscript_resolve::STDLIB_GLOBAL_IDENTIFIERS;
 
+pub(super) struct InvokeOptions<'a> {
+    pub enforce_min_arity: bool,
+    pub arg_array_cells: Option<&'a [Option<(SharedArray, usize)>]>,
+    pub arg_idents: Option<&'a [Option<String>]>,
+}
+
+impl<'a> InvokeOptions<'a> {
+    pub fn strict() -> Self {
+        Self {
+            enforce_min_arity: true,
+            arg_array_cells: None,
+            arg_idents: None,
+        }
+    }
+}
+
 /// Unqualified `name(args)` from a class lexical context: pick a **static** overload on the
 /// enclosing class chain, or `None` to fall back to globals (`sqrt` inside `static sqrt()`).
 /// `f()` callee fallback: globals in [`InterpCx::env`] must win over lexically enclosing
@@ -70,10 +86,13 @@ pub(super) fn invoke_value(
     enclosing_class: Option<&str>,
     func_val: Value,
     arg_vals: Vec<Value>,
-    enforce_min_arity: bool,
-    arg_array_cells: Option<&[Option<(SharedArray, usize)>]>,
-    arg_idents: Option<&[Option<String>]>,
+    opts: InvokeOptions<'_>,
 ) -> Result<Value, ExecAbort> {
+    let InvokeOptions {
+        enforce_min_arity,
+        arg_array_cells,
+        arg_idents,
+    } = opts;
     match func_val {
         Value::Native(name) => {
             if !enforce_min_arity && arg_vals.is_empty() {
@@ -165,22 +184,19 @@ pub(super) fn invoke_value(
                                 }
                             }
                             pass_parameter_value(cx.language_version, arg_vals[i].clone(), by_ref)
+                        } else if let Some(expr) = param_defaults.get(i).and_then(|x| x.as_ref()) {
+                            eval_expr(cx, expr)?
                         } else {
-                            match param_defaults.get(i).and_then(|x| x.as_ref()) {
-                                Some(expr) => eval_expr(cx, expr)?,
-                                None => {
-                                    // Java VM suite: non-strict missing args default to `null`;
-                                    // strict mode requires an error.
-                                    if cx.strict == Some(true) || enforce_min_arity {
-                                        return Err(InterpretError::invalid_parameter_count(
-                                            params.len(),
-                                            arg_vals.len(),
-                                        )
-                                        .into());
-                                    }
-                                    Value::Null
-                                }
+                            // Java VM suite: non-strict missing args default to `null`;
+                            // strict mode requires an error.
+                            if cx.strict == Some(true) || enforce_min_arity {
+                                return Err(InterpretError::invalid_parameter_count(
+                                    params.len(),
+                                    arg_vals.len(),
+                                )
+                                .into());
                             }
+                            Value::Null
                         };
                         // v2+: typed parameters coerce the argument (suite uses `integer` / `real`).
                         let v = if cx.language_version >= 2 {
@@ -299,392 +315,396 @@ pub(super) fn eval_call(
         }
     }
 
-    match callee {
-        HirExpr::Member { base, field, .. } => {
-            let mut arg_vals = Vec::with_capacity(args.len());
-            let mut arg_idents: Vec<Option<String>> = Vec::with_capacity(args.len());
-            for a in args {
-                arg_vals.push(eval_expr(cx, a)?);
-                arg_idents.push(match a {
-                    HirExpr::Ident { name, .. } => Some(name.clone()),
-                    _ => None,
-                });
+    if let HirExpr::Member { base, field, .. } = callee {
+        let mut arg_vals = Vec::with_capacity(args.len());
+        let mut arg_idents: Vec<Option<String>> = Vec::with_capacity(args.len());
+        for a in args {
+            arg_vals.push(eval_expr(cx, a)?);
+            arg_idents.push(match a {
+                HirExpr::Ident { name, .. } => Some(name.clone()),
+                _ => None,
+            });
+        }
+        let base_v = eval_expr(cx, base)?;
+        match base_v {
+            Value::Map(m) | Value::Object(m) => {
+                if field == "values" {
+                    if !arg_vals.is_empty() {
+                        return Err(
+                            InterpretError::invalid_parameter_count(0, arg_vals.len()).into()
+                        );
+                    }
+                    let b = m.borrow();
+                    cx.charge_ram_quads(b.len() as u64)?;
+                    let vals: Vec<Value> = b.as_slice().iter().map(|(_, v)| v.clone()).collect();
+                    return Ok(Value::array_from(vals));
+                }
+                if field == "keys" {
+                    if !arg_vals.is_empty() {
+                        return Err(
+                            InterpretError::invalid_parameter_count(0, arg_vals.len()).into()
+                        );
+                    }
+                    let b = m.borrow();
+                    cx.charge_ram_quads(b.len() as u64)?;
+                    let keys: Vec<Value> = b.as_slice().iter().map(|(k, _)| k.clone()).collect();
+                    return Ok(Value::array_from(keys));
+                }
+                let key = Value::String(field.clone());
+                let fv = {
+                    let b = m.borrow();
+                    map_find_key(&b, &key).map(|p| b[p].1.clone())
+                };
+                let Some(fv) = fv else {
+                    return Err(InterpretError::not_callable().into());
+                };
+                match fv {
+                    Value::UserClass(ref tn) => eval_new(cx, tn, args),
+                    Value::Function(_) | Value::Native(_) => invoke_value(
+                        cx,
+                        None,
+                        None,
+                        fv,
+                        arg_vals,
+                        InvokeOptions {
+                            enforce_min_arity: true,
+                            arg_array_cells: None,
+                            arg_idents: Some(arg_idents.as_slice()),
+                        },
+                    ),
+                    _ => Err(InterpretError::not_callable().into()),
+                }
             }
-            let base_v = eval_expr(cx, base)?;
-            match base_v {
-                Value::Map(m) | Value::Object(m) => {
-                    if field == "values" {
-                        if !arg_vals.is_empty() {
-                            return Err(
-                                InterpretError::invalid_parameter_count(0, arg_vals.len()).into()
-                            );
+            Value::UserClass(class_name) => {
+                if !cx.classes.contains_key(&class_name) {
+                    return Err(InterpretError::not_callable().into());
+                }
+                let enc = class_name.clone();
+                if let Some(owner) =
+                    resolve_static_method_owner(cx, class_name.as_str(), field.as_str())
+                {
+                    enforce_static_method_call_visibility(cx, owner.as_str(), field.as_str())
+                        .map_err(ExecAbort::Error)?;
+                    let m = cx
+                        .classes
+                        .get(owner.as_str())
+                        .and_then(|d| d.static_methods.get(field.as_str()))
+                        .and_then(|vs| {
+                            vs.iter()
+                                .find(|f| callable_accepts_arg_count(f, arg_vals.len()))
+                        })
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    match &m {
+                        Value::Function(_) | Value::Native(_) => {}
+                        Value::Null if cx.language_version >= 2 => {
+                            return Err(InterpretError::class_static_member_does_not_exist(
+                                class_name.as_str(),
+                                field.as_str(),
+                            )
+                            .into());
                         }
-                        let b = m.borrow();
-                        cx.charge_ram_quads(b.len() as u64)?;
-                        let vals: Vec<Value> =
-                            b.as_slice().iter().map(|(_, v)| v.clone()).collect();
-                        return Ok(Value::array_from(vals));
+                        _ => return Err(InterpretError::not_callable().into()),
                     }
-                    if field == "keys" {
-                        if !arg_vals.is_empty() {
-                            return Err(
-                                InterpretError::invalid_parameter_count(0, arg_vals.len()).into()
-                            );
-                        }
-                        let b = m.borrow();
-                        cx.charge_ram_quads(b.len() as u64)?;
-                        let keys: Vec<Value> =
-                            b.as_slice().iter().map(|(k, _)| k.clone()).collect();
-                        return Ok(Value::array_from(keys));
-                    }
-                    let key = Value::String(field.to_string());
-                    let fv = {
-                        let b = m.borrow();
-                        map_find_key(&b, &key).map(|p| b[p].1.clone())
-                    };
-                    let Some(fv) = fv else {
-                        return Err(InterpretError::not_callable().into());
-                    };
-                    match fv {
+                    return invoke_value(
+                        cx,
+                        None,
+                        Some(enc.as_str()),
+                        m,
+                        arg_vals,
+                        InvokeOptions {
+                            enforce_min_arity: true,
+                            arg_array_cells: None,
+                            arg_idents: Some(arg_idents.as_slice()),
+                        },
+                    );
+                }
+                if let Some(owner) =
+                    resolve_static_field_owner(cx, class_name.as_str(), field.as_str())
+                {
+                    enforce_static_field_visibility(cx, owner.as_str(), field.as_str())
+                        .map_err(ExecAbort::Error)?;
+                    let v = cx
+                        .classes
+                        .get(owner.as_str())
+                        .and_then(|d| d.static_fields.get(field.as_str()))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    return match v {
                         Value::UserClass(ref tn) => eval_new(cx, tn, args),
                         Value::Function(_) | Value::Native(_) => invoke_value(
                             cx,
                             None,
-                            None,
-                            fv,
+                            Some(enc.as_str()),
+                            v,
                             arg_vals,
-                            true,
-                            None,
-                            Some(arg_idents.as_slice()),
+                            InvokeOptions {
+                                enforce_min_arity: true,
+                                arg_array_cells: None,
+                                arg_idents: Some(arg_idents.as_slice()),
+                            },
                         ),
                         _ => Err(InterpretError::not_callable().into()),
-                    }
+                    };
                 }
-                Value::UserClass(class_name) => {
-                    if cx.classes.get(&class_name).is_none() {
-                        return Err(InterpretError::not_callable().into());
+                if cx.language_version >= 2 {
+                    return Err(InterpretError::class_static_member_does_not_exist(
+                        class_name.as_str(),
+                        field.as_str(),
+                    )
+                    .into());
+                }
+                Err(InterpretError::not_callable().into())
+            }
+            Value::Instance(rc) => {
+                if field == "keys" {
+                    if !arg_vals.is_empty() {
+                        return Err(
+                            InterpretError::invalid_parameter_count(0, arg_vals.len()).into()
+                        );
                     }
-                    let enc = class_name.clone();
-                    if let Some(owner) =
-                        resolve_static_method_owner(cx, class_name.as_str(), field.as_str())
-                    {
-                        enforce_static_method_call_visibility(cx, owner.as_str(), field.as_str())
-                            .map_err(ExecAbort::Error)?;
-                        let m = cx
-                            .classes
-                            .get(owner.as_str())
-                            .and_then(|d| d.static_methods.get(field.as_str()))
-                            .and_then(|vs| {
-                                vs.iter()
-                                    .find(|f| callable_accepts_arg_count(f, arg_vals.len()))
-                            })
-                            .cloned()
-                            .unwrap_or(Value::Null);
+                    let cn = rc.borrow().class_name.clone();
+                    let names: Vec<Value> = cx
+                        .classes
+                        .get(cn.as_str())
+                        .map(|d| {
+                            d.instance_fields
+                                .iter()
+                                .cloned()
+                                .map(Value::String)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    return Ok(Value::array_from(names));
+                }
+                match read_instance_callable_member_for_call(cx, &rc, field, arg_vals.len())? {
+                    InstanceMethodCallLookup::Resolved {
+                        callable: m,
+                        declaring_class: enc,
+                        bind_this,
+                    } => {
                         match &m {
                             Value::Function(_) | Value::Native(_) => {}
-                            Value::Null if cx.language_version >= 2 => {
-                                return Err(InterpretError::class_static_member_does_not_exist(
-                                    class_name.as_str(),
-                                    field.as_str(),
-                                )
-                                .into());
-                            }
                             _ => return Err(InterpretError::not_callable().into()),
-                        };
-                        return invoke_value(
+                        }
+                        invoke_value(
                             cx,
-                            None,
+                            if bind_this {
+                                Some(Value::Instance(rc))
+                            } else {
+                                None
+                            },
                             Some(enc.as_str()),
                             m,
                             arg_vals,
-                            true,
-                            None,
-                            Some(arg_idents.as_slice()),
-                        );
-                    }
-                    if let Some(owner) =
-                        resolve_static_field_owner(cx, class_name.as_str(), field.as_str())
-                    {
-                        enforce_static_field_visibility(cx, owner.as_str(), field.as_str())
-                            .map_err(ExecAbort::Error)?;
-                        let v = cx
-                            .classes
-                            .get(owner.as_str())
-                            .and_then(|d| d.static_fields.get(field.as_str()))
-                            .cloned()
-                            .unwrap_or(Value::Null);
-                        return match v {
-                            Value::UserClass(ref tn) => eval_new(cx, tn, args),
-                            Value::Function(_) | Value::Native(_) => invoke_value(
-                                cx,
-                                None,
-                                Some(enc.as_str()),
-                                v,
-                                arg_vals,
-                                true,
-                                None,
-                                Some(arg_idents.as_slice()),
-                            ),
-                            _ => Err(InterpretError::not_callable().into()),
-                        };
-                    }
-                    if cx.language_version >= 2 {
-                        return Err(InterpretError::class_static_member_does_not_exist(
-                            class_name.as_str(),
-                            field.as_str(),
+                            InvokeOptions {
+                                enforce_min_arity: true,
+                                arg_array_cells: None,
+                                arg_idents: Some(arg_idents.as_slice()),
+                            },
                         )
-                        .into());
                     }
-                    Err(InterpretError::not_callable().into())
-                }
-                Value::Instance(rc) => {
-                    if field == "keys" {
-                        if !arg_vals.is_empty() {
-                            return Err(
-                                InterpretError::invalid_parameter_count(0, arg_vals.len()).into()
-                            );
+                    InstanceMethodCallLookup::ArityMismatch { expected } => Err(
+                        InterpretError::invalid_parameter_count(expected, arg_vals.len()).into(),
+                    ),
+                    InstanceMethodCallLookup::NoMatch => Ok(Value::Null),
+                    InstanceMethodCallLookup::Inaccessible(vis) => {
+                        if java_typed_instance_binding(cx, base.as_ref()) {
+                            return Err(match vis {
+                                HirFieldVisibility::Protected => {
+                                    InterpretError::protected_method().into()
+                                }
+                                HirFieldVisibility::Private => {
+                                    InterpretError::private_method().into()
+                                }
+                                HirFieldVisibility::Public => InterpretError::not_callable().into(),
+                            });
                         }
-                        let cn = rc.borrow().class_name.clone();
-                        let names: Vec<Value> = cx
-                            .classes
-                            .get(cn.as_str())
-                            .map(|d| {
-                                d.instance_fields
-                                    .iter()
-                                    .cloned()
-                                    .map(Value::String)
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        return Ok(Value::array_from(names));
+                        Ok(Value::Null)
                     }
-                    match read_instance_callable_member_for_call(cx, &rc, field, arg_vals.len())? {
-                        InstanceMethodCallLookup::Resolved {
+                }
+            }
+            Value::Super => {
+                let Value::Instance(rc) = cx
+                    .this_stack
+                    .last()
+                    .cloned()
+                    .ok_or_else(InterpretError::this_not_allowed_here)?
+                else {
+                    return Err(InterpretError::this_not_allowed_here().into());
+                };
+                let enc = cx
+                    .enclosing_class_stack
+                    .last()
+                    .ok_or_else(InterpretError::this_not_allowed_here)?;
+                let (m, decl_class) = read_super_instance_member(cx, &rc, field, enc.as_str())?;
+                match &m {
+                    Value::Function(_) | Value::Native(_) => {}
+                    _ => return Err(InterpretError::not_callable().into()),
+                }
+                let Some(decl) = decl_class else {
+                    return Err(InterpretError::super_not_available_parent().into());
+                };
+                invoke_value(
+                    cx,
+                    Some(Value::Instance(rc.clone())),
+                    Some(decl.as_str()),
+                    m,
+                    arg_vals,
+                    InvokeOptions {
+                        enforce_min_arity: true,
+                        arg_array_cells: None,
+                        arg_idents: Some(arg_idents.as_slice()),
+                    },
+                )
+            }
+            _ => Err(InterpretError::member_requires_instance().into()),
+        }
+    } else {
+        let (func_val, mut this_for_call, decl_override) = match callee {
+            HirExpr::Ident { name, .. } => {
+                if let Some(Value::Instance(rc)) = cx.this_stack.last() {
+                    match read_instance_callable_member_for_call(cx, rc, name, args.len()) {
+                        Ok(InstanceMethodCallLookup::Resolved {
                             callable: m,
-                            declaring_class: enc,
+                            declaring_class: decl,
                             bind_this,
-                        } => {
-                            match &m {
-                                Value::Function(_) | Value::Native(_) => {}
-                                _ => return Err(InterpretError::not_callable().into()),
-                            };
-                            invoke_value(
-                                cx,
-                                if bind_this {
-                                    Some(Value::Instance(rc))
-                                } else {
-                                    None
-                                },
-                                Some(enc.as_str()),
-                                m,
-                                arg_vals,
-                                true,
+                        }) if matches!(m, Value::Function(_) | Value::Native(_)) => (
+                            m,
+                            if bind_this {
+                                Some(Value::Instance(rc.clone()))
+                            } else {
+                                None
+                            },
+                            Some(decl),
+                        ),
+                        Ok(InstanceMethodCallLookup::Inaccessible(_)) => {
+                            // `m()` with implicit `this`: never Java-typed receiver binding.
+                            (
+                                resolve_call_callee_after_static_miss(cx, callee)?,
                                 None,
-                                Some(arg_idents.as_slice()),
+                                None,
                             )
                         }
-                        InstanceMethodCallLookup::ArityMismatch { expected } => Err(
-                            InterpretError::invalid_parameter_count(expected, arg_vals.len())
-                                .into(),
-                        ),
-                        InstanceMethodCallLookup::NoMatch => Ok(Value::Null),
-                        InstanceMethodCallLookup::Inaccessible(vis) => {
-                            if java_typed_instance_binding(cx, base.as_ref()) {
-                                return Err(match vis {
-                                    HirFieldVisibility::Protected => {
-                                        InterpretError::protected_method().into()
-                                    }
-                                    HirFieldVisibility::Private => {
-                                        InterpretError::private_method().into()
-                                    }
-                                    HirFieldVisibility::Public => {
-                                        InterpretError::not_callable().into()
-                                    }
-                                });
+                        Ok(InstanceMethodCallLookup::ArityMismatch { .. }) => {
+                            // Implicit `this` call: if no overload matches the arity, fall back to
+                            // static/global resolution (e.g. `sqrt(25)` inside `sqrt()`).
+                            (
+                                resolve_call_callee_after_static_miss(cx, callee)?,
+                                None,
+                                None,
+                            )
+                        }
+                        _ => {
+                            if let Some((m, owner)) =
+                                try_static_method_callable(cx, name.as_str(), args.len())
+                            {
+                                enforce_static_method_call_visibility(
+                                    cx,
+                                    owner.as_str(),
+                                    name.as_str(),
+                                )
+                                .map_err(ExecAbort::Error)?;
+                                (m, None, Some(owner))
+                            } else {
+                                (
+                                    resolve_call_callee_after_static_miss(cx, callee)?,
+                                    None,
+                                    None,
+                                )
                             }
-                            Ok(Value::Null)
                         }
                     }
-                }
-                Value::Super => {
-                    let Value::Instance(rc) = cx
-                        .this_stack
-                        .last()
-                        .cloned()
-                        .ok_or_else(|| InterpretError::this_not_allowed_here())?
-                    else {
-                        return Err(InterpretError::this_not_allowed_here().into());
-                    };
-                    let enc = cx
-                        .enclosing_class_stack
-                        .last()
-                        .ok_or_else(|| InterpretError::this_not_allowed_here())?;
-                    let (m, decl_class) = read_super_instance_member(cx, &rc, field, enc.as_str())?;
-                    match &m {
-                        Value::Function(_) | Value::Native(_) => {}
-                        _ => return Err(InterpretError::not_callable().into()),
-                    };
-                    let Some(decl) = decl_class else {
-                        return Err(InterpretError::super_not_available_parent().into());
-                    };
-                    invoke_value(
-                        cx,
-                        Some(Value::Instance(rc.clone())),
-                        Some(decl.as_str()),
-                        m,
-                        arg_vals,
-                        true,
+                } else if let Some((m, owner)) =
+                    try_static_method_callable(cx, name.as_str(), args.len())
+                {
+                    enforce_static_method_call_visibility(cx, owner.as_str(), name.as_str())
+                        .map_err(ExecAbort::Error)?;
+                    (m, None, Some(owner))
+                } else {
+                    (
+                        resolve_call_callee_after_static_miss(cx, callee)?,
                         None,
-                        Some(arg_idents.as_slice()),
+                        None,
                     )
                 }
-                _ => Err(InterpretError::member_requires_instance().into()),
+            }
+            _ => (eval_expr(cx, callee)?, None, None),
+        };
+
+        if let Value::UserClass(ref type_name) = func_val {
+            if this_for_call.is_none() {
+                return eval_new(cx, type_name, args);
             }
         }
-        _ => {
-            let (func_val, mut this_for_call, decl_override) = match callee {
-                HirExpr::Ident { name, .. } => {
-                    if let Some(Value::Instance(rc)) = cx.this_stack.last() {
-                        match read_instance_callable_member_for_call(cx, rc, name, args.len()) {
-                            Ok(InstanceMethodCallLookup::Resolved {
-                                callable: m,
-                                declaring_class: decl,
-                                bind_this,
-                            }) if matches!(m, Value::Function(_) | Value::Native(_)) => (
-                                m,
-                                if bind_this {
-                                    Some(Value::Instance(rc.clone()))
-                                } else {
-                                    None
-                                },
-                                Some(decl),
-                            ),
-                            Ok(InstanceMethodCallLookup::Inaccessible(_)) => {
-                                // `m()` with implicit `this`: never Java-typed receiver binding.
-                                (
-                                    resolve_call_callee_after_static_miss(cx, callee)?,
-                                    None,
-                                    None,
-                                )
-                            }
-                            Ok(InstanceMethodCallLookup::ArityMismatch { .. }) => {
-                                // Implicit `this` call: if no overload matches the arity, fall back to
-                                // static/global resolution (e.g. `sqrt(25)` inside `sqrt()`).
-                                (
-                                    resolve_call_callee_after_static_miss(cx, callee)?,
-                                    None,
-                                    None,
-                                )
-                            }
-                            _ => {
-                                if let Some((m, owner)) =
-                                    try_static_method_callable(cx, name.as_str(), args.len())
-                                {
-                                    enforce_static_method_call_visibility(
-                                        cx,
-                                        owner.as_str(),
-                                        name.as_str(),
-                                    )
-                                    .map_err(ExecAbort::Error)?;
-                                    (m, None, Some(owner))
-                                } else {
-                                    (
-                                        resolve_call_callee_after_static_miss(cx, callee)?,
-                                        None,
-                                        None,
-                                    )
-                                }
-                            }
-                        }
-                    } else if let Some((m, owner)) =
-                        try_static_method_callable(cx, name.as_str(), args.len())
-                    {
-                        enforce_static_method_call_visibility(cx, owner.as_str(), name.as_str())
-                            .map_err(ExecAbort::Error)?;
-                        (m, None, Some(owner))
-                    } else {
-                        (
-                            resolve_call_callee_after_static_miss(cx, callee)?,
-                            None,
-                            None,
-                        )
-                    }
-                }
-                _ => (eval_expr(cx, callee)?, None, None),
-            };
 
-            if let Value::UserClass(ref type_name) = func_val {
-                if this_for_call.is_none() {
-                    return eval_new(cx, type_name, args);
-                }
-            }
-
-            let mut arg_vals = Vec::with_capacity(args.len());
-            let mut arg_idents: Vec<Option<String>> = Vec::with_capacity(args.len());
-            for a in args {
-                arg_vals.push(eval_expr(cx, a)?);
-                arg_idents.push(match a {
-                    HirExpr::Ident { name, .. } => Some(name.clone()),
-                    _ => None,
-                });
-            }
-
-            if this_for_call.is_none() {
-                if let Value::Function(f) = &func_val {
-                    if arg_vals.len() == f.params.len() + 1
-                        && matches!(arg_vals.first(), Some(Value::Instance(_)))
-                    {
-                        this_for_call = Some(arg_vals[0].clone());
-                        arg_vals.remove(0);
-                    }
-                }
-            }
-
-            let enclosing_name: Option<String> = decl_override.or_else(|| match &this_for_call {
-                Some(Value::Instance(rc)) => Some(rc.borrow().class_name.clone()),
+        let mut arg_vals = Vec::with_capacity(args.len());
+        let mut arg_idents: Vec<Option<String>> = Vec::with_capacity(args.len());
+        for a in args {
+            arg_vals.push(eval_expr(cx, a)?);
+            arg_idents.push(match a {
+                HirExpr::Ident { name, .. } => Some(name.clone()),
                 _ => None,
             });
-
-            let enforce_min_arity = match (callee, &func_val) {
-                (HirExpr::Ident { name, .. }, Value::Native(native_name)) => {
-                    // Direct stdlib calls (`sqrt(...)`, `Array(...)`) enforce arity.
-                    // Calls through user variables (`var a = sqrt; a(...)`) are more permissive.
-                    //
-                    // Embedding natives (e.g. Leek Wars fight) are not in `STDLIB_GLOBAL_IDENTIFIERS`,
-                    // but a **direct** reference `getNearestEnemy()` must still invoke the native with
-                    // zero args — otherwise `invoke_value` treats empty-arg indirect-style calls as `null`.
-                    name == native_name
-                        || STDLIB_GLOBAL_IDENTIFIERS.contains(&name.as_str())
-                        || (cx.language_version >= 3
-                            && matches!(
-                                name.as_str(),
-                                "Array"
-                                    | "Object"
-                                    | "Null"
-                                    | "String"
-                                    | "Boolean"
-                                    | "Function"
-                                    | "Class"
-                                    | "Interval"
-                                    | "Integer"
-                                    | "Real"
-                                    | "Number"
-                            ))
-                }
-                (HirExpr::Ident { .. }, _) => true,
-                _ => false,
-            };
-            invoke_value(
-                cx,
-                this_for_call,
-                enclosing_name.as_deref(),
-                func_val,
-                arg_vals,
-                enforce_min_arity,
-                None,
-                Some(arg_idents.as_slice()),
-            )
         }
+
+        if this_for_call.is_none() {
+            if let Value::Function(f) = &func_val {
+                if arg_vals.len() == f.params.len() + 1
+                    && matches!(arg_vals.first(), Some(Value::Instance(_)))
+                {
+                    this_for_call = Some(arg_vals[0].clone());
+                    arg_vals.remove(0);
+                }
+            }
+        }
+
+        let enclosing_name: Option<String> = decl_override.or_else(|| match &this_for_call {
+            Some(Value::Instance(rc)) => Some(rc.borrow().class_name.clone()),
+            _ => None,
+        });
+
+        let enforce_min_arity = match (callee, &func_val) {
+            (HirExpr::Ident { name, .. }, Value::Native(native_name)) => {
+                // Direct stdlib calls (`sqrt(...)`, `Array(...)`) enforce arity.
+                // Calls through user variables (`var a = sqrt; a(...)`) are more permissive.
+                //
+                // Embedding natives (e.g. Leek Wars fight) are not in `STDLIB_GLOBAL_IDENTIFIERS`,
+                // but a **direct** reference `getNearestEnemy()` must still invoke the native with
+                // zero args — otherwise `invoke_value` treats empty-arg indirect-style calls as `null`.
+                name == native_name
+                    || STDLIB_GLOBAL_IDENTIFIERS.contains(&name.as_str())
+                    || (cx.language_version >= 3
+                        && matches!(
+                            name.as_str(),
+                            "Array"
+                                | "Object"
+                                | "Null"
+                                | "String"
+                                | "Boolean"
+                                | "Function"
+                                | "Class"
+                                | "Interval"
+                                | "Integer"
+                                | "Real"
+                                | "Number"
+                        ))
+            }
+            (HirExpr::Ident { .. }, _) => true,
+            _ => false,
+        };
+        invoke_value(
+            cx,
+            this_for_call,
+            enclosing_name.as_deref(),
+            func_val,
+            arg_vals,
+            InvokeOptions {
+                enforce_min_arity,
+                arg_array_cells: None,
+                arg_idents: Some(arg_idents.as_slice()),
+            },
+        )
     }
 }
 
@@ -698,5 +718,5 @@ pub(super) fn invoke_global_by_name(
         .env
         .get(name)
         .ok_or_else(|| ExecAbort::Error(InterpretError::variable_not_exists(name)))?;
-    invoke_value(cx, None, None, func_val, arg_vals, true, None, None)
+    invoke_value(cx, None, None, func_val, arg_vals, InvokeOptions::strict())
 }

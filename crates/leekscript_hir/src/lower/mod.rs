@@ -186,7 +186,10 @@ mod tests {
     #[test]
     fn assign_stmt() {
         let hir = compile_hir("var x = 0;\nx = 3;\n");
-        let HirStmt::Expr(HirExpr::AssignExpr { place, op, value, .. }) = &hir.stmts[1] else {
+        let HirStmt::Expr(HirExpr::AssignExpr {
+            place, op, value, ..
+        }) = &hir.stmts[1]
+        else {
             panic!("expected expression-statement assign");
         };
         assert_eq!(*op, HirAssignOp::Assign);
@@ -295,9 +298,7 @@ mod tests {
             panic!("expected expr update step");
         };
         let HirExpr::PostUpdate {
-            target,
-            increment,
-            ..
+            target, increment, ..
         } = expr
         else {
             panic!("expected postfix ++/--");
@@ -319,9 +320,7 @@ mod tests {
             panic!("expected expr update step");
         };
         let HirExpr::PreUpdate {
-            target,
-            increment,
-            ..
+            target, increment, ..
         } = expr
         else {
             panic!("expected prefix ++/--");

@@ -1,6 +1,6 @@
 //! Expression evaluation.
 
-use super::call::{eval_call, invoke_value};
+use super::call::{eval_call, invoke_value, InvokeOptions};
 use super::context::InterpCx;
 use super::error::{ExecAbort, InterpretError};
 use super::exec::exec_stmts;
@@ -252,7 +252,7 @@ pub(super) fn eval_expr(cx: &mut InterpCx, e: &HirExpr) -> Result<Value, ExecAbo
             let start_idx = pos_slice_start(s_val.as_ref(), len)?;
             let end_bound = pos_slice_end(e_val.as_ref(), len)?;
             // Match JVM `for (i = start; i < end; …)` (e.g. `end` may stay negative after `+len`).
-            if !(start_idx < end_bound) {
+            if start_idx >= end_bound {
                 return Ok(Value::array_from(vec![]));
             }
             let b = arr.borrow();
@@ -366,7 +366,7 @@ pub(super) fn eval_expr(cx: &mut InterpCx, e: &HirExpr) -> Result<Value, ExecAbo
 }
 
 fn eval_unary(op: HirUnaryOp, cx: &mut InterpCx, expr: &HirExpr) -> Result<Value, ExecAbort> {
-    use HirUnaryOp::*;
+    use HirUnaryOp::{BitNot, Neg, Not, Typeof};
     match op {
         Neg => {
             let v = eval_expr(cx, expr)?;
@@ -514,7 +514,7 @@ fn eval_logical_short_circuit(
     left: &HirExpr,
     right: &HirExpr,
 ) -> Result<Value, ExecAbort> {
-    use HirBinOp::*;
+    use HirBinOp::{LogicalAnd, LogicalOr};
     match op {
         LogicalAnd => eval_and_components(cx, left, right).map(Value::Bool),
         LogicalOr => eval_or_components(cx, left, right).map(Value::Bool),
@@ -573,7 +573,7 @@ fn eval_index_read(
             let Value::String(f) = key else {
                 return Err(InterpretError::not_indexable().into());
             };
-            if cx.classes.get(class_name).is_none() {
+            if !cx.classes.contains_key(class_name) {
                 return Ok(Value::Null);
             }
             if let Some(v) = read_visible_class_static_field(cx, class_name.as_str(), f.as_str()) {
@@ -609,9 +609,13 @@ fn eval_keyed_literal(
     for (ke, ve) in entries {
         let k = eval_expr(cx, ke)?;
         let v = eval_expr(cx, ve)?;
-        // Match Leek Wars JVM: later entry wins (same as v1–3 and as `{}` object literals in v4).
-        // Duplicate keys are not a hard error in shipped fights; see e.g. static `Map` fields in AI.
+        // Match Leek Wars JVM: later entry wins for v1–3 map literals, `{}` object literals, and
+        // duplicate keys in object literals at any version. Map literals `[…]` at language v4+
+        // reject duplicate keys (`MAP_DUPLICATED_KEY`).
         if let Some(j) = m.find_key(&k) {
+            if !object_literal && cx.language_version >= 4 {
+                return Err(InterpretError::map_duplicated_key().into());
+            }
             m[j].1 = v;
         } else {
             m.push_kv(k, v);
@@ -815,7 +819,7 @@ fn eval_interval_slice(
 
     let start_idx = pos_slice_start(start_for_slice.as_ref(), len)?;
     let end_bound = pos_slice_end(end_for_slice.as_ref(), len)?;
-    if !(start_idx < end_bound) {
+    if start_idx >= end_bound {
         return Ok(coerce_interval_slice_for_export(
             &iv,
             ver,
@@ -977,8 +981,7 @@ fn eval_member_read(cx: &mut InterpCx, base: &HirExpr, field: &str) -> Result<Va
                 return Ok(def
                     .extends
                     .as_ref()
-                    .map(|p| Value::UserClass(p.clone()))
-                    .unwrap_or(Value::Null));
+                    .map_or(Value::Null, |p| Value::UserClass(p.clone())));
             }
             if field == "fields" {
                 let names: Vec<Value> = def
@@ -1204,9 +1207,7 @@ pub(super) fn run_user_class_constructor_with_arg_values(
                 Some(type_name),
                 candidates.pop().expect("one candidate"),
                 arg_vals,
-                true,
-                None,
-                None,
+                InvokeOptions::strict(),
             )?;
             Ok(())
         } else if candidates.is_empty() {
@@ -1277,11 +1278,9 @@ pub(super) fn eval_new(
     args: &[HirExpr],
 ) -> Result<Value, ExecAbort> {
     // Java VM operation accounting for constructor-like expressions (subset used by `*.ops` tests).
-    match (type_name, args.len()) {
-        ("SetLiteral", n) => cx
-            .charge_ops((n as u64).saturating_mul(2))
-            .map_err(ExecAbort::Error)?,
-        _ => {}
+    if let ("SetLiteral", n) = (type_name, args.len()) {
+        cx.charge_ops((n as u64).saturating_mul(2))
+            .map_err(ExecAbort::Error)?;
     }
     if cx.classes.contains_key(type_name) {
         let mut arg_vals = Vec::with_capacity(args.len());
@@ -1306,7 +1305,7 @@ pub(super) fn eval_new(
                 Ok(match v {
                     Value::Integer(i) => Value::Integer(i),
                     Value::Real(r) if r.is_finite() => Value::Integer(r as i64),
-                    Value::Bool(b) => Value::Integer(if b { 1 } else { 0 }),
+                    Value::Bool(b) => Value::Integer(i64::from(b)),
                     Value::Null => Value::Integer(0),
                     _ => Value::Integer(number_from_value(&v)? as i64),
                 })
@@ -1327,7 +1326,7 @@ pub(super) fn eval_new(
             .into()),
         },
         "Map" | "LegacyLeekArray" => {
-            if args.len() % 2 != 0 {
+            if !args.len().is_multiple_of(2) {
                 return Err(InterpretError::invalid_constructor(
                     type_name,
                     "expected an even number of key/value arguments",
@@ -1453,7 +1452,10 @@ pub(super) fn eval_new_with_arg_values(
         for f in &class_def.instance_fields {
             let v = if let Some(expr) = class_def.field_inits.get(f) {
                 let raw = eval_expr(cx, expr)?;
-                let decl = class_def.field_decl_tys.get(f).map(|s| s.as_str());
+                let decl = class_def
+                    .field_decl_tys
+                    .get(f)
+                    .map(std::string::String::as_str);
                 super::util::coerce_var_init_value(raw, decl, cx.language_version)?
             } else {
                 Value::Null
@@ -1478,9 +1480,7 @@ pub(super) fn eval_new_with_arg_values(
                     Some(enc.as_str()),
                     m,
                     Vec::new(),
-                    true,
-                    None,
-                    None,
+                    InvokeOptions::strict(),
                 ) {
                     rc.borrow_mut().string_override = Some(s);
                 }

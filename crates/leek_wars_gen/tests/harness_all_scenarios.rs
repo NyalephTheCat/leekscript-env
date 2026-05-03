@@ -22,16 +22,13 @@ fn java_bin() -> PathBuf {
 
 #[test]
 fn harness_all_checkout_scenarios_full_normalized_matches_java() {
-    let jar = match resolve_generator_jar() {
-        Ok(j) => j,
-        Err(_) => return,
+    let Ok(jar) = resolve_generator_jar() else {
+        return;
     };
     let cwd = default_java_cwd(&jar);
-    let scenarios =
-        match discover_scenario_json_files(&cwd, std::path::Path::new("test/scenario"))
-    {
-        Ok(s) => s,
-        Err(_) => return,
+    let Ok(scenarios) = discover_scenario_json_files(&cwd, std::path::Path::new("test/scenario"))
+    else {
+        return;
     };
     if scenarios.is_empty() {
         return;
@@ -44,14 +41,12 @@ fn harness_all_checkout_scenarios_full_normalized_matches_java() {
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .map(|n| !INCOMPLETE_SCENARIO_BASELINES.contains(&n))
-                .unwrap_or(true)
+                .is_none_or(|n| !INCOMPLETE_SCENARIO_BASELINES.contains(&n))
         })
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .map(|n| n != "parity_1v1_alt_ai.json" && n != "parity_2v2_chips.json")
-                .unwrap_or(true)
+                .is_none_or(|n| n != "parity_1v1_alt_ai.json" && n != "parity_2v2_chips.json")
         })
         .collect();
     if scenarios.is_empty() {

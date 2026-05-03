@@ -1,4 +1,4 @@
-//! High-level intermediate representation for LeekScript.
+//! High-level intermediate representation for `LeekScript`.
 //!
 //! Produced by lowering a grammar-shaped rowan tree ([`leekscript_syntax`]) after a successful parse.
 //! Intended for future codegen, interpretation, and semantic analysis.

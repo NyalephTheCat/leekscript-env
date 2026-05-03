@@ -1,4 +1,4 @@
-//! API-backed PvP batches: composition vs composition, composition vs leek, multi-seed win rates.
+//! API-backed `PvP` batches: composition vs composition, composition vs leek, multi-seed win rates.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -13,9 +13,9 @@ use serde_json::{json, Value};
 use ureq::Agent;
 
 use crate::error::GenError;
+use crate::experiment::execute_run_task;
 use crate::experiment::metrics::RunMetrics;
 use crate::experiment::planner::RunTask;
-use crate::experiment::execute_run_task;
 
 use lw_meta::{
     fetch_composition_sim_bundle, fetch_leek_public, scenario_entity_from_leek_get, RetryPolicy,
@@ -42,13 +42,12 @@ impl FromStr for BenchSide {
         let id_s = id_s.trim_start_matches(':').trim();
         let id: u64 = id_s
             .parse()
-            .map_err(|_| format!("invalid id in {:?} (expected positive integer)", id_s))?;
+            .map_err(|_| format!("invalid id in {id_s:?} (expected positive integer)"))?;
         match kind.trim().to_ascii_lowercase().as_str() {
             "composition" | "compo" | "c" | "team" => Ok(BenchSide::Composition(id)),
             "leek" | "l" => Ok(BenchSide::Leek(id)),
             other => Err(format!(
-                "unknown side kind {:?} (use composition: or leek:)",
-                other
+                "unknown side kind {other:?} (use composition: or leek:)"
             )),
         }
     }
@@ -64,11 +63,13 @@ impl std::fmt::Display for BenchSide {
 }
 
 /// Inner `farmer` object from `farmer/get` (`{ "farmer": { ... } }` or already the inner object).
-pub fn farmer_inner<'a>(body: &'a Value) -> &'a Value {
+#[must_use]
+pub fn farmer_inner(body: &Value) -> &Value {
     body.get("farmer").unwrap_or(body)
 }
 
 /// `(composition_id, name)` when the API includes `team.compositions` (often requires session token).
+#[must_use]
 pub fn list_team_compositions(farmer: &Value) -> Vec<(u64, String)> {
     let Some(team) = farmer.get("team").filter(|t| !t.is_null()) else {
         return Vec::new();
@@ -78,7 +79,7 @@ pub fn list_team_compositions(farmer: &Value) -> Vec<(u64, String)> {
     };
     let mut out = Vec::new();
     for c in arr {
-        let Some(id) = c.get("id").and_then(|x| x.as_u64()) else {
+        let Some(id) = c.get("id").and_then(serde_json::Value::as_u64) else {
             continue;
         };
         let name = c
@@ -92,6 +93,7 @@ pub fn list_team_compositions(farmer: &Value) -> Vec<(u64, String)> {
 }
 
 /// Leeks listed on the farmer profile (`farmer.leeks` map) for `leek:ID` test targets.
+#[must_use]
 pub fn list_farmer_leeks(farmer: &Value) -> Vec<(u64, String)> {
     let Some(map) = farmer.get("leeks").and_then(|x| x.as_object()) else {
         return Vec::new();
@@ -99,7 +101,7 @@ pub fn list_farmer_leeks(farmer: &Value) -> Vec<(u64, String)> {
     let mut out: Vec<(u64, String)> = map
         .values()
         .filter_map(|v| {
-            let id = v.get("id").and_then(|x| x.as_u64())?;
+            let id = v.get("id").and_then(serde_json::Value::as_u64)?;
             let name = v
                 .get("name")
                 .and_then(|x| x.as_str())
@@ -149,21 +151,13 @@ pub fn fetch_side_row(
 ) -> Result<(Vec<Value>, String), GenError> {
     match side {
         BenchSide::Composition(id) => {
-            let bundle = fetch_composition_sim_bundle(
-                agent,
-                api_base,
-                *id,
-                retry,
-                true,
-                false,
-                gap,
-            )?;
+            let bundle =
+                fetch_composition_sim_bundle(agent, api_base, *id, retry, true, false, gap)?;
             let label = bundle
                 .get("summary")
                 .and_then(|s| s.get("name"))
                 .and_then(|x| x.as_str())
-                .map(|s| format!("{} [{id}]", s))
-                .unwrap_or_else(|| format!("composition {id}"));
+                .map_or_else(|| format!("composition {id}"), |s| format!("{s} [{id}]"));
             let row = entities_row_from_composition_bundle(&bundle)?;
             Ok((row, label))
         }
@@ -172,8 +166,7 @@ pub fn fetch_side_row(
             let label = raw
                 .get("name")
                 .and_then(|x| x.as_str())
-                .map(|s| format!("{} [{id}]", s))
-                .unwrap_or_else(|| format!("leek {id}"));
+                .map_or_else(|| format!("leek {id}"), |s| format!("{s} [{id}]"));
             let row = entities_row_from_leek_raw(&raw)?;
             Ok((row, label))
         }
@@ -189,18 +182,24 @@ pub fn build_pvp_scenario_value(
     random_seed: i32,
 ) -> Result<Value, GenError> {
     if row0.is_empty() || row1.is_empty() {
-        return Err(GenError::Message("both teams need at least one leek".into()));
+        return Err(GenError::Message(
+            "both teams need at least one leek".into(),
+        ));
     }
 
     let fid0 = row0[0]
         .get("farmer")
-        .and_then(|x| x.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(1) as i32;
     let fid1 = row1[0]
         .get("farmer")
-        .and_then(|x| x.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(2) as i32;
-    let fid1 = if fid1 == fid0 { fid0.saturating_add(1).max(1) } else { fid1 };
+    let fid1 = if fid1 == fid0 {
+        fid0.saturating_add(1).max(1)
+    } else {
+        fid1
+    };
 
     let mut r0 = row0;
     let mut r1 = row1;
@@ -246,7 +245,9 @@ pub fn apply_team_ai_override(
         .and_then(|e| e.as_array_mut())
         .ok_or_else(|| GenError::Message("scenario.entities must be array".into()))?;
     let Some(team) = entities.get_mut(team_idx).and_then(|t| t.as_array_mut()) else {
-        return Err(GenError::Message(format!("scenario.entities[{team_idx}] missing")));
+        return Err(GenError::Message(format!(
+            "scenario.entities[{team_idx}] missing"
+        )));
     };
     for ent in team {
         if let Some(o) = ent.as_object_mut() {
@@ -345,7 +346,7 @@ pub fn run_pvp_batch(
     let (tx, rx) = channel::<Result<(usize, RunMetrics), GenError>>();
     let root = params.generator_root.to_path_buf();
     thread::scope(|s| {
-        let chunk_size = (n + jobs - 1) / jobs;
+        let chunk_size = n.div_ceil(jobs);
         for chunk in tasks.chunks(chunk_size.max(1)) {
             let tx = tx.clone();
             let chunk: Vec<RunTask> = chunk.to_vec();
@@ -354,14 +355,12 @@ pub fn run_pvp_batch(
                 for task in chunk {
                     let id = task.run_id;
                     let arm = task.arm_name.clone();
-                    let res = execute_run_task(
-                        &task,
-                        root.as_path(),
-                        None,
-                        params.ai_scripts_root,
-                    )
-                    .map(|o| (id, o.metrics));
-                    if tx.send(res.map_err(|e| GenError::Message(format!("{arm}: {e}")))).is_err() {
+                    let res = execute_run_task(&task, root.as_path(), None, params.ai_scripts_root)
+                        .map(|o| (id, o.metrics));
+                    if tx
+                        .send(res.map_err(|e| GenError::Message(format!("{arm}: {e}"))))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -384,23 +383,19 @@ pub fn run_pvp_batch(
 
     let mut records = Vec::with_capacity(n);
     for (i, slot) in metrics_by_id.into_iter().enumerate() {
-        let arm = arms
-            .get(i)
-            .cloned()
-            .unwrap_or_else(|| format!("run_{i}"));
-        let m = match slot {
-            Some(m) => m,
-            None => {
-                records.push(BenchFightRecord {
-                    arm,
-                    seed: 0,
-                    ok: false,
-                    winner: None,
-                    duration: None,
-                    error: Some("missing worker result".into()),
-                });
-                continue;
-            }
+        let arm = arms.get(i).cloned().unwrap_or_else(|| format!("run_{i}"));
+        let m = if let Some(m) = slot {
+            m
+        } else {
+            records.push(BenchFightRecord {
+                arm,
+                seed: 0,
+                ok: false,
+                winner: None,
+                duration: None,
+                error: Some("missing worker result".into()),
+            });
+            continue;
         };
         let ok = m.error.is_none();
         records.push(BenchFightRecord {
@@ -425,7 +420,9 @@ pub fn print_pvp_summary(records: &[BenchFightRecord], team0_name: &str, team1_n
     eprintln!();
     eprintln!(
         "{}",
-        title.apply_to(format!("── PvP batch: {} (team 0) vs {} (team 1) ──", team0_name, team1_name))
+        title.apply_to(format!(
+            "── PvP batch: {team0_name} (team 0) vs {team1_name} (team 1) ──"
+        ))
     );
 
     let mut by_arm: HashMap<String, (u64, u64, u64)> = HashMap::new();
@@ -466,10 +463,7 @@ pub fn print_pvp_summary(records: &[BenchFightRecord], team0_name: &str, team1_n
         } else {
             draw.apply_to(rate_s).to_string()
         };
-        eprintln!(
-            "  {:<40}  {}  (n={}  W/L/D={}/{}/{})",
-            k, rate_styled, dec, w0, w1, dr
-        );
+        eprintln!("  {k:<40}  {rate_styled}  (n={dec}  W/L/D={w0}/{w1}/{dr})");
     }
     eprintln!();
 }

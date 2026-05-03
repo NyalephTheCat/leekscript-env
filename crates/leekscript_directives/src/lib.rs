@@ -55,9 +55,7 @@ pub fn parse_file_preamble(
     let mut line_no = 0usize;
     let mut block_comment = false;
     while line_no < max_lines && offset <= src.len() {
-        let line_end = src[offset..]
-            .find('\n')
-            .map_or(src.len(), |p| offset + p);
+        let line_end = src[offset..].find('\n').map_or(src.len(), |p| offset + p);
         let line = &src[offset..line_end];
         let line_start = offset;
 

@@ -2,6 +2,7 @@
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use thiserror::Error;
 use toml::Value;
 
@@ -64,17 +65,14 @@ pub struct Experimental {
 }
 
 impl LeekManifest {
-    pub fn from_str(s: &str) -> Result<Self, ConfigError> {
-        let v: Value = s.parse().map_err(ConfigError::TomlParse)?;
-        validate_top_level_keys(&v)?;
-        let m: LeekManifest = toml::from_str(s).map_err(ConfigError::TomlParse)?;
-        m.validate()?;
-        Ok(m)
-    }
-
+    /// Read `Leek.toml` from disk and parse it with [`FromStr`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`FromStr::from_str`], plus [`ConfigError::Io`] if the file cannot be read.
     pub fn load_path(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let s = std::fs::read_to_string(path.as_ref())?;
-        Self::from_str(&s)
+        s.parse()
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -87,7 +85,7 @@ impl LeekManifest {
         }
         if let Some(ref l) = self.language {
             if let Some(ver) = l.version {
-                if ver < 1 || ver > 99 {
+                if !(1..=99).contains(&ver) {
                     return Err(ConfigError::Invalid(format!(
                         "language.version {ver} is out of expected range (1–99)"
                     )));
@@ -112,6 +110,25 @@ impl LeekManifest {
             }
         }
         Ok(())
+    }
+}
+
+impl FromStr for LeekManifest {
+    type Err = ConfigError;
+
+    /// Parse and validate `Leek.toml` contents.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::TomlParse`] if the document is not valid TOML, [`ConfigError::Invalid`]
+    /// if a top-level key is unknown or semantic checks fail (schema version, `language.version`,
+    /// `lint.level`, `fmt.*` types), or the same variants produced by [`LeekManifest::validate`].
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v: Value = s.parse().map_err(ConfigError::TomlParse)?;
+        validate_top_level_keys(&v)?;
+        let m: LeekManifest = toml::from_str(s).map_err(ConfigError::TomlParse)?;
+        m.validate()?;
+        Ok(m)
     }
 }
 
@@ -151,6 +168,7 @@ fn validate_top_level_keys(v: &Value) -> Result<(), ConfigError> {
 }
 
 /// Walk upward from `start` (file or directory) looking for `Leek.toml`.
+#[must_use]
 pub fn find_manifest(mut dir: PathBuf) -> Option<PathBuf> {
     loop {
         let candidate = dir.join("Leek.toml");
@@ -169,23 +187,23 @@ mod tests {
 
     #[test]
     fn minimal_valid() {
-        let s = r#"
+        let s = r"
 [language]
 version = 4
 strict = false
-"#;
-        LeekManifest::from_str(s).unwrap();
+";
+        s.parse::<LeekManifest>().unwrap();
     }
 
     #[test]
     fn rejects_unknown_top_level() {
-        let s = r#"
+        let s = r"
 [language]
 version = 4
 [bad]
 x = 1
-"#;
-        assert!(LeekManifest::from_str(s).is_err());
+";
+        assert!(s.parse::<LeekManifest>().is_err());
     }
 
     #[test]
@@ -195,7 +213,7 @@ schema_version = 1
 [signatures]
 path = "lw-signatures.toml"
 "#;
-        let m = LeekManifest::from_str(s).unwrap();
+        let m: LeekManifest = s.parse().unwrap();
         assert_eq!(
             m.signatures.as_ref().unwrap().path.as_deref(),
             Some("lw-signatures.toml")

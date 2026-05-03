@@ -30,6 +30,7 @@ enum ValueTy {
     Unknown,
 }
 
+#[must_use]
 pub fn check_hir_types(hir: &HirFile, main_source: &Path) -> Vec<TypeDiagnostic> {
     let mut out = Vec::new();
     let use_sources = hir.stmt_sources.len() == hir.stmts.len();
@@ -276,7 +277,7 @@ fn walk_expr(e: &HirExpr, source_file: &Path, out: &mut Vec<TypeDiagnostic>) {
             walk_expr(value, source_file, out);
         }
         HirExpr::PostUpdate { target, .. } | HirExpr::PreUpdate { target, .. } => {
-            walk_expr(target, source_file, out)
+            walk_expr(target, source_file, out);
         }
         HirExpr::ArraySlice {
             base,
@@ -326,7 +327,7 @@ fn check_cast(
         None => None,
         Some(ValueTy::Unknown) => None,
         Some(ValueTy::String) => None, // Stringification is always possible at runtime.
-        Some(ValueTy::Real) | Some(ValueTy::Integer) => match src {
+        Some(ValueTy::Real | ValueTy::Integer) => match src {
             ValueTy::Integer | ValueTy::Real => None,
             ValueTy::Unknown => None,
             _ => Some(TypeDiagnostic {
@@ -418,4 +419,3 @@ fn expr_value_ty(e: &HirExpr) -> ValueTy {
         _ => ValueTy::Unknown,
     }
 }
-

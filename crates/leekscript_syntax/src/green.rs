@@ -6,6 +6,7 @@ use leekscript_lexer::{Token, TokenKind};
 use rowan::GreenNodeBuilder;
 
 /// Map a lexer token to a concrete [`LeekSyntaxKind`] leaf.
+#[must_use]
 pub fn syntax_kind_for_token(kind: &TokenKind) -> LeekSyntaxKind {
     match kind {
         TokenKind::Ident => LeekSyntaxKind::Ident,

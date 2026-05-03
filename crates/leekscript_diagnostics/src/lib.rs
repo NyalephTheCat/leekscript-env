@@ -34,11 +34,22 @@ pub struct RegistryEntry {
 
 impl Registry {
     /// Load and validate the registry file (unique `code` values).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError::Io`] on read failure, [`RegistryError::Yaml`] if the file is not valid YAML,
+    /// [`RegistryError::UnsupportedSchema`] if `schema_version` is not `1`, or [`RegistryError::DuplicateCode`]
+    /// when two entries share the same `code`.
     pub fn load_path(path: impl AsRef<Path>) -> Result<Self, RegistryError> {
         let bytes = std::fs::read(path.as_ref())?;
         Self::from_slice(&bytes)
     }
 
+    /// Parse a registry from YAML bytes and validate it.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Registry::load_path`], except I/O errors are not produced.
     pub fn from_slice(bytes: &[u8]) -> Result<Self, RegistryError> {
         let reg: Registry = serde_yaml::from_slice(bytes)?;
         if reg.schema_version != 1 {
@@ -53,15 +64,18 @@ impl Registry {
         Ok(reg)
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Resolve stable `E####` for a Java `Error` name, if present in the registry.
+    #[must_use]
     pub fn code_for_reference(&self, reference: &str) -> Option<&str> {
         self.entries
             .iter()
@@ -70,6 +84,7 @@ impl Registry {
     }
 
     /// Resolve stable `E####` for a toolchain-only `id` (e.g. `unknown_leek_directive`).
+    #[must_use]
     pub fn code_for_id(&self, id: &str) -> Option<&str> {
         self.entries
             .iter()
@@ -78,6 +93,7 @@ impl Registry {
     }
 
     /// References (Java `Error` names) missing from this registry — used to validate `lek` emit lists.
+    #[must_use]
     pub fn missing_references<'a>(&self, refs: &[&'a str]) -> Vec<&'a str> {
         refs.iter()
             .copied()
@@ -93,14 +109,14 @@ mod tests {
 
     #[test]
     fn sample_registry_roundtrip() {
-        let yaml = r#"
+        let yaml = r"
 schema_version: 1
 reference_source: test
 entries:
   - code: E0001
     reference: FOO
     band: parse
-"#;
+";
         let reg = Registry::from_slice(yaml.as_bytes()).unwrap();
         assert_eq!(reg.entries.len(), 1);
         assert_eq!(reg.entries[0].code, "E0001");
@@ -131,14 +147,14 @@ entries:
 
     #[test]
     fn missing_references_empty_when_all_known() {
-        let yaml = r#"
+        let yaml = r"
 schema_version: 1
 reference_source: test
 entries:
   - code: E0001
     reference: FOO
     band: parse
-"#;
+";
         let reg = Registry::from_slice(yaml.as_bytes()).unwrap();
         assert!(reg.missing_references(&["FOO"]).is_empty());
         assert_eq!(reg.missing_references(&["FOO", "BAR"]), vec!["BAR"]);

@@ -1,4 +1,4 @@
-//! Opinionated formatter for LeekScript sources.
+//! Opinionated formatter for `LeekScript` sources.
 //!
 //! Strategy: re-lex, validate delimiters, build a lossless [rowan](https://github.com/rust-analyzer/rowan)
 //! [`SOURCE_FILE`](leekscript_syntax::LeekSyntaxKind::SourceFile) tree ([`leekscript_syntax::build_source_file_tree`]),
@@ -36,27 +36,29 @@ impl Default for FmtConfig {
 
 impl FmtConfig {
     /// Merge `[fmt]` table from a parsed manifest (unknown keys ignored).
+    #[must_use]
     pub fn merge_manifest(self, fmt: Option<&toml::Table>) -> Self {
         let Some(t) = fmt else {
             return self;
         };
         let mut c = self;
-        if let Some(w) = t.get("width").and_then(|v| v.as_integer()) {
+        if let Some(w) = t.get("width").and_then(toml::Value::as_integer) {
             c.width = w as u32;
         }
-        if let Some(i) = t.get("indent").and_then(|v| v.as_integer()) {
+        if let Some(i) = t.get("indent").and_then(toml::Value::as_integer) {
             c.indent = i as u32;
         }
-        if let Some(tw) = t.get("tab_width").and_then(|v| v.as_integer()) {
+        if let Some(tw) = t.get("tab_width").and_then(toml::Value::as_integer) {
             c.tab_width = tw as u32;
         }
-        if let Some(b) = t.get("use_tabs").and_then(|v| v.as_bool()) {
+        if let Some(b) = t.get("use_tabs").and_then(toml::Value::as_bool) {
             c.use_tabs = b;
         }
         c
     }
 
     /// File preamble `// leek-fmt:` overrides (narrower fields only).
+    #[must_use]
     pub fn merge_preamble(self, preamble: Option<&FmtPreamble>) -> Self {
         let Some(p) = preamble else {
             return self;
@@ -79,6 +81,7 @@ impl FmtConfig {
 }
 
 /// Load `[fmt]` from `Leek.toml` discovered like other tools (optional path, else cwd walk).
+#[must_use]
 pub fn fmt_config_from_workspace(manifest: Option<&PathBuf>) -> FmtConfig {
     let defaults = FmtConfig::default();
     let path = manifest.cloned().or_else(|| {
@@ -135,8 +138,8 @@ pub fn format_source(
         last_real + 1,
         "rowan lexicals align with lexer tokens"
     );
-    for i in 0..=last_real {
-        debug_assert_eq!(seg.lexicals[i].text(), token_slice(src, &tokens[i]));
+    for (i, tok) in tokens.iter().enumerate().take(last_real + 1) {
+        debug_assert_eq!(seg.lexicals[i].text(), token_slice(src, tok));
     }
     debug_assert_eq!(seg.between.len(), last_real);
 
@@ -164,9 +167,7 @@ pub fn format_source(
         match tokens[i].kind {
             TokenKind::BraceOpen => depth += 1,
             TokenKind::BraceClose => {
-                if depth > 0 {
-                    depth -= 1;
-                }
+                depth = depth.saturating_sub(1);
             }
             _ => {}
         }
@@ -183,7 +184,7 @@ fn token_slice<'a>(src: &'a str, t: &Token) -> &'a str {
 
 fn pieces_whitespace_only(pieces: &[TriviaPiece]) -> bool {
     pieces.iter().all(|p| {
-        matches!(p, TriviaPiece::Whitespace(_)) && p.text().chars().all(|c| c.is_whitespace())
+        matches!(p, TriviaPiece::Whitespace(_)) && p.text().chars().all(char::is_whitespace)
     })
 }
 
@@ -212,7 +213,10 @@ fn format_trivia_gap(
     cfg: &FmtConfig,
     src: &str,
 ) -> String {
-    if pieces.iter().any(|p| p.is_comment()) {
+    if pieces
+        .iter()
+        .any(leekscript_syntax::TriviaPiece::is_comment)
+    {
         return FileSegments::join_pieces_normalize_comments(pieces);
     }
     if !pieces.is_empty() && !pieces_whitespace_only(pieces) {
@@ -253,13 +257,16 @@ fn format_gap_whitespace_only(
 
 fn normalize_trailing_trivia(pieces: &[TriviaPiece]) -> String {
     let joined = FileSegments::join_pieces_normalize_comments(pieces);
-    if pieces.iter().any(|p| p.is_comment()) {
+    if pieces
+        .iter()
+        .any(leekscript_syntax::TriviaPiece::is_comment)
+    {
         return normalize_newlines(&joined);
     }
     if joined.is_empty() {
         return String::new();
     }
-    if joined.chars().all(|c| c.is_whitespace()) {
+    if joined.chars().all(char::is_whitespace) {
         return if joined.contains('\n') {
             "\n".into()
         } else {

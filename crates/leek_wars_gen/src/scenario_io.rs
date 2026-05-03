@@ -8,8 +8,15 @@ pub enum ScenarioFormat {
     Toml,
 }
 
+#[must_use]
 pub fn infer_format(path: &Path) -> Option<ScenarioFormat> {
-    match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "json" => Some(ScenarioFormat::Json),
         "toml" => Some(ScenarioFormat::Toml),
         _ => None,
@@ -129,8 +136,7 @@ pub fn materialize_json_path(
                 "leekgen_scenario_{}.json",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
+                    .map_or(0, |d| d.as_nanos())
             ));
             let s = serde_json::to_string(&v).map_err(GenError::ScenarioJson)?;
             std::fs::write(&tmp, s)?;
@@ -158,8 +164,7 @@ mod tests {
             "leekgen_scenario_io_test_{}.{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0),
+                .map_or(0, |d| d.as_nanos()),
             ext
         ))
     }
@@ -201,4 +206,3 @@ mod tests {
         assert!(!json_path.is_file(), "guard should remove temp json");
     }
 }
-

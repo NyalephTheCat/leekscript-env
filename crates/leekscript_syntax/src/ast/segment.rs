@@ -23,6 +23,7 @@ impl std::fmt::Debug for TriviaPiece {
 }
 
 impl TriviaPiece {
+    #[must_use]
     pub fn cast(token: SyntaxToken<LeekLanguage>) -> Option<Self> {
         match token.kind() {
             LeekSyntaxKind::Whitespace => Some(Self::Whitespace(token)),
@@ -32,6 +33,7 @@ impl TriviaPiece {
         }
     }
 
+    #[must_use]
     pub fn is_comment(&self) -> bool {
         matches!(
             self,
@@ -39,6 +41,7 @@ impl TriviaPiece {
         )
     }
 
+    #[must_use]
     pub fn as_syntax_token(&self) -> &SyntaxToken<LeekLanguage> {
         match self {
             TriviaPiece::Whitespace(t)
@@ -48,6 +51,7 @@ impl TriviaPiece {
     }
 
     /// Source slice for this trivia piece.
+    #[must_use]
     pub fn text(&self) -> &str {
         self.as_syntax_token().text()
     }
@@ -68,11 +72,13 @@ pub struct FileSegments {
 
 impl FileSegments {
     /// Concatenate trivia for compatibility with string-based gap helpers.
+    #[must_use]
     pub fn join_pieces(pieces: &[TriviaPiece]) -> String {
         pieces.iter().map(|p| p.text().to_string()).collect()
     }
 
     /// Join pieces with `\r\n` normalized inside comment bodies only (whitespace unchanged).
+    #[must_use]
     pub fn join_pieces_normalize_comments(pieces: &[TriviaPiece]) -> String {
         let mut s = String::new();
         for p in pieces {

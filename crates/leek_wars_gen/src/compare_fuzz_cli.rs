@@ -24,9 +24,7 @@ fn resolve_fuzz_artifacts_dir(dir: &Path) -> PathBuf {
     if dir.is_absolute() {
         dir.to_path_buf()
     } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(dir))
-            .unwrap_or_else(|_| dir.to_path_buf())
+        std::env::current_dir().map_or_else(|_| dir.to_path_buf(), |cwd| cwd.join(dir))
     }
 }
 
@@ -34,12 +32,12 @@ fn resolve_fuzz_artifacts_dir(dir: &Path) -> PathBuf {
 
 fn section_stderr(title: &str) {
     eprintln!();
-    eprintln!("── {} ──", title);
+    eprintln!("── {title} ──");
 }
 
 fn section_stdout(title: &str) {
     println!();
-    println!("── {} ──", title);
+    println!("── {title} ──");
 }
 
 fn compare_status_one_line(compare: &CompareResult) -> &'static str {
@@ -51,7 +49,9 @@ fn compare_status_one_line(compare: &CompareResult) -> &'static str {
         CompareResult::FullMismatch { .. } => "mismatch — normalized outcome differs",
         CompareResult::WinnerDurationMatch => "ok — winner and duration match",
         CompareResult::WinnerDurationMismatch { .. } => "mismatch — winner or duration differs",
-        CompareResult::ActionsSubsequenceOk => "ok — official generator actions ⊆ Rust order (minimal filter)",
+        CompareResult::ActionsSubsequenceOk => {
+            "ok — official generator actions ⊆ Rust order (minimal filter)"
+        }
         CompareResult::ActionsSubsequenceFail { .. } => {
             "mismatch — action subsequence check failed"
         }
@@ -59,22 +59,24 @@ fn compare_status_one_line(compare: &CompareResult) -> &'static str {
         CompareResult::ActionsExactMismatch { .. } => "mismatch — fight.actions differ (exact)",
         CompareResult::OpsExactMatch => "ok — fight.ops match (exact)",
         CompareResult::OpsExactMismatch { .. } => "mismatch — fight.ops differ (exact)",
-        CompareResult::EngineRunMismatch { .. } => "mismatch — engine run error(s); see stderr blocks below",
+        CompareResult::EngineRunMismatch { .. } => {
+            "mismatch — engine run error(s); see stderr blocks below"
+        }
         CompareResult::OutcomeNotJson { .. } => "mismatch — outcome stdout is not comparable JSON",
     }
 }
 
 fn print_timing_table_stdout(label_java: &str, java: Option<&TimingSummary>, rust: &TimingSummary) {
     println!(
-        "  {:<8} {:>9} {:>9} {:>9}  {}",
-        "", "min", "median", "mean", "samples"
+        "  {:<8} {:>9} {:>9} {:>9}  samples",
+        "", "min", "median", "mean"
     );
     if let Some(j) = java {
         print_timing_row_stdout(label_java, j);
     } else {
         println!(
-            "  {:<8} {:>9} {:>9} {:>9}  {}",
-            label_java, "—", "—", "—", "(skipped)"
+            "  {:<8} {:>9} {:>9} {:>9}  (skipped)",
+            label_java, "—", "—", "—"
         );
     }
     print_timing_row_stdout("Rust", rust);
@@ -82,10 +84,7 @@ fn print_timing_table_stdout(label_java: &str, java: Option<&TimingSummary>, rus
 
 fn print_timing_row_stdout(engine: &str, t: &TimingSummary) {
     if t.iterations == 0 {
-        println!(
-            "  {:<8} {:>9} {:>9} {:>9}  {}",
-            engine, "—", "—", "—", "n=0"
-        );
+        println!("  {:<8} {:>9} {:>9} {:>9}  n=0", engine, "—", "—", "—");
     } else {
         println!(
             "  {:<8} {:>8.2}ms {:>8.2}ms {:>8.2}ms  n={}",
@@ -97,12 +96,12 @@ fn print_timing_row_stdout(engine: &str, t: &TimingSummary) {
 fn print_timing_table_stderr(title: &str, rows: &[(&str, &TimingSummary)]) {
     eprintln!("{title}");
     eprintln!(
-        "  {:<10} {:>9} {:>9} {:>9}  {}",
-        "", "min", "median", "mean", "samples"
+        "  {:<10} {:>9} {:>9} {:>9}  samples",
+        "", "min", "median", "mean"
     );
     for (name, t) in rows {
         if t.iterations == 0 {
-            eprintln!("  {:<10} {:>9} {:>9} {:>9}  {}", name, "—", "—", "—", "n=0");
+            eprintln!("  {:<10} {:>9} {:>9} {:>9}  n=0", name, "—", "—", "—");
         } else {
             eprintln!(
                 "  {:<10} {:>8.2}ms {:>8.2}ms {:>8.2}ms  n={}",
@@ -112,8 +111,8 @@ fn print_timing_table_stderr(title: &str, rows: &[(&str, &TimingSummary)]) {
     }
 }
 
-fn print_fuzz_banner_stderr(
-    root: &PathBuf,
+struct FuzzBannerParams<'a> {
+    root: &'a Path,
     requested: u64,
     run_until_interrupt: bool,
     ok: u64,
@@ -140,117 +139,106 @@ fn print_fuzz_banner_stderr(
     mutate_ai_inject_max_stmts: u8,
     mutate_ai_require_parseable: bool,
     randomize_draw_rule: bool,
-    artifacts_dir: Option<&Path>,
-) {
+    artifacts_dir: Option<&'a Path>,
+}
+
+fn print_fuzz_banner_stderr(p: FuzzBannerParams<'_>) {
     section_stderr("fuzz");
-    eprintln!("  {:<18} {}", "Generator root", root.display());
-    if parity_profile {
+    eprintln!("  {:<18} {}", "Generator root", p.root.display());
+    if p.parity_profile {
         eprintln!(
-            "  {:<18} {}",
-            "Parity preset",
-            "strict (no scenario jitter; parseable + compilable AI mutants; Java benchmark on)"
+            "  {:<18} strict (no scenario jitter; parseable + compilable AI mutants; Java benchmark on)",
+            "Parity preset"
         );
     }
-    if let Some(a) = artifacts_dir {
+    if let Some(a) = p.artifacts_dir {
         eprintln!("  {:<18} {}", "Artifacts dir", a.display());
     }
     eprintln!(
         "  {:<18} {}",
         "Requested iters",
-        if run_until_interrupt {
+        if p.run_until_interrupt {
             "∞ (first Ctrl+C: finish current iteration, then print summary; second Ctrl+C: exit 130)"
                 .to_string()
         } else {
-            requested.to_string()
+            p.requested.to_string()
         }
     );
-    let attempted = ok.saturating_add(failed as u64);
-    let requested_label = if run_until_interrupt {
+    let attempted = p.ok.saturating_add(p.failed as u64);
+    let requested_label = if p.run_until_interrupt {
         "∞".to_string()
     } else {
-        requested.to_string()
+        p.requested.to_string()
     };
     eprintln!(
         "  {:<18} {} ok, {} failed (attempted {}, requested {})",
-        "Progress", ok, failed, attempted, requested_label
+        "Progress", p.ok, p.failed, attempted, requested_label
     );
-    if run_until_interrupt {
+    if p.run_until_interrupt {
         if attempted > 0 {
             eprintln!(
                 "  {:<18} {:.1}% of attempted iterations succeeded",
                 "Success rate",
-                100.0 * (ok as f64) / (attempted as f64)
+                100.0 * (p.ok as f64) / (attempted as f64)
             );
         }
-    } else if requested > 0 {
+    } else if p.requested > 0 {
         eprintln!(
             "  {:<18} {:.1}% of requested iterations succeeded",
             "Success rate",
-            100.0 * (ok as f64) / (requested as f64)
+            100.0 * (p.ok as f64) / (p.requested as f64)
         );
     }
-    eprintln!("  {:<18} {}", "Master seed", master_seed);
+    eprintln!("  {:<18} {}", "Master seed", p.master_seed);
     eprintln!(
         "  {:<18} --fuzz --fuzz-master-seed {}",
-        "Replay cmd", master_seed
+        "Replay cmd", p.master_seed
     );
     eprintln!(
-        "  {:<18} {}",
-        "Scenario pool",
-        format!(
-            "{} (recursive={}  parity_corpus={})",
-            scenario_count, scenarios_recursive, parity_corpus_merged
-        )
+        "  {:<18} {} (recursive={}  parity_corpus={})",
+        "Scenario pool", p.scenario_count, p.scenarios_recursive, p.parity_corpus_merged
     );
-    eprintln!("  {:<18} {}", "AI scripts", ai_count);
+    eprintln!("  {:<18} {}", "AI scripts", p.ai_count);
+    let java_cmp = p
+        .fuzz_compare_mode
+        .map_or(String::new(), |m| format!("  java_compare={m}"));
     eprintln!(
-        "  {:<18} {}",
-        "Variants",
-        format!(
-            "random_seed={}  shuffle_ai={}  java_harness={}{}",
-            fuzz_seed,
-            shuffle_ais,
-            benchmark_java,
-            if let Some(m) = fuzz_compare_mode {
-                format!("  java_compare={m}")
-            } else {
-                String::new()
-            }
-        )
+        "  {:<18} random_seed={}  shuffle_ai={}  java_harness={}{}",
+        "Variants", p.fuzz_seed, p.shuffle_ais, p.benchmark_java, java_cmp,
     );
-    let mut_ai = if mutate_ai_level == 0 {
+    let mut_ai = if p.mutate_ai_level == 0 {
         "off".to_string()
-    } else if benchmark_java {
-        format!("level {mutate_ai_level} (official-generator+Rust sandbox)")
+    } else if p.benchmark_java {
+        format!(
+            "level {} (official-generator+Rust sandbox)",
+            p.mutate_ai_level
+        )
     } else {
-        format!("level {mutate_ai_level} (Rust overlay)")
+        format!("level {} (Rust overlay)", p.mutate_ai_level)
     };
-    let inject = if mutate_ai_level >= 4 {
+    let inject = if p.mutate_ai_level >= 4 {
         format!(
             "inject_complexity={}  inject_wrap={}٪  inject_max_stmts={}  require_parseable={}",
-            mutate_ai_inject_complexity,
-            mutate_ai_inject_wrap_percent,
-            mutate_ai_inject_max_stmts,
-            mutate_ai_require_parseable
+            p.mutate_ai_inject_complexity,
+            p.mutate_ai_inject_wrap_percent,
+            p.mutate_ai_inject_max_stmts,
+            p.mutate_ai_require_parseable
         )
     } else {
         "inject=(level<4)".to_string()
     };
     eprintln!(
-        "  {:<18} {}",
+        "  {:<18} mutate_leek={}  {}  jitter_entity_stats={}  jitter_max_turns={}  jitter_map={}  jitter_cells={}  jitter_max_ops={}  jitter_loadout={}  random_draw_rule={}",
         "AI / scenario",
-        format!(
-            "mutate_leek={}  {}  jitter_entity_stats={}  jitter_max_turns={}  jitter_map={}  jitter_cells={}  jitter_max_ops={}  jitter_loadout={}  random_draw_rule={}",
-            mut_ai,
-            inject,
-            jitter_entity_stats,
-            jitter_max_turns,
-            jitter_map,
-            jitter_cells,
-            jitter_max_ops,
-            jitter_loadout,
-            randomize_draw_rule
-        )
+        mut_ai,
+        inject,
+        p.jitter_entity_stats,
+        p.jitter_max_turns,
+        p.jitter_map,
+        p.jitter_cells,
+        p.jitter_max_ops,
+        p.jitter_loadout,
+        p.randomize_draw_rule
     );
 }
 
@@ -891,8 +879,7 @@ fn run_compare(cli: &CompareCli) -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ratio) = r.java_over_rust_median {
                 println!();
                 println!(
-                    "  Generator/Rust median ratio: {:.3}x (JVM startup included unless warmup is high)",
-                    ratio
+                    "  Generator/Rust median ratio: {ratio:.3}x (JVM startup included unless warmup is high)"
                 );
             }
             println!();
@@ -907,7 +894,9 @@ fn run_compare(cli: &CompareCli) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let failed = reports.iter().any(|r| r.comparison_failed());
+    let failed = reports
+        .iter()
+        .any(super::harness::ScenarioHarnessReport::comparison_failed);
     if failed {
         std::process::exit(1);
     }
@@ -937,17 +926,14 @@ fn run_fuzz_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
     let jitter_max_ops = fo.fuzz_jitter_max_ops || jitter_all;
     let jitter_loadout = fo.fuzz_jitter_loadout || jitter_all;
 
-    let mutate_ai_require_parseable =
-        fo.fuzz_mutate_ai_require_parseable || parity_profile;
+    let mutate_ai_require_parseable = fo.fuzz_mutate_ai_require_parseable || parity_profile;
 
     let benchmark_java_effective = fo.fuzz_benchmark_java || parity_profile;
-    if benchmark_java_effective {
-        if cmp.skip_java || cmp.skip_rust {
-            return Err(Box::new(GenError::Message(
+    if benchmark_java_effective && (cmp.skip_java || cmp.skip_rust) {
+        return Err(Box::new(GenError::Message(
                 "--fuzz-benchmark-java requires both the official generator and Rust (do not pass --skip-java or --skip-rust)"
                     .into(),
             )));
-        }
     }
     let root = generator_root(fo.fuzz_root.as_ref())?;
     if !root.is_dir() {
@@ -985,7 +971,10 @@ fn run_fuzz_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
     // Note: relative paths are resolved from the current working directory.
     // (We only add the rel paths here; copying happens in the fuzz runner.)
     // This makes `--fuzz-no-shuffle-ai` still usable with external AIs if scenarios reference them explicitly.
-    fn collect_leek_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) -> std::io::Result<()> {
+    fn collect_leek_files(
+        dir: &std::path::Path,
+        out: &mut Vec<std::path::PathBuf>,
+    ) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let p = entry.path();
@@ -995,8 +984,7 @@ fn run_fuzz_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
             } else if p
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("leek"))
-                == Some(true)
+                .is_some_and(|e| e.eq_ignore_ascii_case("leek"))
             {
                 out.push(p);
             }
@@ -1032,10 +1020,7 @@ fn run_fuzz_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
         if !d.is_dir() {
             continue;
         }
-        let dir_name = d
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("dir");
+        let dir_name = d.file_name().and_then(|s| s.to_str()).unwrap_or("dir");
         let mut files = Vec::new();
         collect_leek_files(d.as_path(), &mut files)?;
         files.sort();
@@ -1047,15 +1032,15 @@ fn run_fuzz_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
                     || rel_posix.ends_with("/merged-for-upload.leek")
                     || rel_posix == "merged-for-upload.leek";
                 if !fo.fuzz_ai_entrypoints_only || is_entry {
-                    external_dir_rel_paths.push(format!(
-                        "_external_ai/{}/{}",
-                        dir_name, rel_posix
-                    ));
+                    external_dir_rel_paths.push(format!("_external_ai/{dir_name}/{rel_posix}"));
                 }
             }
         }
     }
-    for rel in external_rel_paths.iter().chain(external_dir_rel_paths.iter()) {
+    for rel in external_rel_paths
+        .iter()
+        .chain(external_dir_rel_paths.iter())
+    {
         if !ai_rels.contains(rel) {
             ai_rels.push(rel.clone());
         }
@@ -1186,8 +1171,7 @@ fn run_fuzz_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
     if run_until_interrupt && !fo.fuzz_quiet {
         if progress_report_every > 0 {
             eprintln!(
-                "leekgen-compare: --fuzz-n 0 — infinite fuzz until first Ctrl+C. Live progress every {} attempt(s) on stderr.",
-                progress_report_every
+                "leekgen-compare: --fuzz-n 0 — infinite fuzz until first Ctrl+C. Live progress every {progress_report_every} attempt(s) on stderr."
             );
         } else {
             eprintln!(
@@ -1218,36 +1202,36 @@ fn run_fuzz_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
     if !fo.fuzz_quiet {
         let failed = bench.summary.failures.len();
         let ok = bench.summary.iterations_ok;
-        print_fuzz_banner_stderr(
-            &root_for_report,
-            fo.fuzz_iterations,
+        print_fuzz_banner_stderr(FuzzBannerParams {
+            root: root_for_report.as_path(),
+            requested: fo.fuzz_iterations,
             run_until_interrupt,
             ok,
             failed,
             master_seed,
-            scenario_pool_n,
-            ai_pool_n,
+            scenario_count: scenario_pool_n,
+            ai_count: ai_pool_n,
             scenarios_recursive,
-            !fo.fuzz_no_parity_corpus,
-            !fo.fuzz_no_fuzz_seed,
-            !fo.fuzz_no_shuffle_ai,
-            benchmark_java_effective,
+            parity_corpus_merged: !fo.fuzz_no_parity_corpus,
+            fuzz_seed: !fo.fuzz_no_fuzz_seed,
+            shuffle_ais: !fo.fuzz_no_shuffle_ai,
+            benchmark_java: benchmark_java_effective,
             parity_profile,
-            fuzz_compare_mode_label,
-            cfg.mutate_ai_level,
-            cfg.jitter_entity_stats,
-            cfg.jitter_max_turns,
-            cfg.jitter_map_obstacles,
-            cfg.jitter_entity_cells,
-            cfg.jitter_max_operations,
-            cfg.jitter_entity_loadouts,
-            cfg.mutate_ai_inject_complexity,
-            cfg.mutate_ai_inject_wrap_percent,
-            cfg.mutate_ai_inject_max_stmts,
-            cfg.mutate_ai_require_parseable,
-            cfg.fuzz_draw_check_life,
-            cfg.artifacts_dir.as_deref(),
-        );
+            fuzz_compare_mode: fuzz_compare_mode_label,
+            mutate_ai_level: cfg.mutate_ai_level,
+            jitter_entity_stats: cfg.jitter_entity_stats,
+            jitter_max_turns: cfg.jitter_max_turns,
+            jitter_map: cfg.jitter_map_obstacles,
+            jitter_cells: cfg.jitter_entity_cells,
+            jitter_max_ops: cfg.jitter_max_operations,
+            jitter_loadout: cfg.jitter_entity_loadouts,
+            mutate_ai_inject_complexity: cfg.mutate_ai_inject_complexity,
+            mutate_ai_inject_wrap_percent: cfg.mutate_ai_inject_wrap_percent,
+            mutate_ai_inject_max_stmts: cfg.mutate_ai_inject_max_stmts,
+            mutate_ai_require_parseable: cfg.mutate_ai_require_parseable,
+            randomize_draw_rule: cfg.fuzz_draw_check_life,
+            artifacts_dir: cfg.artifacts_dir.as_deref(),
+        });
         print_fuzz_results_stderr(&bench, benchmark_java_effective, fuzz_compare_mode_label);
     }
 
@@ -1317,24 +1301,21 @@ fn run_replay_branch(cli: &TopCli) -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .expect("checked replay is Some in caller");
     let artifact_dir = if dir.is_absolute() {
-        dir.to_path_buf()
+        dir.clone()
     } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(dir))
-            .unwrap_or_else(|_| dir.to_path_buf())
+        std::env::current_dir().map_or_else(|_| dir.clone(), |cwd| cwd.join(dir))
     };
 
     let meta_raw = fs::read_to_string(artifact_dir.join("meta.json"))?;
     let meta: serde_json::Value = serde_json::from_str(&meta_raw)?;
     let benchmark_java = meta
         .get("benchmark_java")
-        .and_then(|v| v.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     let compare_mode = meta
         .get("compare_mode")
         .and_then(|v| v.as_str())
-        .map(compare_mode_from_meta)
-        .unwrap_or(CompareMode::FullNormalized);
+        .map_or(CompareMode::FullNormalized, compare_mode_from_meta);
 
     let root = generator_root(fo.fuzz_root.as_ref())?;
 

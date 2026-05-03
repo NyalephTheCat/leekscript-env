@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 fn heuristic_f32(world: &FightWorld, a: i32, b: i32) -> f32 {
     // Official generator: getDistance = sqrt(distance2) (double), then cast to float.
-    let d2 = map::distance2(world.map_w, a, b) as f64;
+    let d2 = f64::from(map::distance2(world.map_w, a, b));
     d2.sqrt() as f32
 }
 
@@ -23,10 +23,9 @@ fn open_weight(
     if cell == start {
         return 0.0;
     }
-    best_g
-        .get(&cell)
-        .map(|g| *g as f32 + heuristic_f32(world, cell, goal0))
-        .unwrap_or(f32::INFINITY)
+    best_g.get(&cell).map_or(f32::INFINITY, |g| {
+        *g as f32 + heuristic_f32(world, cell, goal0)
+    })
 }
 
 fn neighbors(world: &FightWorld, u: i32) -> Vec<i32> {
@@ -210,6 +209,7 @@ fn astar_path_inner(
 }
 
 /// [`astar_path`] with a probe script for `tools/TreeSetWeightProbe.java` (`u` / `i` / `p`, live weights).
+#[must_use]
 pub fn astar_path_probe_script(
     world: &FightWorld,
     start: i32,
@@ -222,6 +222,7 @@ pub fn astar_path_probe_script(
 }
 
 /// Official generator: `Map.getPathBeetween(start, end, cells_to_ignore)` wrapper.
+#[must_use]
 pub fn get_path_between(
     world: &FightWorld,
     start: i32,

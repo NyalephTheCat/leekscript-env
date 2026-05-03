@@ -23,10 +23,12 @@ impl DebugSourceContext {
         path.to_string_lossy().replace('\\', "/")
     }
 
+    #[must_use]
     pub fn file_id(&self, path: &Path) -> i32 {
         java_log::java_path_file_id(&self.path_key(path))
     }
 
+    #[must_use]
     pub fn line_1_based(&self, path: &Path, span: Span) -> Option<i32> {
         let t = self.texts.get(path)?;
         Some(leekscript_span::line_col_at(t, span.start as usize).0 as i32)
@@ -156,7 +158,7 @@ impl InterpCx {
         let sp = self.pending_call_span?;
         let ctx = self.debug_sources.as_ref()?;
         let file = self.debug_active_file.as_ref()?;
-        let line = ctx.line_1_based(file, sp)? as i32;
+        let line = ctx.line_1_based(file, sp)?;
         let rel = ctx.path_key(file);
         let base = Path::new(&rel)
             .file_name()

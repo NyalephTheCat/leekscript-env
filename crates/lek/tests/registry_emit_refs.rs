@@ -5,7 +5,7 @@ use std::process::Command;
 
 #[test]
 fn registry_verify_emit_refs_ok() {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let mut reg = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     reg.pop();
     reg.pop();

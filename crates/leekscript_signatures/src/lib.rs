@@ -20,6 +20,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use thiserror::Error;
 
 fn default_schema_version() -> u32 {
@@ -47,15 +48,14 @@ pub struct SignatureFile {
 }
 
 impl SignatureFile {
-    pub fn from_str(s: &str) -> Result<Self, SignatureError> {
-        let f: SignatureFile = toml::from_str(s)?;
-        f.validate()?;
-        Ok(f)
-    }
-
+    /// Read a signature TOML file from disk and parse it with [`FromStr`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`FromStr::from_str`], plus [`SignatureError::Io`] if the file cannot be read.
     pub fn load_path(path: impl AsRef<Path>) -> Result<Self, SignatureError> {
         let s = fs::read_to_string(path.as_ref())?;
-        Self::from_str(&s)
+        s.parse()
     }
 
     fn validate(&self) -> Result<(), SignatureError> {
@@ -66,11 +66,12 @@ impl SignatureFile {
     }
 
     /// Names to pre-seed the resolve global scope (`globals` ∪ `functions`, stable order, first wins).
+    #[must_use]
     pub fn resolve_names(&self) -> Vec<String> {
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for list in [&self.globals, &self.functions] {
-            for n in list.iter() {
+            for n in list {
                 let n = n.trim();
                 if n.is_empty() {
                     continue;
@@ -84,19 +85,34 @@ impl SignatureFile {
     }
 }
 
+impl FromStr for SignatureFile {
+    type Err = SignatureError;
+
+    /// Parse and validate a signature TOML document.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SignatureError::Toml`] if deserialization fails, or [`SignatureError::UnsupportedSchema`]
+    /// when `schema_version` is not `1`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let f: SignatureFile = toml::from_str(s)?;
+        f.validate()?;
+        Ok(f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn merges_globals_and_functions_dedupes() {
-        let f = SignatureFile::from_str(
-            r#"
+        let f: SignatureFile = r#"
  schema_version = 1
             globals = ["a", "b", "a"]
             functions = ["b", "c"]
-        "#,
-        )
+        "#
+        .parse()
         .unwrap();
         assert_eq!(f.resolve_names(), vec!["a", "b", "c"]);
     }

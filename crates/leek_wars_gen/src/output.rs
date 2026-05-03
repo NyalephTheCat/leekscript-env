@@ -38,7 +38,7 @@ pub enum SimVerbosity {
 pub struct SimData {
     /// `chipTemplateId` (from actions) -> chip name.
     pub chip_name_by_template: std::collections::HashMap<i64, String>,
-    /// `weaponTemplateId` (from set_weapon actions / UI) -> weapon name.
+    /// `weaponTemplateId` (from `set_weapon` actions / UI) -> weapon name.
     pub weapon_name_by_template: std::collections::HashMap<i64, String>,
 }
 
@@ -56,6 +56,7 @@ pub fn parse_outcome(outcome_json: &str) -> Result<Value, GenError> {
         .map_err(|e| GenError::Message(format!("outcome is not JSON: {e}")))
 }
 
+#[must_use]
 pub fn pretty_summary(outcome: &Value) -> String {
     let winner = outcome.get("winner").cloned().unwrap_or(Value::Null);
     let duration = outcome.get("duration").cloned().unwrap_or(Value::Null);
@@ -63,17 +64,17 @@ pub fn pretty_summary(outcome: &Value) -> String {
         .get("fight")
         .and_then(|f| f.get("ops"))
         .and_then(|v| v.as_array())
-        .map(|a| a.len());
+        .map(std::vec::Vec::len);
     let actions = outcome
         .get("fight")
         .and_then(|f| f.get("actions"))
         .and_then(|v| v.as_array())
-        .map(|a| a.len());
+        .map(std::vec::Vec::len);
 
     let mut s = String::new();
     s.push_str("Outcome\n");
-    s.push_str(&format!("  winner:   {}\n", winner));
-    s.push_str(&format!("  duration: {}\n", duration));
+    s.push_str(&format!("  winner:   {winner}\n"));
+    s.push_str(&format!("  duration: {duration}\n"));
     if let Some(n) = actions {
         s.push_str(&format!("  actions:  {n}\n"));
     }
@@ -83,10 +84,12 @@ pub fn pretty_summary(outcome: &Value) -> String {
     s
 }
 
+#[must_use]
 pub fn sim_text(outcome: &Value) -> String {
     sim_text_with_options(outcome, &SimOptions::default())
 }
 
+#[must_use]
 pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
     let mut out = String::new();
     out.push_str("Simulation\n");
@@ -106,25 +109,33 @@ pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
     let mut active_fid: Option<i64> = None;
     let mut weapon_by_fid: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
     let mut hp_by_fid: std::collections::HashMap<i64, i64> = initial_hp_map(outcome);
-    let mut turn_start_hp_by_fid: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    let mut turn_start_hp_by_fid: std::collections::HashMap<i64, i64> =
+        std::collections::HashMap::new();
     let mut emitted: usize = 0;
 
     for (i, a) in actions.iter().enumerate() {
         let code = a
             .as_array()
             .and_then(|arr| arr.first())
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(-1);
 
         // Best-effort turn tracking from known official-generator codes emitted by our Rust engine.
         // [6, turn] = ActionNewTurn, [7, fid] = ActionEntityTurn, [8, fid, tp, mp] = ActionEndTurn
         if code == 6 {
-            if let Some(t) = a.as_array().and_then(|arr| arr.get(1)).and_then(|v| v.as_i64()) {
+            if let Some(t) = a
+                .as_array()
+                .and_then(|arr| arr.get(1))
+                .and_then(serde_json::Value::as_i64)
+            {
                 current_turn = t.max(1);
             }
             active_fid = None;
         } else if code == 7 {
-            active_fid = a.as_array().and_then(|arr| arr.get(1)).and_then(|v| v.as_i64());
+            active_fid = a
+                .as_array()
+                .and_then(|arr| arr.get(1))
+                .and_then(serde_json::Value::as_i64);
             if let Some(fid) = active_fid {
                 if let Some(hp) = hp_by_fid.get(&fid).copied() {
                     turn_start_hp_by_fid.insert(fid, hp);
@@ -132,12 +143,18 @@ pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
             }
         } else if code == 8 {
             // Keep fid visible but we can still attribute the action to its fid.
-            active_fid = a.as_array().and_then(|arr| arr.get(1)).and_then(|v| v.as_i64());
+            active_fid = a
+                .as_array()
+                .and_then(|arr| arr.get(1))
+                .and_then(serde_json::Value::as_i64);
         } else if code == 13 {
             // [SET_WEAPON, weaponTemplate]
             // Attribute to active fid (set by [7,fid]) when possible.
             if let Some(fid) = active_fid {
-                if let Some(wt) = a.as_array().and_then(|arr| arr.get(1)).and_then(|v| v.as_i64())
+                if let Some(wt) = a
+                    .as_array()
+                    .and_then(|arr| arr.get(1))
+                    .and_then(serde_json::Value::as_i64)
                 {
                     weapon_by_fid.insert(fid, wt);
                 }
@@ -148,8 +165,12 @@ pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
         // [101, target_fid, dmg, erosion] and [103, target_fid, heal]
         if code == 101 {
             if let Some(arr) = a.as_array() {
-                let tfid = arr.get(1).and_then(|v| v.as_i64());
-                let dmg = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+                let tfid = arr.get(1).and_then(serde_json::Value::as_i64);
+                let dmg = arr
+                    .get(2)
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0)
+                    .max(0);
                 if let Some(fid) = tfid {
                     let cur = hp_by_fid.get(&fid).copied().unwrap_or(0);
                     hp_by_fid.insert(fid, (cur - dmg).max(0));
@@ -157,8 +178,12 @@ pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
             }
         } else if code == 103 {
             if let Some(arr) = a.as_array() {
-                let tfid = arr.get(1).and_then(|v| v.as_i64());
-                let heal = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0).max(0);
+                let tfid = arr.get(1).and_then(serde_json::Value::as_i64);
+                let heal = arr
+                    .get(2)
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0)
+                    .max(0);
                 if let Some(fid) = tfid {
                     let cur = hp_by_fid.get(&fid).copied().unwrap_or(0);
                     hp_by_fid.insert(fid, cur + heal);
@@ -175,7 +200,10 @@ pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
             // Include if:
             // - the action's second element is the fid, or
             // - the currently active fid (from [7, fid]) matches.
-            let second = a.as_array().and_then(|arr| arr.get(1)).and_then(|v| v.as_i64());
+            let second = a
+                .as_array()
+                .and_then(|arr| arr.get(1))
+                .and_then(serde_json::Value::as_i64);
             if second != Some(only) && active_fid != Some(only) {
                 continue;
             }
@@ -189,21 +217,20 @@ pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
             SimStyle::Raw => {
                 if opts.group_turns && (emitted == 0 || code == 6) {
                     out.push_str(&format!("\n-- turn {current_turn} --\n"));
-                } else if opts.group_turns && emitted == 0 {
-                    out.push_str(&format!("\n-- turn {current_turn} --\n"));
                 }
 
                 if opts.diff_friendly {
                     // Stable, line-oriented: omit full JSON, keep a short preview.
-                    let fid_label = active_fid
-                        .map(|f| format!(" fid={f}"))
-                        .unwrap_or_default();
+                    let fid_label = active_fid.map(|f| format!(" fid={f}")).unwrap_or_default();
                     out.push_str(&format!(
                         "  [{i:04}] turn={current_turn}{fid_label} code={code}  {}\n",
                         preview_json(a, 96)
                     ));
                 } else {
-                    out.push_str(&format!("  [{i:04}] code={code}  {}\n", preview_json(a, 160)));
+                    out.push_str(&format!(
+                        "  [{i:04}] code={code}  {}\n",
+                        preview_json(a, 160)
+                    ));
                 }
             }
             SimStyle::Pretty => {
@@ -231,24 +258,23 @@ pub fn sim_text_with_options(outcome: &Value, opts: &SimOptions) -> String {
                 } else {
                     "    - ".to_string()
                 };
-                let include_actor = action_primary_fid(a).is_some_and(|fid| Some(fid) != active_fid);
+                let include_actor =
+                    action_primary_fid(a).is_some_and(|fid| Some(fid) != active_fid);
                 let line = format_action_pretty_with_state(
                     code,
                     a,
                     active_fid,
                     &fid_names,
                     include_actor,
-                    &data,
-                    &weapon_by_fid,
-                    &hp_by_fid,
-                    &turn_start_hp_by_fid,
-                    opts.show_live_stats,
+                    &PrettyActionState {
+                        data: &data,
+                        weapon_by_fid: &weapon_by_fid,
+                        hp_by_fid: &hp_by_fid,
+                        turn_start_hp_by_fid: &turn_start_hp_by_fid,
+                        show_live_stats: opts.show_live_stats,
+                    },
                 );
-                if opts.diff_friendly {
-                    out.push_str(&format!("{prefix}{line}\n"));
-                } else {
-                    out.push_str(&format!("{prefix}{line}\n"));
-                }
+                out.push_str(&format!("{prefix}{line}\n"));
             }
         }
 
@@ -277,7 +303,7 @@ fn action_primary_fid(action: &Value) -> Option<i64> {
     action
         .as_array()
         .and_then(|arr| arr.get(1))
-        .and_then(|v| v.as_i64())
+        .and_then(serde_json::Value::as_i64)
 }
 
 fn initial_hp_map(outcome: &Value) -> std::collections::HashMap<i64, i64> {
@@ -290,8 +316,13 @@ fn initial_hp_map(outcome: &Value) -> std::collections::HashMap<i64, i64> {
         .unwrap_or_default();
     for l in leeks {
         let Some(obj) = l.as_object() else { continue };
-        let Some(id) = obj.get("id").and_then(|v| v.as_i64()) else { continue };
-        let life = obj.get("life").and_then(|v| v.as_i64()).unwrap_or(0);
+        let Some(id) = obj.get("id").and_then(serde_json::Value::as_i64) else {
+            continue;
+        };
+        let life = obj
+            .get("life")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
         out.insert(id, life);
     }
     out
@@ -307,7 +338,9 @@ fn fid_name_map_from_outcome(outcome: &Value) -> std::collections::HashMap<i64, 
         .unwrap_or_default();
     for l in leeks {
         let Some(obj) = l.as_object() else { continue };
-        let Some(id) = obj.get("id").and_then(|v| v.as_i64()) else { continue };
+        let Some(id) = obj.get("id").and_then(serde_json::Value::as_i64) else {
+            continue;
+        };
         let name = obj
             .get("name")
             .and_then(|v| v.as_str())
@@ -318,25 +351,41 @@ fn fid_name_map_from_outcome(outcome: &Value) -> std::collections::HashMap<i64, 
     out
 }
 
+struct PrettyActionState<'a> {
+    data: &'a SimData,
+    weapon_by_fid: &'a std::collections::HashMap<i64, i64>,
+    hp_by_fid: &'a std::collections::HashMap<i64, i64>,
+    turn_start_hp_by_fid: &'a std::collections::HashMap<i64, i64>,
+    show_live_stats: bool,
+}
+
 fn format_action_pretty_with_state(
     code: i64,
     action: &Value,
     active_fid: Option<i64>,
     fid_names: &std::collections::HashMap<i64, String>,
     include_actor: bool,
-    data: &SimData,
-    weapon_by_fid: &std::collections::HashMap<i64, i64>,
-    hp_by_fid: &std::collections::HashMap<i64, i64>,
-    turn_start_hp_by_fid: &std::collections::HashMap<i64, i64>,
-    show_live_stats: bool,
+    st: &PrettyActionState<'_>,
 ) -> String {
+    let PrettyActionState {
+        data,
+        weapon_by_fid,
+        hp_by_fid,
+        turn_start_hp_by_fid,
+        show_live_stats: show_ls,
+    } = st;
+    let show_live_stats = *show_ls;
     match code {
         101 => {
             // LOST_LIFE: [101, target_fid, dmg, erosion_or_absorbed]
             let arr = action.as_array().cloned().unwrap_or_default();
-            let fid = arr.get(1).and_then(|v| v.as_i64()).or(active_fid).unwrap_or(-1);
-            let dmg = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0);
-            let erosion = arr.get(3).and_then(|v| v.as_i64()).unwrap_or(0);
+            let fid = arr
+                .get(1)
+                .and_then(serde_json::Value::as_i64)
+                .or(active_fid)
+                .unwrap_or(-1);
+            let dmg = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0);
+            let erosion = arr.get(3).and_then(serde_json::Value::as_i64).unwrap_or(0);
             let who = fid_names
                 .get(&fid)
                 .cloned()
@@ -365,8 +414,12 @@ fn format_action_pretty_with_state(
         103 => {
             // HEAL: [103, target_fid, heal]
             let arr = action.as_array().cloned().unwrap_or_default();
-            let fid = arr.get(1).and_then(|v| v.as_i64()).or(active_fid).unwrap_or(-1);
-            let heal = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0);
+            let fid = arr
+                .get(1)
+                .and_then(serde_json::Value::as_i64)
+                .or(active_fid)
+                .unwrap_or(-1);
+            let heal = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0);
             let who = fid_names
                 .get(&fid)
                 .cloned()
@@ -395,8 +448,12 @@ fn format_action_pretty_with_state(
         104 => {
             // VITALITY: [104, target_fid, add]
             let arr = action.as_array().cloned().unwrap_or_default();
-            let fid = arr.get(1).and_then(|v| v.as_i64()).or(active_fid).unwrap_or(-1);
-            let add = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0);
+            let fid = arr
+                .get(1)
+                .and_then(serde_json::Value::as_i64)
+                .or(active_fid)
+                .unwrap_or(-1);
+            let add = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0);
             let who = fid_names
                 .get(&fid)
                 .cloned()
@@ -415,8 +472,8 @@ fn format_action_pretty_with_state(
         }
         12 => {
             let arr = action.as_array().cloned().unwrap_or_default();
-            let tpl = arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
-            let cell = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let tpl = arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            let cell = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             let res = arr.get(3).map(|v| preview_json(v, 90)).unwrap_or_default();
             let chip_name = data
                 .chip_name_by_template
@@ -426,7 +483,7 @@ fn format_action_pretty_with_state(
             if include_actor {
                 let who = active_fid
                     .and_then(|f| fid_names.get(&f).cloned())
-                    .unwrap_or_else(|| active_fid.map(|f| format!("#{f}")).unwrap_or("?".into()));
+                    .unwrap_or_else(|| active_fid.map_or("?".into(), |f| format!("#{f}")));
                 format!("{who} casts {chip_name} on cell {cell} -> {res}")
             } else {
                 format!("casts {chip_name} on cell {cell} -> {res}")
@@ -434,7 +491,7 @@ fn format_action_pretty_with_state(
         }
         13 => {
             let arr = action.as_array().cloned().unwrap_or_default();
-            let tpl = arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let tpl = arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             let weapon_name = data
                 .weapon_name_by_template
                 .get(&tpl)
@@ -443,7 +500,7 @@ fn format_action_pretty_with_state(
             if include_actor {
                 let who = active_fid
                     .and_then(|f| fid_names.get(&f).cloned())
-                    .unwrap_or_else(|| active_fid.map(|f| format!("#{f}")).unwrap_or("?".into()));
+                    .unwrap_or_else(|| active_fid.map_or("?".into(), |f| format!("#{f}")));
                 format!("{who} equips {weapon_name}")
             } else {
                 format!("equips {weapon_name}")
@@ -451,7 +508,7 @@ fn format_action_pretty_with_state(
         }
         16 => {
             let arr = action.as_array().cloned().unwrap_or_default();
-            let cell = arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let cell = arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             let res = arr.get(2).map(|v| preview_json(v, 100)).unwrap_or_default();
             let weapon_tpl = active_fid.and_then(|fid| weapon_by_fid.get(&fid).copied());
             let weapon_name = weapon_tpl
@@ -461,7 +518,7 @@ fn format_action_pretty_with_state(
             if include_actor {
                 let who = active_fid
                     .and_then(|f| fid_names.get(&f).cloned())
-                    .unwrap_or_else(|| active_fid.map(|f| format!("#{f}")).unwrap_or("?".into()));
+                    .unwrap_or_else(|| active_fid.map_or("?".into(), |f| format!("#{f}")));
                 format!("{who} uses {weapon_name} at cell {cell} -> {res}")
             } else {
                 format!("uses {weapon_name} at cell {cell} -> {res}")
@@ -470,9 +527,13 @@ fn format_action_pretty_with_state(
         8 => {
             // END_TURN: [8, fid, tp, mp]
             let arr = action.as_array().cloned().unwrap_or_default();
-            let fid = arr.get(1).and_then(|v| v.as_i64()).or(active_fid).unwrap_or(-1);
-            let tp = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(-1);
-            let mp = arr.get(3).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let fid = arr
+                .get(1)
+                .and_then(serde_json::Value::as_i64)
+                .or(active_fid)
+                .unwrap_or(-1);
+            let tp = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            let mp = arr.get(3).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             let hp = hp_by_fid.get(&fid).copied();
             let start = turn_start_hp_by_fid.get(&fid).copied();
             let delta = match (hp, start) {
@@ -498,13 +559,13 @@ fn format_action_pretty_with_state(
         14 => {
             // STACK_EFFECT: [14, log_id, addedValue]
             let arr = action.as_array().cloned().unwrap_or_default();
-            let log_id = arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
-            let add = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0);
+            let log_id = arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            let add = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0);
             format!("stack effect (log_id={log_id}, +{add})")
         }
         303 => {
             let arr = action.as_array().cloned().unwrap_or_default();
-            let log_id = arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let log_id = arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             format!("remove effect (log_id={log_id})")
         }
         _ => format_action_pretty(code, action, active_fid, fid_names, include_actor),
@@ -519,10 +580,13 @@ fn format_action_pretty(
     include_actor: bool,
 ) -> String {
     let arr = action.as_array().cloned().unwrap_or_default();
-    let fid = arr.get(1).and_then(|v| v.as_i64()).or(active_fid);
+    let fid = arr
+        .get(1)
+        .and_then(serde_json::Value::as_i64)
+        .or(active_fid);
     let who = fid
         .and_then(|f| fid_names.get(&f).cloned())
-        .unwrap_or_else(|| fid.map(|f| format!("#{f}")).unwrap_or_else(|| "?".into()));
+        .unwrap_or_else(|| fid.map_or_else(|| "?".into(), |f| format!("#{f}")));
 
     let who_prefix = if include_actor {
         format!("{who} ")
@@ -535,63 +599,65 @@ fn format_action_pretty(
         5 => format!(
             "{}dies (killed_by={})",
             who_prefix,
-            arr.get(2).and_then(|v| v.as_i64()).unwrap_or(-1)
+            arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(-1)
         ),
-        6 => format!("turn {}", arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1)),
+        6 => format!(
+            "turn {}",
+            arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1)
+        ),
         7 => format!("{who_prefix}turn starts"),
         8 => format!(
             "{}turn ends (tp={}, mp={})",
             who_prefix,
-            arr.get(2).and_then(|v| v.as_i64()).unwrap_or(-1),
-            arr.get(3).and_then(|v| v.as_i64()).unwrap_or(-1)
+            arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(-1),
+            arr.get(3).and_then(serde_json::Value::as_i64).unwrap_or(-1)
         ),
         9 => format!("summon {:?}", preview_json(action, 120)),
         10 => {
-            let dest = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let dest = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             let steps = arr
                 .get(3)
                 .and_then(|v| v.as_array())
-                .map(|p| p.len().saturating_sub(1))
-                .unwrap_or(0);
-            format!("{}moves to cell {dest} ({steps} steps)", who_prefix)
+                .map_or(0, |p| p.len().saturating_sub(1));
+            format!("{who_prefix}moves to cell {dest} ({steps} steps)")
         }
         11 => format!("{who} is killed"),
         12 => {
-            let chip = arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
-            let cell = arr.get(2).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let chip = arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1);
+            let cell = arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             let res = arr.get(3).map(|v| preview_json(v, 90)).unwrap_or_default();
             format!("use chip {chip} on cell {cell} -> {res}")
         }
         13 => format!(
             "{}sets weapon {}",
             who_prefix,
-            arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1)
+            arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1)
         ),
         14 => format!(
             "stack effect log_id={} +{}",
-            arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1),
-            arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0)
+            arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1),
+            arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0)
         ),
         16 => {
-            let cell = arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1);
+            let cell = arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1);
             let res = arr.get(2).map(|v| preview_json(v, 100)).unwrap_or_default();
-            format!("{}uses weapon at cell {cell} -> {res}", who_prefix)
+            format!("{who_prefix}uses weapon at cell {cell} -> {res}")
         }
         101 => format!(
             "{}loses {} hp (erosion={})",
             who_prefix,
-            arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0),
-            arr.get(3).and_then(|v| v.as_i64()).unwrap_or(0)
+            arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0),
+            arr.get(3).and_then(serde_json::Value::as_i64).unwrap_or(0)
         ),
         103 => format!(
             "{}heals {}",
             who_prefix,
-            arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0)
+            arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0)
         ),
         104 => format!(
             "{}gains vitality {}",
             who_prefix,
-            arr.get(2).and_then(|v| v.as_i64()).unwrap_or(0)
+            arr.get(2).and_then(serde_json::Value::as_i64).unwrap_or(0)
         ),
         105 => format!("{who_prefix}resurrects"),
         107 => format!("{who} nova damage {:?}", preview_json(action, 100)),
@@ -600,11 +666,11 @@ fn format_action_pretty(
         111 => format!("{who} aftereffect {:?}", preview_json(action, 100)),
         203 => {
             let msg = arr.get(1).and_then(|v| v.as_str()).unwrap_or("");
-            format!("{}says: {msg:?}", who_prefix)
+            format!("{who_prefix}says: {msg:?}")
         }
         303 => format!(
             "remove effect log_id={}",
-            arr.get(1).and_then(|v| v.as_i64()).unwrap_or(-1)
+            arr.get(1).and_then(serde_json::Value::as_i64).unwrap_or(-1)
         ),
         306 => format!("{who} reduces effects {:?}", preview_json(action, 100)),
         307 => format!("{who} removes poisons"),
@@ -657,4 +723,3 @@ fn preview_json(v: &Value, max: usize) -> String {
         format!("{}…", &s[..max])
     }
 }
-

@@ -15,6 +15,7 @@ pub struct InterpretError {
 }
 
 impl InterpretError {
+    #[must_use]
     pub fn variable_not_exists(name: &str) -> Self {
         Self {
             reference: "VARIABLE_NOT_EXISTS",
@@ -22,6 +23,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn division_by_zero() -> Self {
         Self {
             reference: "DIVISION_BY_ZERO",
@@ -29,6 +31,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn remainder_by_zero() -> Self {
         Self {
             reference: "DIVISION_BY_ZERO",
@@ -36,6 +39,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn this_not_allowed_here() -> Self {
         Self {
             reference: "THIS_NOT_ALLOWED_HERE",
@@ -43,6 +47,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn class_self_not_allowed_here() -> Self {
         Self {
             reference: "THIS_NOT_ALLOWED_HERE",
@@ -50,6 +55,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn super_not_available_parent() -> Self {
         Self {
             reference: "SUPER_NOT_AVAILABLE_PARENT",
@@ -57,6 +63,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn class_static_member_does_not_exist(class_name: &str, field: &str) -> Self {
         Self {
             reference: "CLASS_STATIC_MEMBER_DOES_NOT_EXIST",
@@ -64,6 +71,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn cant_assign_value() -> Self {
         Self {
             reference: "CANT_ASSIGN_VALUE",
@@ -71,6 +79,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn cannot_redefine_function(name: &str) -> Self {
         Self {
             reference: "CANNOT_REDEFINE_FUNCTION",
@@ -78,6 +87,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn incompatible_type() -> Self {
         Self {
             reference: "INCOMPATIBLE_TYPE",
@@ -85,6 +95,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn impossible_cast() -> Self {
         Self {
             reference: "IMPOSSIBLE_CAST",
@@ -92,6 +103,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn class_member_does_not_exist(class_name: &str, field: &str) -> Self {
         Self {
             reference: "CLASS_MEMBER_DOES_NOT_EXIST",
@@ -99,6 +111,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn wrong_operand_types_binary() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -106,6 +119,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn wrong_operand_types_compare() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -113,6 +127,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn wrong_unary_operand() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -120,6 +135,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn not_callable() -> Self {
         Self {
             reference: "NOT_CALLABLE",
@@ -127,6 +143,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn function_not_available() -> Self {
         Self {
             reference: "FUNCTION_NOT_AVAILABLE",
@@ -135,6 +152,7 @@ impl InterpretError {
     }
 
     /// Legacy builtin removed in Leek v4 — Java `Error.REMOVED_FUNCTION_REPLACEMENT`.
+    #[must_use]
     pub fn removed_function_replacement() -> Self {
         Self {
             reference: "REMOVED_FUNCTION_REPLACEMENT",
@@ -142,6 +160,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn map_duplicated_key() -> Self {
         Self {
             reference: "MAP_DUPLICATED_KEY",
@@ -149,6 +168,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn invalid_parameter_count(expected: usize, got: usize) -> Self {
         Self {
             reference: "INVALID_PARAMETER_COUNT",
@@ -156,6 +176,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn randint_empty_range() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -163,6 +184,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn break_out_of_loop() -> Self {
         Self {
             reference: "BREAK_OUT_OF_LOOP",
@@ -170,6 +192,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn continue_out_of_loop() -> Self {
         Self {
             reference: "CONTINUE_OUT_OF_LOOP",
@@ -177,6 +200,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn not_iterable() -> Self {
         Self {
             reference: "NOT_ITERABLE",
@@ -186,6 +210,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn cannot_iterate_unbounded_interval() -> Self {
         Self {
             reference: "CANNOT_ITERATE_UNBOUNDED_INTERVAL",
@@ -193,6 +218,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn invalid_constructor(name: &str, detail: &str) -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -200,6 +226,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn uncaught_throw() -> Self {
         Self {
             reference: "UNCAUGHT_THROW",
@@ -207,6 +234,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn array_index_out_of_bounds() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -214,6 +242,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn array_out_of_bound_strict() -> Self {
         Self {
             reference: "ARRAY_OUT_OF_BOUND",
@@ -221,6 +250,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn not_indexable() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -228,6 +258,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn member_requires_instance() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -235,6 +266,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn private_field() -> Self {
         Self {
             reference: "PRIVATE_FIELD",
@@ -242,6 +274,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn protected_field() -> Self {
         Self {
             reference: "PROTECTED_FIELD",
@@ -249,6 +282,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn protected_method() -> Self {
         Self {
             reference: "PROTECTED_METHOD",
@@ -256,6 +290,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn private_method() -> Self {
         Self {
             reference: "PRIVATE_METHOD",
@@ -263,6 +298,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn protected_constructor() -> Self {
         Self {
             reference: "PROTECTED_CONSTRUCTOR",
@@ -270,6 +306,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn private_constructor() -> Self {
         Self {
             reference: "PRIVATE_CONSTRUCTOR",
@@ -277,6 +314,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn protected_static_method() -> Self {
         Self {
             reference: "PROTECTED_STATIC_METHOD",
@@ -284,6 +322,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn private_static_method() -> Self {
         Self {
             reference: "PRIVATE_STATIC_METHOD",
@@ -291,6 +330,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn invalid_assign_target() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -298,6 +338,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn in_operator_requires_container() -> Self {
         Self {
             reference: "WRONG_ARGUMENT_TYPE",
@@ -305,6 +346,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn assignment_incompatible_type() -> Self {
         Self {
             reference: "ASSIGNMENT_INCOMPATIBLE_TYPE",
@@ -312,6 +354,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn cannot_assign_final_field() -> Self {
         Self {
             reference: "CANNOT_ASSIGN_FINAL_FIELD",
@@ -319,6 +362,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn too_much_operations() -> Self {
         Self {
             reference: "TOO_MUCH_OPERATIONS",
@@ -326,6 +370,7 @@ impl InterpretError {
         }
     }
 
+    #[must_use]
     pub fn out_of_memory() -> Self {
         Self {
             reference: "OUT_OF_MEMORY",

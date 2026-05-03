@@ -13,16 +13,14 @@ use leekscript_run::{
 };
 use owo_colors::OwoColorize;
 use regex::Regex;
-use tabled::{
-    settings::{
-        object::Columns, Alignment, Modify, Padding, Panel, Style,
-    },
-    Table, Tabled,
-};
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
-use std::io::{self, IsTerminal};
+use tabled::{
+    settings::{object::Columns, Alignment, Modify, Padding, Panel, Style},
+    Table, Tabled,
+};
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum CorpusMatchMode {
@@ -233,10 +231,7 @@ fn print_export_mismatches_summary(entries: &[(String, ExportMismatch)], color: 
     if entries.is_empty() {
         return;
     }
-    emit_section(
-        &format!("export mismatches ({})", entries.len()),
-        color,
-    );
+    emit_section(&format!("export mismatches ({})", entries.len()), color);
     for (path, m) in entries {
         eprintln!("  {path}");
         if m.rust_error.is_some() || m.java_error.is_some() {
@@ -288,11 +283,13 @@ fn javac_executable() -> PathBuf {
 }
 
 fn ensure_java_runner(root: &Path, jar: &Path) -> Result<PathBuf, String> {
-    let runner_src = root.join(
-        "tools/parity_java_runner/src/main/java/leekscript/parity/ParitySnippetRunner.java",
-    );
+    let runner_src = root
+        .join("tools/parity_java_runner/src/main/java/leekscript/parity/ParitySnippetRunner.java");
     if !runner_src.is_file() {
-        return Err(format!("missing Java runner source: {}", runner_src.display()));
+        return Err(format!(
+            "missing Java runner source: {}",
+            runner_src.display()
+        ));
     }
     let out_dir = root.join("target/parity_java_runner_classes");
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
@@ -302,8 +299,7 @@ fn ensure_java_runner(root: &Path, jar: &Path) -> Result<PathBuf, String> {
             .and_then(|m| m.modified())
             .ok()
             .zip(std::fs::metadata(&marker).and_then(|m| m.modified()).ok())
-            .map(|(s, t)| s > t)
-            .unwrap_or(true);
+            .is_none_or(|(s, t)| s > t);
     if need_compile {
         let status = Command::new(javac_executable())
             .arg("--release")
@@ -408,14 +404,19 @@ struct BenchError {
 
 #[derive(Clone, Debug)]
 enum BenchOutcome {
-    Ok { export: String, timings_all: Vec<Timing> },
-    Err { error: BenchError },
+    Ok {
+        export: String,
+        timings_all: Vec<Timing>,
+    },
+    Err {
+        error: BenchError,
+    },
 }
 
 fn fnv1a64(s: &str) -> u64 {
     let mut h: u64 = 0xcbf29ce484222325;
     for &b in s.as_bytes() {
-        h ^= b as u64;
+        h ^= u64::from(b);
         h = h.wrapping_mul(0x100000001b3);
     }
     h
@@ -451,7 +452,11 @@ fn run_java_snippet(
         if let Some(e) = parse_java_error(&stderr) {
             return Ok(BenchOutcome::Err {
                 error: BenchError {
-                    phase: if e.phase == "compile" { "compile" } else { "run" },
+                    phase: if e.phase == "compile" {
+                        "compile"
+                    } else {
+                        "run"
+                    },
                     reference: e.reference,
                 },
             });
@@ -508,7 +513,11 @@ fn run_java_file(
         if let Some(e) = parse_java_error(&stderr) {
             return Ok(BenchOutcome::Err {
                 error: BenchError {
-                    phase: if e.phase == "compile" { "compile" } else { "run" },
+                    phase: if e.phase == "compile" {
+                        "compile"
+                    } else {
+                        "run"
+                    },
                     reference: e.reference,
                 },
             });
@@ -536,8 +545,7 @@ fn rust_compile_unit(
         phase: "compile",
         reference: diags
             .first()
-            .map(|d| d.reference.clone())
-            .unwrap_or_else(|| "UNKNOWN".into()),
+            .map_or_else(|| "UNKNOWN".into(), |d| d.reference.clone()),
     })?;
     let compile_ms = t0.elapsed().as_secs_f64() * 1000.0;
     Ok((unit, compile_ms))
@@ -780,7 +788,7 @@ fn phase_stats(samples: &[f64]) -> Option<PhaseStats> {
         return None;
     }
     let mut v = samples.to_vec();
-    v.sort_by(|a, b| a.total_cmp(b));
+    v.sort_by(f64::total_cmp);
     let n = v.len();
     let min = v[0];
     let max = v[n - 1];
@@ -821,8 +829,8 @@ fn summarize_calc(samples: &[Timing]) -> Option<SummaryStats> {
         phase_stats(&samples.iter().map(|s| s.init_ms).collect::<Vec<_>>()).expect("non-empty");
     let run =
         phase_stats(&samples.iter().map(|s| s.run_ms).collect::<Vec<_>>()).expect("non-empty");
-    let export = phase_stats(&samples.iter().map(|s| s.export_ms).collect::<Vec<_>>())
-        .expect("non-empty");
+    let export =
+        phase_stats(&samples.iter().map(|s| s.export_ms).collect::<Vec<_>>()).expect("non-empty");
     Some(SummaryStats {
         compile,
         init,
@@ -832,7 +840,12 @@ fn summarize_calc(samples: &[Timing]) -> Option<SummaryStats> {
     })
 }
 
-fn overview_timing_row(phase: &str, r: PhaseStats, j: PhaseStats, use_color: bool) -> OverviewTimingRow {
+fn overview_timing_row(
+    phase: &str,
+    r: PhaseStats,
+    j: PhaseStats,
+    use_color: bool,
+) -> OverviewTimingRow {
     let p50_ratio = ratio(j.p50, r.p50);
     let p90_ratio = ratio(j.p90, r.p90);
 
@@ -935,7 +948,7 @@ fn fmt_ratio(r: f64) -> String {
     if r == f64::NEG_INFINITY {
         return "    -∞x".into();
     }
-    format!("{:>7.2}x", r)
+    format!("{r:>7.2}x")
 }
 
 fn ratio(a: f64, b: f64) -> f64 {
@@ -972,8 +985,7 @@ fn summarize_rust_interpreter_counters(label: &str, samples: &[Timing], color: &
 
     let ops_min = samples.iter().map(|s| s.ops_used).min().unwrap_or(0);
     let ops_max = samples.iter().map(|s| s.ops_used).max().unwrap_or(0);
-    let ops_avg =
-        (samples.iter().map(|s| s.ops_used).sum::<u64>() as f64) / samples.len() as f64;
+    let ops_avg = (samples.iter().map(|s| s.ops_used).sum::<u64>() as f64) / samples.len() as f64;
 
     let ram_min = samples.iter().map(|s| s.ram_quads_used).min().unwrap_or(0);
     let ram_max = samples.iter().map(|s| s.ram_quads_used).max().unwrap_or(0);
@@ -1075,10 +1087,7 @@ fn select_corpus_files(
         } else {
             Some(args.corpus_filter.iter().any(|f| rel.contains(f)))
         };
-        let glob_ok = match &globset {
-            None => None,
-            Some(gs) => Some(gs.is_match(rel.as_str())),
-        };
+        let glob_ok = globset.as_ref().map(|gs| gs.is_match(rel.as_str()));
         let regex_ok = if regexes.is_empty() {
             None
         } else {
@@ -1164,8 +1173,7 @@ fn run_single_snippet(
             let (unit, compile_ms) = rust_compile_unit(&label, &src, &compile_opts)
                 .map_err(|e| format!("{} {}", e.phase, e.reference))?;
             eprintln!(
-                "Rust: compile once {:.3} ms; iterations time interpret only (Java unchanged)",
-                compile_ms
+                "Rust: compile once {compile_ms:.3} ms; iterations time interpret only (Java unchanged)"
             );
             for i in 0..total {
                 let (ex, run_ms, export_ms, ops_used, ram_quads_used) =
@@ -1279,19 +1287,26 @@ fn run_single_snippet(
                 java_timings,
                 parity_ok: Some(false),
                 export_mismatch: Some(ExportMismatch {
-                    rust_export: rust_exports.last().cloned().unwrap_or_else(|| "<none>".into()),
+                    rust_export: rust_exports
+                        .last()
+                        .cloned()
+                        .unwrap_or_else(|| "<none>".into()),
                     java_export: java_export.clone().unwrap_or_else(|| "<none>".into()),
                     rust_ops: *rust_ops_all.last().unwrap_or(&0),
-                    java_ops: java_timings_all.last().map(|t| t.ops_used).unwrap_or(0),
+                    java_ops: java_timings_all.last().map_or(0, |t| t.ops_used),
                     rust_export_hash: *rust_hash_all.last().unwrap_or(&0),
-                    java_export_hash: java_timings_all.last().map(|t| t.export_hash).unwrap_or(0),
+                    java_export_hash: java_timings_all.last().map_or(0, |t| t.export_hash),
                     rust_error: re,
                     java_error: je,
                 }),
             });
         }
-        let r_last = rust_exports.last().ok_or_else(|| "rust: no export".to_string())?;
-        let j_last = java_export.as_ref().ok_or_else(|| "java: no export".to_string())?;
+        let r_last = rust_exports
+            .last()
+            .ok_or_else(|| "rust: no export".to_string())?;
+        let j_last = java_export
+            .as_ref()
+            .ok_or_else(|| "java: no export".to_string())?;
         let r_ops_last = *rust_ops_all
             .last()
             .ok_or_else(|| "rust: no ops counter for last iteration".to_string())?;
@@ -1354,7 +1369,9 @@ fn run_single_snippet(
             )
         } else {
             if rust_exports.windows(2).any(|w| w[0] != w[1]) {
-                eprintln!("warning: Rust exports differ across iterations (non-deterministic program?)");
+                eprintln!(
+                    "warning: Rust exports differ across iterations (non-deterministic program?)"
+                );
             }
             (Some(true), None)
         }
@@ -1400,7 +1417,7 @@ fn run_single_file(
     let compile_opts = CompileOptions {
         manifest: None,
         cli_language_version: cli_version,
-        cli_strict: cli_strict,
+        cli_strict,
         source_path: Some(canon.clone()),
         snippet_origin: Some(canon),
         signature_globals: vec![],
@@ -1416,8 +1433,7 @@ fn run_single_file(
             let (unit, compile_ms) = rust_compile_unit(&path_label, &src, &compile_opts)
                 .map_err(|e| format!("{} {}", e.phase, e.reference))?;
             eprintln!(
-                "Rust: compile once {:.3} ms; iterations time interpret only (Java unchanged)",
-                compile_ms
+                "Rust: compile once {compile_ms:.3} ms; iterations time interpret only (Java unchanged)"
             );
             for i in 0..total {
                 let (ex, run_ms, export_ms, ops_used, ram_quads_used) =
@@ -1474,14 +1490,7 @@ fn run_single_file(
     if !args.rust_only {
         let classes = java_classes.ok_or_else(|| "internal: missing Java classes".to_string())?;
         let (java_v, java_s) = java_version_strict_for_source(&src, args);
-        let outcome = run_java_file(
-            jar,
-            classes,
-            java_v,
-            java_s,
-            path,
-            total,
-        )?;
+        let outcome = run_java_file(jar, classes, java_v, java_s, path, total)?;
         match outcome {
             BenchOutcome::Ok {
                 export,
@@ -1531,19 +1540,26 @@ fn run_single_file(
                 java_timings,
                 parity_ok: Some(false),
                 export_mismatch: Some(ExportMismatch {
-                    rust_export: rust_exports.last().cloned().unwrap_or_else(|| "<none>".into()),
+                    rust_export: rust_exports
+                        .last()
+                        .cloned()
+                        .unwrap_or_else(|| "<none>".into()),
                     java_export: java_export.clone().unwrap_or_else(|| "<none>".into()),
                     rust_ops: *rust_ops_all.last().unwrap_or(&0),
-                    java_ops: java_timings_all.last().map(|t| t.ops_used).unwrap_or(0),
+                    java_ops: java_timings_all.last().map_or(0, |t| t.ops_used),
                     rust_export_hash: *rust_hash_all.last().unwrap_or(&0),
-                    java_export_hash: java_timings_all.last().map(|t| t.export_hash).unwrap_or(0),
+                    java_export_hash: java_timings_all.last().map_or(0, |t| t.export_hash),
                     rust_error: re,
                     java_error: je,
                 }),
             });
         }
-        let r_last = rust_exports.last().ok_or_else(|| "rust: no export".to_string())?;
-        let j_last = java_export.as_ref().ok_or_else(|| "java: no export".to_string())?;
+        let r_last = rust_exports
+            .last()
+            .ok_or_else(|| "rust: no export".to_string())?;
+        let j_last = java_export
+            .as_ref()
+            .ok_or_else(|| "java: no export".to_string())?;
         let r_ops_last = *rust_ops_all
             .last()
             .ok_or_else(|| "rust: no ops counter for last iteration".to_string())?;
@@ -1606,7 +1622,9 @@ fn run_single_file(
             )
         } else {
             if rust_exports.windows(2).any(|w| w[0] != w[1]) {
-                eprintln!("warning: Rust exports differ across iterations (non-deterministic program?)");
+                eprintln!(
+                    "warning: Rust exports differ across iterations (non-deterministic program?)"
+                );
             }
             (Some(true), None)
         }
@@ -1671,7 +1689,10 @@ fn main_inner(args: Args) -> Result<(), String> {
             .canonicalize()
             .map_err(|e| format!("{}: {e}", corpus_dir.display()))?;
         if !corpus_dir.is_dir() {
-            return Err(format!("--corpus is not a directory: {}", corpus_dir.display()));
+            return Err(format!(
+                "--corpus is not a directory: {}",
+                corpus_dir.display()
+            ));
         }
         let all_files = collect_corpus_leek_files(&corpus_dir, args.recursive)?;
         let files = select_corpus_files(all_files, &corpus_dir, &args)?;
@@ -1724,7 +1745,10 @@ fn main_inner(args: Args) -> Result<(), String> {
                     if rep.parity_ok == Some(false) && args.fail_fast {
                         eprintln!();
                         if want_color(&args.color) {
-                            eprintln!("{}", "Stopped by --fail-fast (export mismatch).".yellow().bold());
+                            eprintln!(
+                                "{}",
+                                "Stopped by --fail-fast (export mismatch).".yellow().bold()
+                            );
                         } else {
                             eprintln!("Stopped by --fail-fast (export mismatch).");
                         }
@@ -1761,15 +1785,15 @@ fn main_inner(args: Args) -> Result<(), String> {
         print_export_mismatches_summary(&export_mismatches, &args.color);
 
         emit_section("timings", &args.color);
-        let rust_sum = if !args.java_only {
+        let rust_sum = if args.java_only {
+            None
+        } else {
             summarize_calc(&all_rust)
-        } else {
-            None
         };
-        let java_sum = if !args.rust_only {
-            summarize_calc(&all_java)
-        } else {
+        let java_sum = if args.rust_only {
             None
+        } else {
+            summarize_calc(&all_java)
         };
         print_timings_report("corpus aggregate", rust_sum, java_sum, &args.color);
 
@@ -1809,8 +1833,7 @@ fn main_inner(args: Args) -> Result<(), String> {
     let input_label = args
         .file
         .as_ref()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<snippet>".into());
+        .map_or_else(|| "<snippet>".into(), |p| p.display().to_string());
 
     if report.parity_ok == Some(false) {
         if let Some(m) = report.export_mismatch.clone() {
@@ -1835,15 +1858,15 @@ fn main_inner(args: Args) -> Result<(), String> {
     }
 
     emit_section("timings", &args.color);
-    let rust_sum = if !args.java_only {
+    let rust_sum = if args.java_only {
+        None
+    } else {
         summarize_calc(&report.rust_timings)
-    } else {
-        None
     };
-    let java_sum = if !args.rust_only {
-        summarize_calc(&report.java_timings)
-    } else {
+    let java_sum = if args.rust_only {
         None
+    } else {
+        summarize_calc(&report.java_timings)
     };
     print_timings_report(&input_label, rust_sum, java_sum, &args.color);
 

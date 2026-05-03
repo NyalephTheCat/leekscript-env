@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn lek() -> Command {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let mut c = Command::new(exe);
     c.current_dir(env!("CARGO_MANIFEST_DIR"));
     c

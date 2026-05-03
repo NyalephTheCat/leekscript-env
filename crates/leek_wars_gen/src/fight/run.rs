@@ -4,12 +4,12 @@ use super::host::FightHost;
 use super::rng::JavaCompatRng;
 use super::sig_globals;
 use super::summons::load_summons_json;
-use super::weapons::load_weapons_json;
 use super::trace::TraceEvent;
+use super::weapons::load_weapons_json;
 use super::world::{FightWorld, TraceSink};
 use crate::engine::JavaFightBootstrap;
-use crate::fight::java_bootstrap::compute_java_fight_bootstrap;
 use crate::error::GenError;
+use crate::fight::java_bootstrap::compute_java_fight_bootstrap;
 use crate::scenario::Scenario;
 use leekscript_run::{
     compile_source, CompileOptions, DebugSourceContext, HirStmt, InterpretSession,
@@ -58,7 +58,9 @@ fn debug_source_context_for_hir(
     let generator_root = generator_root
         .canonicalize()
         .unwrap_or_else(|_| generator_root.to_path_buf());
-    let default_ai = default_ai.canonicalize().unwrap_or_else(|_| default_ai.to_path_buf());
+    let default_ai = default_ai
+        .canonicalize()
+        .unwrap_or_else(|_| default_ai.to_path_buf());
     let mut texts = std::collections::HashMap::new();
     let mut paths: Vec<PathBuf> = Vec::new();
     for p in hir.stmt_sources.iter().chain(std::iter::once(&default_ai)) {
@@ -128,10 +130,13 @@ pub fn run_scenario_path_with_ai_overlay(
     ai_base: &Path,
     ai_overlay: Option<&Path>,
 ) -> Result<String, GenError> {
-    Ok(
-        run_scenario_path_inner(scenario_path, ai_base, ai_overlay, FightRunOptions::default())?
-            .outcome_json,
-    )
+    Ok(run_scenario_path_inner(
+        scenario_path,
+        ai_base,
+        ai_overlay,
+        FightRunOptions::default(),
+    )?
+    .outcome_json)
 }
 
 /// Run a scenario JSON through the in-tree fight loop and return outcome JSON (same general shape as the official generator).
@@ -139,7 +144,8 @@ pub fn run_scenario_path_with_ai_overlay(
 /// Replays official-generator `State.init` procedural map + start order in Rust (no JVM subprocess).
 pub fn run_scenario_path(scenario_path: &Path, ai_base: &Path) -> Result<String, GenError> {
     Ok(
-        run_scenario_path_inner(scenario_path, ai_base, None, FightRunOptions::default())?.outcome_json,
+        run_scenario_path_inner(scenario_path, ai_base, None, FightRunOptions::default())?
+            .outcome_json,
     )
 }
 
@@ -159,10 +165,7 @@ fn run_scenario_path_inner(
     ai_overlay: Option<&Path>,
     options: FightRunOptions,
 ) -> Result<FightRunOutput, GenError> {
-    let scripts_base = options
-        .ai_scripts_root
-        .as_deref()
-        .unwrap_or(ai_base);
+    let scripts_base = options.ai_scripts_root.as_deref().unwrap_or(ai_base);
     let scenario_path = if scenario_path.is_absolute() {
         scenario_path.to_path_buf()
     } else {
@@ -272,8 +275,7 @@ fn run_scenario_path_inner(
         let (ai_version, ai_strict) = world
             .borrow()
             .entity(fid)
-            .map(|e| (e.ai_version, e.ai_strict))
-            .unwrap_or((0, false));
+            .map_or((0, false), |e| (e.ai_version, e.ai_strict));
         if ai_rel.is_empty() {
             // Official generator: `State.endTurn` does not advance the order when the fight ends.
             if world.borrow().is_finished() {
@@ -283,24 +285,23 @@ fn run_scenario_path_inner(
             continue;
         }
         let ai_path = resolve_ai_source_path(scripts_base, ai_overlay, &ai_rel);
-        let src = std::fs::read_to_string(&ai_path)
-            .map_err(|e| {
-                let mut msg = format!("read AI {}: {}", ai_path.display(), e);
-                if scripts_base != ai_base && ai_rel.contains("leekwars-ai") {
-                    msg.push_str(&format!(
-                        " (data from {}, scripts from {}; fix --ai-root / LEEKWARS_AI_ROOT if wrong)",
-                        ai_base.display(),
-                        scripts_base.display()
-                    ));
-                }
-                GenError::Message(msg)
-            })?;
+        let src = std::fs::read_to_string(&ai_path).map_err(|e| {
+            let mut msg = format!("read AI {}: {}", ai_path.display(), e);
+            if scripts_base != ai_base && ai_rel.contains("leekwars-ai") {
+                msg.push_str(&format!(
+                    " (data from {}, scripts from {}; fix --ai-root / LEEKWARS_AI_ROOT if wrong)",
+                    ai_base.display(),
+                    scripts_base.display()
+                ));
+            }
+            GenError::Message(msg)
+        })?;
         let src_digest = short_source_hash(src.as_bytes());
         let cache_key = format!(
             "{}::v{}::strict{}::{}",
             ai_path.to_string_lossy(),
             ai_version,
-            if ai_strict { 1 } else { 0 },
+            i32::from(ai_strict),
             src_digest
         );
 
@@ -330,7 +331,7 @@ fn run_scenario_path_inner(
         }
         let (hir, language_version, _strict) = compile_cache.get(&cache_key).unwrap();
 
-        if !entity_ais.contains_key(&fid) {
+        if let std::collections::hash_map::Entry::Vacant(e) = entity_ais.entry(fid) {
             let host = FightHost::new(Rc::clone(&world));
             let ops_limit = world.borrow().max_operations_per_entity;
             let dbg = debug_source_context_for_hir(scripts_base, hir, &ai_path).ok();
@@ -340,21 +341,20 @@ fn run_scenario_path_inner(
                     *language_version,
                     Some(Box::new(host)),
                     EXTRA_FIGHT_NATIVES,
-                    ops_limit,
-                    None,
-                    dbg,
-                    ai_path.clone(),
+                    leekscript_run::LeekWarsAiInitParams {
+                        operations_limit: ops_limit,
+                        ram_quads_limit: None,
+                        debug_sources: dbg,
+                        default_ai_path: ai_path.clone(),
+                    },
                 )
                 .map_err(|e| GenError::Message(format!("{}: {}", e.reference, e.message)))?;
             sig_globals::seed_interpret_session(&mut session);
-            entity_ais.insert(
-                fid,
-                EntityAiState {
-                    session,
-                    turn_stmts,
-                    turn_files,
-                },
-            );
+            e.insert(EntityAiState {
+                session,
+                turn_stmts,
+                turn_files,
+            });
         }
         if let Some(state) = entity_ais.get_mut(&fid) {
             // Official generator: `EntityAI.runTurn` catches user/runtime errors and keeps generating the fight.
@@ -382,7 +382,7 @@ fn run_scenario_path_inner(
         // Official generator: ActionEndTurn: [END_TURN, fid, tp, mp]
         {
             let w = world.borrow();
-            let (tp, mp) = w.entity(fid).map(|e| (e.tp, e.mp)).unwrap_or((0, 0));
+            let (tp, mp) = w.entity(fid).map_or((0, 0), |e| (e.tp, e.mp));
             drop(w);
             world.borrow_mut().log_action(json!([8, fid, tp, mp]));
         }
@@ -391,8 +391,7 @@ fn run_scenario_path_inner(
             let (life, tp, mp) = world
                 .borrow()
                 .entity(fid)
-                .map(|e| (e.life, e.tp, e.mp))
-                .unwrap_or((0, 0, 0));
+                .map_or((0, 0, 0), |e| (e.life, e.tp, e.mp));
             world.borrow_mut().trace_event(
                 eng.turn,
                 fid,
@@ -497,17 +496,13 @@ fn outcome_json(world: &FightWorld, winner: i32, duration: i32) -> serde_json::V
         }
         serde_json::Value::Object(m)
     };
-    let map_obstacles = world
-        .outcome_obstacles_json
-        .as_ref()
-        .map(|v| v.clone())
-        .unwrap_or_else(|| {
-            let mut m = serde_json::Map::new();
-            for (&cid, &val) in &world.obstacles {
-                m.insert(cid.to_string(), json!(val));
-            }
-            serde_json::Value::Object(m)
-        });
+    let map_obstacles = world.outcome_obstacles_json.clone().unwrap_or_else(|| {
+        let mut m = serde_json::Map::new();
+        for (&cid, &val) in &world.obstacles {
+            m.insert(cid.to_string(), json!(val));
+        }
+        serde_json::Value::Object(m)
+    });
     let mut ops_map = serde_json::Map::new();
     let mut op_fids: Vec<i32> = world.entity_ops_totals.keys().copied().collect();
     op_fids.sort_unstable();

@@ -1,4 +1,4 @@
-//! Rowan [`Language`] marker for LeekScript.
+//! Rowan [`Language`] marker for `LeekScript`.
 
 use crate::kind::LeekSyntaxKind;
 

@@ -13,11 +13,13 @@ use rowan::{NodeOrToken, SyntaxNode, TextRange};
 type SynNode = SyntaxNode<LeekLanguage>;
 
 /// `true` if lexer + grammar parse succeed for at least one language version (4 down to 1).
+#[must_use]
 pub fn source_parses_any_version(src: &str) -> bool {
     parse_best(src).is_some()
 }
 
 /// Best-effort parse: first lexer version in `4..=1` that yields a green tree.
+#[must_use]
 pub fn parse_best(src: &str) -> Option<SynNode> {
     for version in [4u8, 3, 2, 1] {
         let cfg = LexerConfig { version };
@@ -52,7 +54,7 @@ pub fn generate_mutant_candidate_with_settings(
     match level {
         0 => src.to_string(),
         1 => append_fuzz_comment(src, rng),
-        2 | 3 | 4 => mutate_ast_or_fallback(src, rng, level, settings),
+        2..=4 => mutate_ast_or_fallback(src, rng, level, settings),
         _ => mutate_ast_or_fallback(src, rng, 4, settings),
     }
 }
@@ -121,7 +123,12 @@ fn append_fuzz_comment(src: &str, rng: &mut StdRng) -> String {
     s
 }
 
-fn mutate_ast_or_fallback(src: &str, rng: &mut StdRng, level: u8, settings: &MutateSettings) -> String {
+fn mutate_ast_or_fallback(
+    src: &str,
+    rng: &mut StdRng,
+    level: u8,
+    settings: &MutateSettings,
+) -> String {
     if let Some(mut out) = try_cst_mutations(src, rng, level, settings) {
         out.push_str(&format!("\n// leekgen-fuzz:{:016x}\n", rng.gen::<u64>()));
         return out;
@@ -136,7 +143,12 @@ fn mutate_ast_or_fallback(src: &str, rng: &mut StdRng, level: u8, settings: &Mut
     s
 }
 
-fn try_cst_mutations(src: &str, rng: &mut StdRng, level: u8, settings: &MutateSettings) -> Option<String> {
+fn try_cst_mutations(
+    src: &str,
+    rng: &mut StdRng,
+    level: u8,
+    settings: &MutateSettings,
+) -> Option<String> {
     let root = parse_best(src)?;
     let _scope_idents = collect_declared_identifiers(&root);
     let mut candidates = collect_mutation_candidates(src, &root, level, rng, settings);
@@ -184,9 +196,7 @@ fn literal_expr_is_include_path(lit: &SynNode) -> bool {
 
 fn literal_expr_is_string_literal(src: &str, lit: &SynNode) -> bool {
     let r = lit.text_range();
-    byte_slice(src, r)
-        .map(|s| s.trim_start().starts_with('"'))
-        .unwrap_or(false)
+    byte_slice(src, r).is_some_and(|s| s.trim_start().starts_with('"'))
 }
 
 /// Paren- or nudge-mutating a literal that participates in `++` / `--` can make the operand
@@ -341,8 +351,7 @@ fn collect_declared_identifiers(root: &SynNode) -> Vec<String> {
             match n.kind() {
                 LeekSyntaxKind::VarDecl
                 | LeekSyntaxKind::TypedVarDecl
-                | LeekSyntaxKind::FunctionDecl
-                => {
+                | LeekSyntaxKind::FunctionDecl => {
                     ok = true;
                     break;
                 }
@@ -407,7 +416,7 @@ fn collect_mutation_candidates(
                     });
                 }
             }
-        } else         if t.kind() == LeekSyntaxKind::Kw {
+        } else if t.kind() == LeekSyntaxKind::Kw {
             if token_strictly_before_enclosing_for_body(&t) {
                 continue;
             }
@@ -529,12 +538,15 @@ fn collect_mutation_candidates(
             // Scope-aware injection: reuse identifiers already declared in the file.
             let scope_idents = collect_declared_identifiers(root);
             let injected = {
-                let n = (inject.max_injected_stmts.max(1)).min(16);
+                let n = inject.max_injected_stmts.clamp(1, 16);
                 let count = rng.gen_range(1..=n);
                 let tag = rng.gen::<u64>();
                 let name = format!("__leekgen_fuzz_{tag:016x}");
                 let mut outb = String::new();
-                outb.push_str(&format!("var {name} = {};", rng.gen_range(-10_000..=10_000)));
+                outb.push_str(&format!(
+                    "var {name} = {};",
+                    rng.gen_range(-10_000..=10_000)
+                ));
                 for _ in 1..count {
                     outb.push('\n');
                     outb.push_str(&injected_stmt(
@@ -554,7 +566,9 @@ fn collect_mutation_candidates(
                     0 => format!("if (true) {{\n{slice}\n{injected}\n}} else {{ ; }}"),
                     1 => format!("if (false) {{ ; }} else {{\n{slice}\n{injected}\n}}"),
                     2 => format!("try {{\n{slice}\n{injected}\n}} catch (e) {{ ; }}"),
-                    _ => format!("switch (0) {{ case 0: {{\n{slice}\n{injected}\n}} break; default: ; }}"),
+                    _ => format!(
+                        "switch (0) {{ case 0: {{\n{slice}\n{injected}\n}} break; default: ; }}"
+                    ),
                 };
                 out.push(MutationCandidate::Replace {
                     range: r,
@@ -584,7 +598,10 @@ fn injected_stmt(
     let scope_aware = !scope_idents.is_empty() && rng.gen_range(0u8..=100) <= scope_aware_percent;
 
     if scope_aware && c >= 2 {
-        let pick = scope_idents.choose(rng).cloned().unwrap_or_else(|| name.to_string());
+        let pick = scope_idents
+            .choose(rng)
+            .cloned()
+            .unwrap_or_else(|| name.to_string());
         match rng.gen_range(0..=6u8) {
             0 => return format!("{pick} = {pick};"),
             1 => return format!("{pick} = {name};"),
@@ -600,9 +617,24 @@ fn injected_stmt(
         (_, 1) => format!("{name} = {name} + {};", rng.gen_range(-50..=50)),
         (_, 2) => format!("{name} = {name} * {};", rng.gen_range(-10..=10)),
         // Do not redeclare `var {name}` — `injected_block` already did.
-        (_, 3) => format!("{name} = [{}, {}, {}];", rng.gen_range(-9..=9), rng.gen_range(-9..=9), rng.gen_range(-9..=9)),
-        (_, 4) => format!("{name} = ({} < {} ? {} : {});", rng.gen_range(-9..=9), rng.gen_range(-9..=9), rng.gen_range(-9..=9), rng.gen_range(-9..=9)),
-        (0 | 1, _) => format!("{} + {};", rng.gen_range(-10_000..=10_000), rng.gen_range(-10_000..=10_000)),
+        (_, 3) => format!(
+            "{name} = [{}, {}, {}];",
+            rng.gen_range(-9..=9),
+            rng.gen_range(-9..=9),
+            rng.gen_range(-9..=9)
+        ),
+        (_, 4) => format!(
+            "{name} = ({} < {} ? {} : {});",
+            rng.gen_range(-9..=9),
+            rng.gen_range(-9..=9),
+            rng.gen_range(-9..=9),
+            rng.gen_range(-9..=9)
+        ),
+        (0 | 1, _) => format!(
+            "{} + {};",
+            rng.gen_range(-10_000..=10_000),
+            rng.gen_range(-10_000..=10_000)
+        ),
         (_, 5) => "if (true) { ; }".to_string(),
         (_, 6) => "if (false) { ; } else { ; }".to_string(),
         (_, 7) => "while (false) { ; }".to_string(),
@@ -610,12 +642,23 @@ fn injected_stmt(
         (2..=5, 9) => format!("for (var i = 0; i < 0; i = i + 1) {{ {name} = i; }}"),
         (2..=5, 10) => "switch (0) { case 0: ; break; default: ; }".to_string(),
         (3..=5, 11) => "try { ; } catch (e) { ; }".to_string(),
-        (3..=5, 12) => format!("if (({} + {}) == {}) {{ {name} = {name}; }}", rng.gen_range(-9..=9), rng.gen_range(-9..=9), rng.gen_range(-9..=9)),
+        (3..=5, 12) => format!(
+            "if (({} + {}) == {}) {{ {name} = {name}; }}",
+            rng.gen_range(-9..=9),
+            rng.gen_range(-9..=9),
+            rng.gen_range(-9..=9)
+        ),
         (4..=5, 13) => "var __tmp = [1,2,3]; __tmp[0] = __tmp[0] + 1;".to_string(),
-        (4..=5, 14) => "var __tmp = 0; for (var j = 0; j < 0; j = j + 1) { __tmp = __tmp + j; }".to_string(),
+        (4..=5, 14) => {
+            "var __tmp = 0; for (var j = 0; j < 0; j = j + 1) { __tmp = __tmp + j; }".to_string()
+        }
         (4..=5, 15) => "var __s = \"x\" + \"y\";".to_string(),
         (4..=5, 16) => "debug(\"leekgen-fuzz\");".to_string(),
-        _ => format!("{} * {};", rng.gen_range(-1000..=1000), rng.gen_range(-1000..=1000)),
+        _ => format!(
+            "{} * {};",
+            rng.gen_range(-1000..=1000),
+            rng.gen_range(-1000..=1000)
+        ),
     }
 }
 
@@ -623,7 +666,10 @@ fn pick_disjoint(candidates: Vec<MutationCandidate>, max: usize) -> Vec<Mutation
     let mut picked = Vec::new();
     for c in candidates {
         let r = c.range();
-        if picked.iter().all(|p: &MutationCandidate| !ranges_overlap(p.range(), r)) {
+        if picked
+            .iter()
+            .all(|p: &MutationCandidate| !ranges_overlap(p.range(), r))
+        {
             picked.push(c);
             if picked.len() >= max {
                 break;
@@ -649,9 +695,7 @@ fn apply_replacements(src: &str, picked: &[MutationCandidate]) -> Option<String>
     for (range, rep) in reps {
         let start: usize = range.start().into();
         let end: usize = range.end().into();
-        if out.get(start..end).is_none() {
-            return None;
-        }
+        out.get(start..end)?;
         out.replace_range(start..end, &rep);
     }
     Some(out)
@@ -672,13 +716,7 @@ fn binary_swap_replacement(src: &str, node: &SynNode, parity_safe: bool) -> Opti
     let ok = if parity_safe {
         op == "+" || op == "*" || op == "==" || op == "!="
     } else {
-        op == "+"
-            || op == "*"
-            || op == "=="
-            || op == "!="
-            || op == "&"
-            || op == "|"
-            || op == "^"
+        op == "+" || op == "*" || op == "==" || op == "!=" || op == "&" || op == "|" || op == "^"
     };
     if !ok {
         return None;
@@ -892,10 +930,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(1);
         let out = mutate_leek_source(src, &mut rng, 3, &settings).unwrap();
         assert_eq!(out.source, src);
-        assert!(matches!(
-            out.kind,
-            OutcomeKind::RejectedAllAttempts { .. }
-        ));
+        assert!(matches!(out.kind, OutcomeKind::RejectedAllAttempts { .. }));
     }
 
     /// Statement-inject must not run on one-liner libraries (`say` only) — Java rejects the wrapped shape.

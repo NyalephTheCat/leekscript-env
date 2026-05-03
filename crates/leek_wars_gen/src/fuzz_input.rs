@@ -43,10 +43,10 @@ pub struct FuzzInput {
     // --- AI mutation knobs -------------------------------------------------
     /// 0..=4 (0 = off). Higher = more edits.
     pub mutate_ai_level: u8,
-    pub mutate_ai_require_parseable: u8, // probability
-    pub mutate_ai_inject_complexity: u8, // magnitude-ish
+    pub mutate_ai_require_parseable: u8,   // probability
+    pub mutate_ai_inject_complexity: u8,   // magnitude-ish
     pub mutate_ai_inject_wrap_percent: u8, // 0..=100
-    pub mutate_ai_inject_max_stmts: u8, // 1..=16
+    pub mutate_ai_inject_max_stmts: u8,    // 1..=16
 }
 
 impl Default for FuzzInput {
@@ -79,6 +79,7 @@ impl FuzzInput {
     ///
     /// - Empty/short inputs are padded with zeros.
     /// - Some fields are clamped to safe ranges.
+    #[must_use]
     pub fn from_bytes(data: &[u8]) -> Self {
         let mut buf = [0u8; FUZZ_INPUT_BYTES];
         let n = data.len().min(FUZZ_INPUT_BYTES);
@@ -121,6 +122,7 @@ impl FuzzInput {
     }
 
     /// Stable, fixed-size encoding for artifacts / corpora.
+    #[must_use]
     pub fn to_bytes(&self) -> [u8; FUZZ_INPUT_BYTES] {
         let mut out = [0u8; FUZZ_INPUT_BYTES];
         out[0..8].copy_from_slice(&self.seed.to_le_bytes());
@@ -150,20 +152,22 @@ impl FuzzInput {
     }
 
     /// Convenience: render bytes as lowercase hex for `meta.json`.
+    #[must_use]
     pub fn to_hex(&self) -> String {
         let b = self.to_bytes();
         let mut s = String::with_capacity(b.len() * 2);
         for x in b {
             use std::fmt::Write;
-            write!(&mut s, "{:02x}", x).expect("fmt");
+            write!(&mut s, "{x:02x}").expect("fmt");
         }
         s
     }
 
     /// Decode from lowercase/uppercase hex produced by [`Self::to_hex`].
+    #[must_use]
     pub fn from_hex(hex: &str) -> Option<Self> {
         let s = hex.trim();
-        if s.len() % 2 != 0 {
+        if !s.len().is_multiple_of(2) {
             return None;
         }
         let mut bytes = Vec::with_capacity(s.len() / 2);
@@ -180,6 +184,7 @@ impl FuzzInput {
     ///
     /// This is used by the RNG-based campaign driver so each iteration can be recorded and replayed
     /// via the same libFuzzer-style input.
+    #[must_use]
     pub fn from_seed(seed: u64) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut buf = [0u8; FUZZ_INPUT_BYTES];
@@ -200,8 +205,8 @@ impl FuzzInput {
     }
 
     /// Convert a `0..=255` magnitude into a small integer scale in `1..=4`.
+    #[must_use]
     pub fn mag_scale(m: u8) -> i64 {
-        1 + (m as i64 / 85) // 0..84 => 1, 85..169 => 2, 170..254 => 3, 255 => 4
+        1 + (i64::from(m) / 85) // 0..84 => 1, 85..169 => 2, 170..254 => 3, 255 => 4
     }
 }
-

@@ -31,6 +31,7 @@ pub struct HirFile {
 }
 
 impl HirFile {
+    #[must_use]
     pub fn new(stmts: Vec<HirStmt>) -> Self {
         Self {
             stmts,
@@ -241,6 +242,7 @@ pub enum HirClassMember {
 
 impl HirStmt {
     /// Plain `return` / `return expr` (not Java `return ? expr`).
+    #[must_use]
     pub fn ret(value: Option<HirExpr>) -> Self {
         HirStmt::Return {
             value,
@@ -311,7 +313,7 @@ pub enum HirUnaryOp {
     Not,
     /// Bitwise `~` — Java `BITNOT` / `bnot(...)`.
     BitNot,
-    /// Unary `typeof` — same numeric codes as the `typeOf` native (Java LeekConstants).
+    /// Unary `typeof` — same numeric codes as the `typeOf` native (Java `LeekConstants`).
     Typeof,
 }
 

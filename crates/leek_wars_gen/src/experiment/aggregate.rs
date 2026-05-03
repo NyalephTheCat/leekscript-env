@@ -44,6 +44,7 @@ impl ArmAggregate {
         self.n_err += 1;
     }
 
+    #[must_use]
     pub fn win_rate_team0(&self) -> f64 {
         let denom = self.wins_team0 + self.wins_other;
         if denom == 0 {
@@ -53,6 +54,7 @@ impl ArmAggregate {
         }
     }
 
+    #[must_use]
     pub fn mean_duration(&self) -> f64 {
         if self.duration_count == 0 {
             0.0
@@ -68,13 +70,7 @@ pub struct ExperimentAggregate {
 }
 
 impl ExperimentAggregate {
-    pub fn record(
-        &mut self,
-        arm: &str,
-        ok: bool,
-        winner: Option<i64>,
-        duration: Option<i64>,
-    ) {
+    pub fn record(&mut self, arm: &str, ok: bool, winner: Option<i64>, duration: Option<i64>) {
         let e = self
             .by_arm
             .entry(arm.to_string())

@@ -35,8 +35,8 @@ pub use run::{
     run_scenario_path, run_scenario_path_with_ai_overlay, run_scenario_path_with_options,
     FightRunOptions, FightRunOutput,
 };
-pub use trace::{TraceConfig, TraceEvent};
 pub use start_order::compute_turn_order;
 pub use summons::{load_summons_json, SummonTemplate};
+pub use trace::{TraceConfig, TraceEvent};
 pub use weapons::{load_weapons_json, WeaponStats};
 pub use world::{ActiveEffect, FightWorld, SimEntity};

@@ -29,12 +29,14 @@ pub fn load_trace_jsonl(path: &Path) -> Result<Vec<TraceEvent>, GenError> {
         if v.get("schema").is_some() {
             continue;
         }
-        let ev: TraceEvent = serde_json::from_value(v).map_err(|e| GenError::Message(e.to_string()))?;
+        let ev: TraceEvent =
+            serde_json::from_value(v).map_err(|e| GenError::Message(e.to_string()))?;
         out.push(ev);
     }
     Ok(out)
 }
 
+#[must_use]
 pub fn summarize_trace_events(events: &[TraceEvent]) -> TraceSummary {
     let mut s = TraceSummary {
         n_events: events.len(),
@@ -45,7 +47,7 @@ pub fn summarize_trace_events(events: &[TraceEvent]) -> TraceSummary {
         if e.kind == "end_entity_turn" {
             s.end_entity_turn_samples += 1;
             if let Some(d) = e.detail.as_ref() {
-                if let Some(l) = d.get("life").and_then(|x| x.as_i64()) {
+                if let Some(l) = d.get("life").and_then(serde_json::Value::as_i64) {
                     s.min_life = Some(s.min_life.map_or(l, |m| m.min(l)));
                     s.max_life = Some(s.max_life.map_or(l, |m| m.max(l)));
                 }

@@ -77,7 +77,7 @@ impl FightHost {
                 .saturating_add(JAVA_ERROR_LOG_COST),
         );
         let mut w = self.world.borrow_mut();
-        let log_owner = w.entity(fid).map(|e| e.log_bucket_owner).unwrap_or(0);
+        let log_owner = w.entity(fid).map_or(0, |e| e.log_bucket_owner);
         // Official generator: `EntityAI.addSystemLog(int, int)` passes `new String[0]` → FarmerLog includes `[]`.
         let empty_params: &[String] = &[];
         w.push_ai_system_log(
@@ -109,10 +109,10 @@ impl FightHost {
             path.push(0);
             path.push(a + 1);
         } else {
-            let d = (a as f64) / (b as f64) / 2.0;
+            let d = f64::from(a) / f64::from(b) / 2.0;
             let mut h = 0i32;
             for i in 0..b {
-                let y = 0.5 + ((i * 2 + 1) as f64) * d;
+                let y = 0.5 + f64::from(i * 2 + 1) * d;
                 path.push(h);
                 path.push(((y - 0.00001).ceil() as i32) - h);
                 h = (y + 0.00001).floor() as i32;
@@ -282,7 +282,7 @@ impl FightHost {
                 continue;
             }
             let d2 = map::distance2(w.map_w, from, c);
-            if best.map(|b| d2 < b).unwrap_or(true) {
+            if best.is_none_or(|b| d2 < b) {
                 best = Some(d2);
             }
         }
@@ -554,10 +554,10 @@ impl FightHost {
             path.push(0);
             path.push(a + 1);
         } else {
-            let d = (a as f64) / (b as f64) / 2.0;
+            let d = f64::from(a) / f64::from(b) / 2.0;
             let mut h = 0i32;
             for i in 0..b {
-                let y = 0.5 + ((i * 2 + 1) as f64) * d;
+                let y = 0.5 + f64::from(i * 2 + 1) * d;
                 path.push(h);
                 path.push(((y - 0.00001).ceil() as i32) - h);
                 h = (y + 0.00001).floor() as i32;
@@ -598,7 +598,7 @@ impl FightHost {
     }
 
     fn generate_critical(w: &mut FightWorld, caster_fid: i32) -> bool {
-        let agi = w.entity(caster_fid).map(|e| e.agility).unwrap_or(0) as f64;
+        let agi = f64::from(w.entity(caster_fid).map_or(0, |e| e.agility));
         let p = (agi / 1000.0).clamp(0.0, 1.0);
         w.rng.next_double01() < p
     }
@@ -613,12 +613,12 @@ impl FightHost {
         let minv = eff.value1.round() as i64;
         let maxv = (eff.value1 + eff.value2).round() as i64;
         Value::array_from(vec![
-            Value::Integer(eff.id as i64),
+            Value::Integer(i64::from(eff.id)),
             Value::Integer(minv),
             Value::Integer(maxv),
-            Value::Integer(eff.turns as i64),
-            Value::Integer(eff.targets as i64),
-            Value::Integer(eff.modifiers as i64),
+            Value::Integer(i64::from(eff.turns)),
+            Value::Integer(i64::from(eff.targets)),
+            Value::Integer(i64::from(eff.modifiers)),
         ])
     }
 
@@ -628,15 +628,14 @@ impl FightHost {
         cs: &super::chips::ChipStats,
     ) -> Option<i64> {
         if w.chip_on_cooldown(caster_fid, cs) {
-            return Some(USE_INVALID_COOLDOWN as i64);
+            return Some(i64::from(USE_INVALID_COOLDOWN));
         }
         if cs.max_uses >= 0 {
             let n = w
                 .entity(caster_fid)
-                .map(|e| *e.chip_uses_turn.get(&cs.chip_id).unwrap_or(&0))
-                .unwrap_or(0);
+                .map_or(0, |e| *e.chip_uses_turn.get(&cs.chip_id).unwrap_or(&0));
             if n >= cs.max_uses {
-                return Some(USE_MAX_USES as i64);
+                return Some(i64::from(USE_MAX_USES));
             }
         }
         None
@@ -662,13 +661,13 @@ impl FightHost {
         }
         let team = w.entity(caster_fid)?.team;
         if w.team_summon_count(team) >= FightWorld::SUMMON_LIMIT {
-            return Some(USE_TOO_MANY_SUMMONS as i64);
+            return Some(i64::from(USE_TOO_MANY_SUMMONS));
         }
         if !w.cell_available_for_summon(target_cell) {
-            return Some(USE_INVALID_POSITION as i64);
+            return Some(i64::from(USE_INVALID_POSITION));
         }
         if !w.summons_by_id.contains_key(&bulb_id) {
-            return Some(USE_INVALID_TARGET as i64);
+            return Some(i64::from(USE_INVALID_TARGET));
         }
         let critical = Self::generate_critical(w, caster_fid);
         let result = if critical { USE_CRITICAL } else { USE_SUCCESS };
@@ -698,9 +697,9 @@ impl FightHost {
                     me.tp = (me.tp - cs.cost).max(0);
                 }
                 w.register_chip_use_after_success(caster_fid, cs);
-                Some(result as i64)
+                Some(i64::from(result))
             }
-            None => Some(USE_INVALID_POSITION as i64),
+            None => Some(i64::from(USE_INVALID_POSITION)),
         }
     }
 }
@@ -720,7 +719,7 @@ impl InterpreterHost for FightHost {
                 // Official generator: `EntityClass.say` + `ActionSay` `[203, message]`.
                 const SAY_LIMIT: i32 = 2;
                 const SAY_MAX_LEN: usize = 100;
-                let msg_raw = args.get(0).map(value_debug_string).unwrap_or_default();
+                let msg_raw = args.first().map(value_debug_string).unwrap_or_default();
                 let mut w = self.world.borrow_mut();
                 let Some(ent) = w.entity_mut(fid) else {
                     return Ok(Some(Value::Bool(false)));
@@ -755,11 +754,11 @@ impl InterpreterHost for FightHost {
             }
             "sendAll" => {
                 // Official generator: send message to all allies (team inbox). Message format: [author, type, params]
-                let msg_type = args.get(0).and_then(value_as_i64).unwrap_or(0) as i32;
+                let msg_type = args.first().and_then(value_as_i64).unwrap_or(0) as i32;
                 let params = args.get(1).cloned().unwrap_or(Value::Null);
                 let fids = {
                     let w = self.world.borrow();
-                    let team = w.entity(fid).map(|e| e.team).unwrap_or(0);
+                    let team = w.entity(fid).map_or(0, |e| e.team);
                     w.entities
                         .iter()
                         .filter(|e| e.team == team && e.fid != fid && !e.ai_path.is_empty())
@@ -767,8 +766,8 @@ impl InterpreterHost for FightHost {
                         .collect::<Vec<_>>()
                 };
                 let msg = Value::array_from(vec![
-                    Value::Integer(fid as i64),
-                    Value::Integer(msg_type as i64),
+                    Value::Integer(i64::from(fid)),
+                    Value::Integer(i64::from(msg_type)),
                     params,
                 ]);
                 let mut w = self.world.borrow_mut();
@@ -778,15 +777,15 @@ impl InterpreterHost for FightHost {
                 Ok(Some(Value::Null))
             }
             "sendTo" => {
-                let target = args.get(0).and_then(value_as_i64).unwrap_or(-1) as i32;
+                let target = args.first().and_then(value_as_i64).unwrap_or(-1) as i32;
                 let msg_type = args.get(1).and_then(value_as_i64).unwrap_or(0) as i32;
                 let params = args.get(2).cloned().unwrap_or(Value::Null);
                 if target == fid {
                     return Ok(Some(Value::Bool(false)));
                 }
                 let msg = Value::array_from(vec![
-                    Value::Integer(fid as i64),
-                    Value::Integer(msg_type as i64),
+                    Value::Integer(i64::from(fid)),
+                    Value::Integer(i64::from(msg_type)),
                     params,
                 ]);
                 let mut w = self.world.borrow_mut();
@@ -802,8 +801,8 @@ impl InterpreterHost for FightHost {
                 let mut out = Vec::with_capacity(rows.len());
                 for (author, msg) in rows {
                     out.push(Value::array_from(vec![
-                        Value::Integer(author as i64),
-                        Value::String(msg.into()),
+                        Value::Integer(i64::from(author)),
+                        Value::String(msg),
                     ]));
                 }
                 Ok(Some(Value::array_from(out)))
@@ -815,16 +814,16 @@ impl InterpreterHost for FightHost {
                 Ok(Some(Value::array_from(msgs)))
             }
             "getMessageAuthor" => {
-                let msg = args.get(0).or_else(|| args.get(1));
+                let msg = args.first().or_else(|| args.get(1));
                 let Some(Value::Array(arr)) = msg else {
                     return Ok(Some(Value::Integer(-1)));
                 };
                 let a = arr.borrow();
-                let v = a.get(0).and_then(value_as_i64).unwrap_or(-1);
+                let v = a.first().and_then(value_as_i64).unwrap_or(-1);
                 Ok(Some(Value::Integer(v)))
             }
             "getMessageType" => {
-                let msg = args.get(0).or_else(|| args.get(1));
+                let msg = args.first().or_else(|| args.get(1));
                 let Some(Value::Array(arr)) = msg else {
                     return Ok(Some(Value::Integer(0)));
                 };
@@ -833,7 +832,7 @@ impl InterpreterHost for FightHost {
                 Ok(Some(Value::Integer(v)))
             }
             "getMessageParams" => {
-                let msg = args.get(0).or_else(|| args.get(1));
+                let msg = args.first().or_else(|| args.get(1));
                 let Some(Value::Array(arr)) = msg else {
                     return Ok(Some(Value::Null));
                 };
@@ -846,21 +845,21 @@ impl InterpreterHost for FightHost {
             "clearMarks" => Ok(Some(Value::Null)),
             "show" => Ok(Some(Value::Bool(true))),
             "setRegister" => {
-                let key = args.get(0).map(value_debug_string).unwrap_or_default();
+                let key = args.first().map(value_debug_string).unwrap_or_default();
                 let value = args.get(1).map(value_debug_string).unwrap_or_default();
                 self.world.borrow_mut().registers.insert(key, value);
                 Ok(Some(Value::Bool(true)))
             }
             "getRegister" => {
-                let key = args.get(0).map(value_debug_string).unwrap_or_default();
+                let key = args.first().map(value_debug_string).unwrap_or_default();
                 let w = self.world.borrow();
                 let Some(v) = w.registers.get(&key) else {
                     return Ok(Some(Value::Null));
                 };
-                Ok(Some(Value::String(v.clone().into())))
+                Ok(Some(Value::String(v.clone())))
             }
             "deleteRegister" => {
-                let key = args.get(0).map(value_debug_string).unwrap_or_default();
+                let key = args.first().map(value_debug_string).unwrap_or_default();
                 self.world.borrow_mut().registers.remove(&key);
                 Ok(Some(Value::Null))
             }
@@ -872,7 +871,7 @@ impl InterpreterHost for FightHost {
                     .into_iter()
                     .map(|k| {
                         let v = w.registers.get(k).cloned().unwrap_or_default();
-                        (Value::String(k.clone().into()), Value::String(v.into()))
+                        (Value::String(k.clone()), Value::String(v))
                     })
                     .collect::<Vec<_>>();
                 Ok(Some(Value::map_from(pairs)))
@@ -880,15 +879,15 @@ impl InterpreterHost for FightHost {
             "getLife" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.life as i64).unwrap_or(0);
+                let v = w.entity(who).map_or(0, |e| i64::from(e.life));
                 Ok(Some(Value::Integer(v)))
             }
             "getType" => {
                 // Official generator: `EntityClass.getType`: returns `entity.getType() + 1`.
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.entity_type + 1).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.entity(who).map_or(0, |e| e.entity_type + 1);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getMobType" => {
                 // Official generator: `EntityClass.getMobType`: skin if `TYPE_MOB`, else -1.
@@ -898,43 +897,43 @@ impl InterpreterHost for FightHost {
                     Some(e) if e.entity_type == 4 => e.skin, // Official generator: `Entity.TYPE_MOB`
                     _ => -1,
                 };
-                Ok(Some(Value::Integer(v as i64)))
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getAIId" | "getAIID" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.ai_id).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.entity(who).map_or(0, |e| e.ai_id);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getAIName" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let v = w.entity(who).map(|e| e.ai_name.clone()).unwrap_or_default();
-                Ok(Some(Value::String(v.into())))
+                Ok(Some(Value::String(v)))
             }
             "getBirthTurn" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.birth_turn).unwrap_or(1);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.entity(who).map_or(1, |e| e.birth_turn);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getCores" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.cores).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.entity(who).map_or(0, |e| e.cores);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getRAM" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.ram).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.entity(who).map_or(0, |e| e.ram);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getFarmerId" | "getFarmerID" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.farmer_id).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.entity(who).map_or(0, |e| e.farmer_id);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getFarmerName" => {
                 let who = entity_arg_or_current(args, fid)?;
@@ -943,16 +942,15 @@ impl InterpreterHost for FightHost {
                     .entity(who)
                     .map(|e| e.farmer_name.clone())
                     .unwrap_or_default();
-                Ok(Some(Value::String(v.into())))
+                Ok(Some(Value::String(v)))
             }
             "getFarmerCountry" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let v = w
                     .entity(who)
-                    .map(|e| e.farmer_country.clone())
-                    .unwrap_or_else(|| "?".into());
-                Ok(Some(Value::String(v.into())))
+                    .map_or_else(|| "?".into(), |e| e.farmer_country.clone());
+                Ok(Some(Value::String(v)))
             }
             "getTeamName" => {
                 let who = entity_arg_or_current(args, fid)?;
@@ -961,7 +959,7 @@ impl InterpreterHost for FightHost {
                     .entity(who)
                     .map(|e| e.team_name.clone())
                     .unwrap_or_default();
-                Ok(Some(Value::String(v.into())))
+                Ok(Some(Value::String(v)))
             }
             "getStat" => {
                 // Official generator: `Entity.getStat(stat)` where `stat` is a STAT_* constant.
@@ -969,7 +967,7 @@ impl InterpreterHost for FightHost {
                 if user_args.len() < 2 {
                     return Err(InterpretError::invalid_parameter_count(2, user_args.len()));
                 }
-                let who = value_as_i64(&user_args[0]).unwrap_or(fid as i64) as i32;
+                let who = value_as_i64(&user_args[0]).unwrap_or(i64::from(fid)) as i32;
                 let stat = value_as_i64(&user_args[1]).unwrap_or(0) as i32;
                 let w = self.world.borrow();
                 let Some(e) = w.entity(who) else {
@@ -994,13 +992,13 @@ impl InterpreterHost for FightHost {
                     17 => e.ram,             // STAT_RAM
                     _ => 0,
                 };
-                Ok(Some(Value::Integer(v as i64)))
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getPower" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.power).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.entity(who).map_or(0, |e| e.power);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getPassiveEffects" => {
                 // Official generator: `Entity.getPassiveEffects()` includes weapon passive effects etc.
@@ -1010,31 +1008,31 @@ impl InterpreterHost for FightHost {
             "getCell" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.cell as i64).unwrap_or(-1);
+                let v = w.entity(who).map_or(-1, |e| i64::from(e.cell));
                 Ok(Some(Value::Integer(v)))
             }
             "getTP" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.tp as i64).unwrap_or(0);
+                let v = w.entity(who).map_or(0, |e| i64::from(e.tp));
                 Ok(Some(Value::Integer(v)))
             }
             "getTotalTP" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.total_tp as i64).unwrap_or(0);
+                let v = w.entity(who).map_or(0, |e| i64::from(e.total_tp));
                 Ok(Some(Value::Integer(v)))
             }
             "getMP" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.mp as i64).unwrap_or(0);
+                let v = w.entity(who).map_or(0, |e| i64::from(e.mp));
                 Ok(Some(Value::Integer(v)))
             }
             "getTotalMP" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
-                let v = w.entity(who).map(|e| e.total_mp as i64).unwrap_or(0);
+                let v = w.entity(who).map_or(0, |e| i64::from(e.total_mp));
                 Ok(Some(Value::Integer(v)))
             }
             "getCellX" => {
@@ -1044,7 +1042,7 @@ impl InterpreterHost for FightHost {
                     return Ok(Some(Value::Null));
                 }
                 let (ix, _) = map::cell_xy(w.map_w, c);
-                Ok(Some(Value::Integer((ix - w.map_w + 1) as i64)))
+                Ok(Some(Value::Integer(i64::from(ix - w.map_w + 1))))
             }
             "getCellY" => {
                 let c = int_user_arg(args, "getCellY")? as i32;
@@ -1053,7 +1051,7 @@ impl InterpreterHost for FightHost {
                     return Ok(Some(Value::Null));
                 }
                 let (_, iy) = map::cell_xy(w.map_w, c);
-                Ok(Some(Value::Integer(iy as i64)))
+                Ok(Some(Value::Integer(i64::from(iy))))
             }
             "getCellFromXY" => {
                 let (ax, iy) = pair_user_ints(args, "getCellFromXY")?;
@@ -1063,7 +1061,7 @@ impl InterpreterHost for FightHost {
                 if !map::is_valid_cell(w.map_w, w.map_h, id) {
                     return Ok(Some(Value::Null));
                 }
-                Ok(Some(Value::Integer(id as i64)))
+                Ok(Some(Value::Integer(i64::from(id))))
             }
             "getDistance" => {
                 let (c1, c2) = pair_user_ints(args, "getDistance")?;
@@ -1075,7 +1073,7 @@ impl InterpreterHost for FightHost {
                 {
                     return Ok(Some(Value::Real(-1.0)));
                 }
-                let d2 = map::distance2(w.map_w, c1, c2) as f64;
+                let d2 = f64::from(map::distance2(w.map_w, c1, c2));
                 Ok(Some(Value::Real(d2.sqrt())))
             }
             "getCellDistance" => {
@@ -1088,7 +1086,7 @@ impl InterpreterHost for FightHost {
                 {
                     return Ok(Some(Value::Integer(-1)));
                 }
-                let d = map::case_distance(w.map_w, c1, c2) as i64;
+                let d = i64::from(map::case_distance(w.map_w, c1, c2));
                 Ok(Some(Value::Integer(d)))
             }
             "getEffects" => {
@@ -1102,14 +1100,14 @@ impl InterpreterHost for FightHost {
                     .iter()
                     .map(|eff| {
                         Value::array_from(vec![
-                            Value::Integer(eff.id as i64),
-                            Value::Integer(eff.value as i64),
-                            Value::Integer(eff.caster_fid as i64),
-                            Value::Integer(eff.turns as i64),
+                            Value::Integer(i64::from(eff.id)),
+                            Value::Integer(i64::from(eff.value)),
+                            Value::Integer(i64::from(eff.caster_fid)),
+                            Value::Integer(i64::from(eff.turns)),
                             Value::Bool(eff.critical),
-                            Value::Integer(eff.item_id as i64),
-                            Value::Integer(who as i64),
-                            Value::Integer(eff.modifiers as i64),
+                            Value::Integer(i64::from(eff.item_id)),
+                            Value::Integer(i64::from(who)),
+                            Value::Integer(i64::from(eff.modifiers)),
                         ])
                     })
                     .collect::<Vec<_>>();
@@ -1133,14 +1131,14 @@ impl InterpreterHost for FightHost {
                     for eff in &target.effects {
                         if launched.contains(&eff.log_id) {
                             out.push(Value::array_from(vec![
-                                Value::Integer(eff.id as i64),
-                                Value::Integer(eff.value as i64),
-                                Value::Integer(eff.caster_fid as i64),
-                                Value::Integer(eff.turns as i64),
+                                Value::Integer(i64::from(eff.id)),
+                                Value::Integer(i64::from(eff.value)),
+                                Value::Integer(i64::from(eff.caster_fid)),
+                                Value::Integer(i64::from(eff.turns)),
                                 Value::Bool(eff.critical),
-                                Value::Integer(eff.item_id as i64),
-                                Value::Integer(target.fid as i64),
-                                Value::Integer(eff.modifiers as i64),
+                                Value::Integer(i64::from(eff.item_id)),
+                                Value::Integer(i64::from(target.fid)),
+                                Value::Integer(i64::from(eff.modifiers)),
                             ]));
                         }
                     }
@@ -1157,7 +1155,7 @@ impl InterpreterHost for FightHost {
                 for eff in &e.effects {
                     if eff.id == 59 {
                         if let Some(sid) = eff.state_id {
-                            let v = Value::Integer(sid as i64);
+                            let v = Value::Integer(i64::from(sid));
                             if !elems.contains(&v) {
                                 elems.push(v);
                             }
@@ -1173,8 +1171,7 @@ impl InterpreterHost for FightHost {
                     .turn_fids
                     .iter()
                     .position(|&x| x == who)
-                    .map(|i| (i + 1) as i64)
-                    .unwrap_or(0);
+                    .map_or(0, |i| (i + 1) as i64);
                 Ok(Some(Value::Integer(pos)))
             }
             "getNextPlayer" => {
@@ -1187,7 +1184,7 @@ impl InterpreterHost for FightHost {
                 let Some(i) = w.turn_fids.iter().position(|&x| x == who) else {
                     return Ok(Some(Value::Integer(-1)));
                 };
-                let next = w.turn_fids[(i + 1) % n] as i64;
+                let next = i64::from(w.turn_fids[(i + 1) % n]);
                 Ok(Some(Value::Integer(next)))
             }
             "getPreviousPlayer" => {
@@ -1200,12 +1197,12 @@ impl InterpreterHost for FightHost {
                 let Some(i) = w.turn_fids.iter().position(|&x| x == who) else {
                     return Ok(Some(Value::Integer(-1)));
                 };
-                let prev = w.turn_fids[(i + n - 1) % n] as i64;
+                let prev = i64::from(w.turn_fids[(i + n - 1) % n]);
                 Ok(Some(Value::Integer(prev)))
             }
             "getTurn" => {
                 let w = self.world.borrow();
-                Ok(Some(Value::Integer(w.active_turn as i64)))
+                Ok(Some(Value::Integer(i64::from(w.active_turn))))
             }
             "getPathLength" => {
                 // Official generator: `FieldClass.getPathLength(startCell, endCell, cells_to_ignore?)`.
@@ -1265,9 +1262,11 @@ impl InterpreterHost for FightHost {
                 );
                 Ok(Some(match path {
                     None => Value::Null,
-                    Some(p) => {
-                        Value::array_from(p.into_iter().map(|c| Value::Integer(c as i64)).collect())
-                    }
+                    Some(p) => Value::array_from(
+                        p.into_iter()
+                            .map(|c| Value::Integer(i64::from(c)))
+                            .collect(),
+                    ),
                 }))
             }
             "isAlive" => {
@@ -1286,7 +1285,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who).and_then(|e| e.summoner_fid) {
-                    Some(id) => Value::Integer(id as i64),
+                    Some(id) => Value::Integer(i64::from(id)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1325,12 +1324,12 @@ impl InterpreterHost for FightHost {
                 };
                 Ok(Some(Value::Bool(ok)))
             }
-            "getLeek" | "getEntity" => Ok(Some(Value::Integer(fid as i64))),
+            "getLeek" | "getEntity" => Ok(Some(Value::Integer(i64::from(fid)))),
             "getLeekID" => {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.leek_id as i64),
+                    Some(e) => Value::Integer(i64::from(e.leek_id)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1339,7 +1338,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.team_id as i64),
+                    Some(e) => Value::Integer(i64::from(e.team_id)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1348,7 +1347,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.team as i64),
+                    Some(e) => Value::Integer(i64::from(e.team)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1357,7 +1356,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.strength as i64),
+                    Some(e) => Value::Integer(i64::from(e.strength)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1367,7 +1366,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.strength as i64),
+                    Some(e) => Value::Integer(i64::from(e.strength)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1376,7 +1375,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.agility as i64),
+                    Some(e) => Value::Integer(i64::from(e.agility)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1385,7 +1384,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.wisdom as i64),
+                    Some(e) => Value::Integer(i64::from(e.wisdom)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1394,7 +1393,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.resistance as i64),
+                    Some(e) => Value::Integer(i64::from(e.resistance)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1403,7 +1402,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.science as i64),
+                    Some(e) => Value::Integer(i64::from(e.science)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1412,7 +1411,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.magic as i64),
+                    Some(e) => Value::Integer(i64::from(e.magic)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1421,7 +1420,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.absolute_shield as i64),
+                    Some(e) => Value::Integer(i64::from(e.absolute_shield)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1430,7 +1429,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.relative_shield as i64),
+                    Some(e) => Value::Integer(i64::from(e.relative_shield)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1439,7 +1438,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.damage_return as i64),
+                    Some(e) => Value::Integer(i64::from(e.damage_return)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1448,7 +1447,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.frequency as i64),
+                    Some(e) => Value::Integer(i64::from(e.frequency)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1457,7 +1456,7 @@ impl InterpreterHost for FightHost {
                 let item = arg0_as_i64_strict(args, "getItemMaxUses")? as i32;
                 let w = self.world.borrow();
                 if let Some(cs) = w.chips_by_id.get(&item) {
-                    return Ok(Some(Value::Integer(cs.max_uses as i64)));
+                    return Ok(Some(Value::Integer(i64::from(cs.max_uses))));
                 }
                 Ok(Some(Value::Integer(-1)))
             }
@@ -1465,7 +1464,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.level as i64),
+                    Some(e) => Value::Integer(i64::from(e.level)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1474,7 +1473,7 @@ impl InterpreterHost for FightHost {
                 let who = entity_arg_or_current(args, fid)?;
                 let w = self.world.borrow();
                 let out = match w.entity(who) {
-                    Some(e) => Value::Integer(e.total_life as i64),
+                    Some(e) => Value::Integer(i64::from(e.total_life)),
                     None => Value::Null,
                 };
                 Ok(Some(out))
@@ -1497,10 +1496,8 @@ impl InterpreterHost for FightHost {
                 // Official generator: `FieldClass.getCellContent`: 2=obstacle, 1=entity, 0=empty
                 let v = if w.is_obstacle_cell(c) {
                     2
-                } else if w.living_entity_on_cell(c, None).is_some() {
-                    1
                 } else {
-                    0
+                    i64::from(w.living_entity_on_cell(c, None).is_some())
                 };
                 Ok(Some(Value::Integer(v)))
             }
@@ -1509,44 +1506,40 @@ impl InterpreterHost for FightHost {
                 let cells = w
                     .obstacles
                     .keys()
-                    .map(|&c| Value::Integer(c as i64))
+                    .map(|&c| Value::Integer(i64::from(c)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(cells)))
             }
             "getMapType" => {
                 // Official generator: `FieldClass.getMapType`: map.getType() + 2 (Nexus is -1 so it's +2).
                 let w = self.world.borrow();
-                Ok(Some(Value::Integer((w.map_type + 2) as i64)))
+                Ok(Some(Value::Integer(i64::from(w.map_type + 2))))
             }
             "getFightBoss" => {
                 let w = self.world.borrow();
-                Ok(Some(Value::Integer(w.fight_boss as i64)))
+                Ok(Some(Value::Integer(i64::from(w.fight_boss))))
             }
             "getFightContext" => {
                 let w = self.world.borrow();
-                Ok(Some(Value::Integer(w.fight_context as i64)))
+                Ok(Some(Value::Integer(i64::from(w.fight_context))))
             }
             "getFightId" => {
                 let w = self.world.borrow();
-                Ok(Some(Value::Integer(w.fight_id as i64)))
+                Ok(Some(Value::Integer(i64::from(w.fight_id))))
             }
             "getFightType" => {
                 let w = self.world.borrow();
-                Ok(Some(Value::Integer(w.fight_type as i64)))
+                Ok(Some(Value::Integer(i64::from(w.fight_type))))
             }
             "getDate" => {
                 let w = self.world.borrow();
                 let dt = Self::fight_local_datetime(&w);
-                Ok(Some(Value::String(
-                    format!("{}", dt.format("%d/%m/%Y")).into(),
-                )))
+                Ok(Some(Value::String(format!("{}", dt.format("%d/%m/%Y")))))
             }
             "getTime" => {
                 let w = self.world.borrow();
                 let dt = Self::fight_local_datetime(&w);
-                Ok(Some(Value::String(
-                    format!("{}", dt.format("%H:%M:%S")).into(),
-                )))
+                Ok(Some(Value::String(format!("{}", dt.format("%H:%M:%S")))))
             }
             "getTimestamp" => {
                 let w = self.world.borrow();
@@ -1554,7 +1547,7 @@ impl InterpreterHost for FightHost {
             }
             "include" => {
                 // Official generator: loads another AI source at relative path; not supported in this Rust port.
-                let _path = args.get(0).map(value_debug_string).unwrap_or_default();
+                let _path = args.first().map(value_debug_string).unwrap_or_default();
                 Ok(Some(Value::Null))
             }
             "weaponNeedLos" => {
@@ -1566,11 +1559,7 @@ impl InterpreterHost for FightHost {
                 } else {
                     wid
                 };
-                let need = w
-                    .weapons_by_item
-                    .get(&item_id)
-                    .map(|ws| ws.los)
-                    .unwrap_or(false);
+                let need = w.weapons_by_item.get(&item_id).is_some_and(|ws| ws.los);
                 Ok(Some(Value::Bool(need)))
             }
             "getChips" => {
@@ -1583,7 +1572,7 @@ impl InterpreterHost for FightHost {
                     })?;
                     e.chips
                         .iter()
-                        .map(|&i| Value::Integer(i as i64))
+                        .map(|&i| Value::Integer(i64::from(i)))
                         .collect::<Vec<_>>()
                 };
                 Ok(Some(Value::array_from(chips)))
@@ -1594,7 +1583,7 @@ impl InterpreterHost for FightHost {
                 ids.sort_unstable();
                 Ok(Some(Value::array_from(
                     ids.into_iter()
-                        .map(|id| Value::Integer(id as i64))
+                        .map(|id| Value::Integer(i64::from(id)))
                         .collect(),
                 )))
             }
@@ -1620,64 +1609,64 @@ impl InterpreterHost for FightHost {
                     (
                         Value::Integer(0),
                         Value::array_from(vec![
-                            Value::Integer(tpl.life.0 as i64),
-                            Value::Integer(tpl.life.1 as i64),
+                            Value::Integer(i64::from(tpl.life.0)),
+                            Value::Integer(i64::from(tpl.life.1)),
                         ]),
                     ),
                     (
                         Value::Integer(1),
                         Value::array_from(vec![
-                            Value::Integer(tpl.tp.0 as i64),
-                            Value::Integer(tpl.tp.1 as i64),
+                            Value::Integer(i64::from(tpl.tp.0)),
+                            Value::Integer(i64::from(tpl.tp.1)),
                         ]),
                     ),
                     (
                         Value::Integer(2),
                         Value::array_from(vec![
-                            Value::Integer(tpl.mp.0 as i64),
-                            Value::Integer(tpl.mp.1 as i64),
+                            Value::Integer(i64::from(tpl.mp.0)),
+                            Value::Integer(i64::from(tpl.mp.1)),
                         ]),
                     ),
                     (
                         Value::Integer(3),
                         Value::array_from(vec![
-                            Value::Integer(tpl.strength.0 as i64),
-                            Value::Integer(tpl.strength.1 as i64),
+                            Value::Integer(i64::from(tpl.strength.0)),
+                            Value::Integer(i64::from(tpl.strength.1)),
                         ]),
                     ),
                     (
                         Value::Integer(4),
                         Value::array_from(vec![
-                            Value::Integer(tpl.agility.0 as i64),
-                            Value::Integer(tpl.agility.1 as i64),
+                            Value::Integer(i64::from(tpl.agility.0)),
+                            Value::Integer(i64::from(tpl.agility.1)),
                         ]),
                     ),
                     (
                         Value::Integer(6),
                         Value::array_from(vec![
-                            Value::Integer(tpl.wisdom.0 as i64),
-                            Value::Integer(tpl.wisdom.1 as i64),
+                            Value::Integer(i64::from(tpl.wisdom.0)),
+                            Value::Integer(i64::from(tpl.wisdom.1)),
                         ]),
                     ),
                     (
                         Value::Integer(11),
                         Value::array_from(vec![
-                            Value::Integer(tpl.resistance.0 as i64),
-                            Value::Integer(tpl.resistance.1 as i64),
+                            Value::Integer(i64::from(tpl.resistance.0)),
+                            Value::Integer(i64::from(tpl.resistance.1)),
                         ]),
                     ),
                     (
                         Value::Integer(12),
                         Value::array_from(vec![
-                            Value::Integer(tpl.science.0 as i64),
-                            Value::Integer(tpl.science.1 as i64),
+                            Value::Integer(i64::from(tpl.science.0)),
+                            Value::Integer(i64::from(tpl.science.1)),
                         ]),
                     ),
                     (
                         Value::Integer(13),
                         Value::array_from(vec![
-                            Value::Integer(tpl.magic.0 as i64),
-                            Value::Integer(tpl.magic.1 as i64),
+                            Value::Integer(i64::from(tpl.magic.0)),
+                            Value::Integer(i64::from(tpl.magic.1)),
                         ]),
                     ),
                 ];
@@ -1709,7 +1698,7 @@ impl InterpreterHost for FightHost {
                     tpl.chips
                         .iter()
                         .copied()
-                        .map(|c| Value::Integer(c as i64))
+                        .map(|c| Value::Integer(i64::from(c)))
                         .collect(),
                 )))
             }
@@ -1723,7 +1712,7 @@ impl InterpreterHost for FightHost {
                     return Ok(Some(Value::Integer(-1)));
                 }
                 // In this port, summoned bulbs have `leek_id = -bulb_template_id`.
-                Ok(Some(Value::Integer((-e.leek_id) as i64)))
+                Ok(Some(Value::Integer(i64::from(-e.leek_id))))
             }
             "getAllies" => {
                 // Official generator: `FightClass.getAllies`: team entities, including dead.
@@ -1736,7 +1725,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team == team)
-                    .map(|e| Value::Integer(e.fid as i64))
+                    .map(|e| Value::Integer(i64::from(e.fid)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(out)))
             }
@@ -1760,7 +1749,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team == team && !e.dead)
-                    .map(|e| Value::Integer(e.fid as i64))
+                    .map(|e| Value::Integer(i64::from(e.fid)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(out)))
             }
@@ -1787,7 +1776,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team == team && e.dead)
-                    .map(|e| Value::Integer(e.fid as i64))
+                    .map(|e| Value::Integer(i64::from(e.fid)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(out)))
             }
@@ -1815,7 +1804,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team == team && !e.dead)
-                    .map(|e| e.life as i64)
+                    .map(|e| i64::from(e.life))
                     .sum();
                 Ok(Some(Value::Integer(life)))
             }
@@ -1830,7 +1819,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team != team)
-                    .map(|e| Value::Integer(e.fid as i64))
+                    .map(|e| Value::Integer(i64::from(e.fid)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(out)))
             }
@@ -1853,7 +1842,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team != team && !e.dead)
-                    .map(|e| Value::Integer(e.fid as i64))
+                    .map(|e| Value::Integer(i64::from(e.fid)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(out)))
             }
@@ -1880,7 +1869,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team != team && e.dead)
-                    .map(|e| Value::Integer(e.fid as i64))
+                    .map(|e| Value::Integer(i64::from(e.fid)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(out)))
             }
@@ -1908,7 +1897,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.team != team && !e.dead)
-                    .map(|e| e.life as i64)
+                    .map(|e| i64::from(e.life))
                     .sum();
                 Ok(Some(Value::Integer(life)))
             }
@@ -1920,7 +1909,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .filter(|e| e.is_summon && !e.dead && e.summoner_fid == Some(who))
-                    .map(|e| Value::Integer(e.fid as i64))
+                    .map(|e| Value::Integer(i64::from(e.fid)))
                     .collect::<Vec<_>>();
                 Ok(Some(Value::array_from(out)))
             }
@@ -1935,8 +1924,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .find(|e| !e.dead && e.team == team && e.entity_type == 2)
-                    .map(|e| Value::Integer(e.fid as i64))
-                    .unwrap_or(Value::Null);
+                    .map_or(Value::Null, |e| Value::Integer(i64::from(e.fid)));
                 Ok(Some(turret))
             }
             "getEnemyTurret" => {
@@ -1950,8 +1938,7 @@ impl InterpreterHost for FightHost {
                     .entities
                     .iter()
                     .find(|e| !e.dead && e.team != team && e.entity_type == 2)
-                    .map(|e| Value::Integer(e.fid as i64))
-                    .unwrap_or(Value::Null);
+                    .map_or(Value::Null, |e| Value::Integer(i64::from(e.fid)));
                 Ok(Some(turret))
             }
             "getNearestAlly" => {
@@ -1967,12 +1954,12 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, from, e.cell);
-                    if best.map(|(bd, _)| d2 < bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "getNearestAllyTo" => {
@@ -1989,12 +1976,12 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, from, e.cell);
-                    if best.map(|(bd, _)| d2 < bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "getNearestAllyToCell" => {
@@ -2013,12 +2000,12 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, cell, e.cell);
-                    if best.map(|(bd, _)| d2 < bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "getNearestEnemy" => {
@@ -2034,12 +2021,12 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, from, e.cell);
-                    if best.map(|(bd, _)| d2 < bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "getNearestEnemyTo" => {
@@ -2056,12 +2043,12 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, from, e.cell);
-                    if best.map(|(bd, _)| d2 < bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "getNearestEnemyToCell" => {
@@ -2080,12 +2067,12 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, cell, e.cell);
-                    if best.map(|(bd, _)| d2 < bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "getFarthestAlly" => {
@@ -2101,12 +2088,12 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, from, e.cell);
-                    if best.map(|(bd, _)| d2 > bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 > bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "getFarthestEnemy" => {
@@ -2122,26 +2109,26 @@ impl InterpreterHost for FightHost {
                         continue;
                     }
                     let d2 = map::distance2(w.map_w, from, e.cell);
-                    if best.map(|(bd, _)| d2 > bd).unwrap_or(true) {
+                    if best.is_none_or(|(bd, _)| d2 > bd) {
                         best = Some((d2, e.fid));
                     }
                 }
                 Ok(Some(Value::Integer(
-                    best.map(|(_, id)| id as i64).unwrap_or(-1),
+                    best.map_or(-1, |(_, id)| i64::from(id)),
                 )))
             }
             "chipNeedLos" => {
                 // Official generator: `ChipClass.chipNeedLos(id)`.
                 let cid = arg0_as_i64_strict(args, "chipNeedLos")? as i32;
                 let w = self.world.borrow();
-                let need = w.chips_by_id.get(&cid).map(|cs| cs.los).unwrap_or(false);
+                let need = w.chips_by_id.get(&cid).is_some_and(|cs| cs.los);
                 Ok(Some(Value::Bool(need)))
             }
             "getChipCost" => {
                 let cid = arg0_as_i64_strict(args, "getChipCost")? as i32;
                 let w = self.world.borrow();
-                let v = w.chips_by_id.get(&cid).map(|cs| cs.cost).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.chips_by_id.get(&cid).map_or(0, |cs| cs.cost);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getChipName" => {
                 let cid = arg0_as_i64_strict(args, "getChipName")? as i32;
@@ -2151,19 +2138,19 @@ impl InterpreterHost for FightHost {
                     .get(&cid)
                     .map(|cs| cs.name.clone())
                     .unwrap_or_default();
-                Ok(Some(Value::String(v.into())))
+                Ok(Some(Value::String(v)))
             }
             "getChipCooldown" => {
                 let cid = arg0_as_i64_strict(args, "getChipCooldown")? as i32;
                 let w = self.world.borrow();
-                let v = w.chips_by_id.get(&cid).map(|cs| cs.cooldown).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.chips_by_id.get(&cid).map_or(0, |cs| cs.cooldown);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getChipMaxUses" => {
                 let cid = arg0_as_i64_strict(args, "getChipMaxUses")? as i32;
                 let w = self.world.borrow();
-                let v = w.chips_by_id.get(&cid).map(|cs| cs.max_uses).unwrap_or(-1);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.chips_by_id.get(&cid).map_or(-1, |cs| cs.max_uses);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getChipEffects" => {
                 let cid = arg0_as_i64_strict(args, "getChipEffects")? as i32;
@@ -2186,11 +2173,7 @@ impl InterpreterHost for FightHost {
             "isInlineChip" => {
                 let cid = arg0_as_i64_strict(args, "isInlineChip")? as i32;
                 let w = self.world.borrow();
-                let launch = w
-                    .chips_by_id
-                    .get(&cid)
-                    .map(|cs| cs.launch_type)
-                    .unwrap_or(0);
+                let launch = w.chips_by_id.get(&cid).map_or(0, |cs| cs.launch_type);
                 Ok(Some(Value::Bool(launch == 1)))
             }
             "isChip" => {
@@ -2213,7 +2196,7 @@ impl InterpreterHost for FightHost {
                     _ => {
                         let target = value_as_i64(args.get(1).unwrap()).unwrap_or(-1) as i32;
                         let w = self.world.borrow();
-                        let from = w.entity(fid).map(|e| e.cell).unwrap_or(-1);
+                        let from = w.entity(fid).map_or(-1, |e| e.cell);
                         (target, from)
                     }
                 };
@@ -2239,7 +2222,7 @@ impl InterpreterHost for FightHost {
                 Ok(Some(Value::array_from(
                     cells
                         .into_iter()
-                        .map(|c| Value::Integer(c as i64))
+                        .map(|c| Value::Integer(i64::from(c)))
                         .collect(),
                 )))
             }
@@ -2258,7 +2241,7 @@ impl InterpreterHost for FightHost {
                 if !map::is_valid_cell(w.map_w, w.map_h, cell) || w.is_obstacle_cell(cell) {
                     return Ok(Some(Value::Null));
                 }
-                let launch_cell = w.entity(fid).map(|e| e.cell).unwrap_or(cell);
+                let launch_cell = w.entity(fid).map_or(cell, |e| e.cell);
                 let cells = Self::area_target_cells(
                     &w,
                     cs.area,
@@ -2271,8 +2254,8 @@ impl InterpreterHost for FightHost {
                 let mut out: Vec<Value> = Vec::new();
                 for c in cells {
                     if let Some(tfid) = w.living_entity_on_cell(c, None) {
-                        if !out.contains(&Value::Integer(tfid as i64)) {
-                            out.push(Value::Integer(tfid as i64));
+                        if !out.contains(&Value::Integer(i64::from(tfid))) {
+                            out.push(Value::Integer(i64::from(tfid)));
                         }
                     }
                 }
@@ -2282,7 +2265,9 @@ impl InterpreterHost for FightHost {
                 // Official generator: `FightClass.getCooldown(chip, entity)` returns the current remaining cooldown.
                 let chip = arg0_as_i64_strict(args, "getCooldown")? as i32;
                 let entity = match args.len() {
-                    n if n >= 2 => value_as_i64(args.get(1).unwrap()).unwrap_or(fid as i64) as i32,
+                    n if n >= 2 => {
+                        value_as_i64(args.get(1).unwrap()).unwrap_or(i64::from(fid)) as i32
+                    }
                     _ => fid,
                 };
                 let w = self.world.borrow();
@@ -2290,7 +2275,7 @@ impl InterpreterHost for FightHost {
                     return Ok(Some(Value::Integer(0)));
                 };
                 let v = if cs.team_cooldown {
-                    let team = w.entity(entity).map(|e| e.team).unwrap_or(-1);
+                    let team = w.entity(entity).map_or(-1, |e| e.team);
                     if team < 0 {
                         0
                     } else {
@@ -2305,13 +2290,15 @@ impl InterpreterHost for FightHost {
                         .and_then(|e| e.chip_cooldowns.get(&chip).copied())
                         .unwrap_or(0)
                 };
-                Ok(Some(Value::Integer(v as i64)))
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getCurrentCooldown" => {
                 // Alias used by some legacy AIs; same semantics as `getCooldown`.
                 let chip = arg0_as_i64_strict(args, "getCurrentCooldown")? as i32;
                 let entity = match args.len() {
-                    n if n >= 2 => value_as_i64(args.get(1).unwrap()).unwrap_or(fid as i64) as i32,
+                    n if n >= 2 => {
+                        value_as_i64(args.get(1).unwrap()).unwrap_or(i64::from(fid)) as i32
+                    }
                     _ => fid,
                 };
                 let w = self.world.borrow();
@@ -2319,7 +2306,7 @@ impl InterpreterHost for FightHost {
                     return Ok(Some(Value::Integer(0)));
                 };
                 let v = if cs.team_cooldown {
-                    let team = w.entity(entity).map(|e| e.team).unwrap_or(-1);
+                    let team = w.entity(entity).map_or(-1, |e| e.team);
                     if team < 0 {
                         0
                     } else {
@@ -2334,14 +2321,16 @@ impl InterpreterHost for FightHost {
                         .and_then(|e| e.chip_cooldowns.get(&chip).copied())
                         .unwrap_or(0)
                 };
-                Ok(Some(Value::Integer(v as i64)))
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getItemUses" => {
                 // Official generator: `Entity.getItemUses(itemID)` counts uses *this turn*.
                 // We currently track per-entity chip uses; other item types return 0.
                 let item = arg0_as_i64_strict(args, "getItemUses")? as i32;
                 let entity = match args.len() {
-                    n if n >= 2 => value_as_i64(args.get(1).unwrap()).unwrap_or(fid as i64) as i32,
+                    n if n >= 2 => {
+                        value_as_i64(args.get(1).unwrap()).unwrap_or(i64::from(fid)) as i32
+                    }
                     _ => fid,
                 };
                 let w = self.world.borrow();
@@ -2349,7 +2338,7 @@ impl InterpreterHost for FightHost {
                     .entity(entity)
                     .and_then(|e| e.chip_uses_turn.get(&item).copied())
                     .unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getWeaponTargets" => {
                 // Official generator: `WeaponClass.getWeaponTargets(weapon?, cell)` → entities in the weapon area.
@@ -2377,13 +2366,13 @@ impl InterpreterHost for FightHost {
                 if !map::is_valid_cell(w.map_w, w.map_h, cell) || w.is_obstacle_cell(cell) {
                     return Ok(Some(Value::Null));
                 }
-                let launch_cell = w.entity(fid).map(|e| e.cell).unwrap_or(cell);
+                let launch_cell = w.entity(fid).map_or(cell, |e| e.cell);
                 let cells = Self::area_target_cells(&w, ws.area, launch_cell, cell, 1, 50, false);
                 let mut out: Vec<Value> = Vec::new();
                 for c in cells {
                     if let Some(tfid) = w.living_entity_on_cell(c, None) {
-                        if !out.contains(&Value::Integer(tfid as i64)) {
-                            out.push(Value::Integer(tfid as i64));
+                        if !out.contains(&Value::Integer(i64::from(tfid))) {
+                            out.push(Value::Integer(i64::from(tfid)));
                         }
                     }
                 }
@@ -2424,7 +2413,7 @@ impl InterpreterHost for FightHost {
                 Ok(Some(Value::array_from(
                     cells
                         .into_iter()
-                        .map(|c| Value::Integer(c as i64))
+                        .map(|c| Value::Integer(i64::from(c)))
                         .collect(),
                 )))
             }
@@ -2458,12 +2447,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if user_args.len() >= 3 {
                     value_cells_vec(&user_args[2])
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let Some(cs) = w.chips_by_id.get(&cid) else {
@@ -2479,7 +2463,6 @@ impl InterpreterHost for FightHost {
                 let mut out: Vec<Value> = Vec::new();
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if !map::is_valid_cell(w.map_w, w.map_h, start) || w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2506,7 +2489,7 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    out.push(Value::Integer(start as i64));
+                    out.push(Value::Integer(i64::from(start)));
                 }
                 Ok(Some(Value::array_from(out)))
             }
@@ -2521,12 +2504,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if user_args.len() >= 3 {
                     value_cells_vec(&user_args[2])
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let Some(cs) = w.chips_by_id.get(&cid) else {
@@ -2540,7 +2518,6 @@ impl InterpreterHost for FightHost {
                 let mut out: Vec<Value> = Vec::new();
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2567,7 +2544,7 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    out.push(Value::Integer(start as i64));
+                    out.push(Value::Integer(i64::from(start)));
                 }
                 Ok(Some(Value::array_from(out)))
             }
@@ -2589,12 +2566,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if let Some(v) = ignored_opt {
                     value_cells_vec(v)
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let weapon_item = if weapon == -1 {
@@ -2615,7 +2587,6 @@ impl InterpreterHost for FightHost {
                 let mut out: Vec<Value> = Vec::new();
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2642,7 +2613,7 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    out.push(Value::Integer(start as i64));
+                    out.push(Value::Integer(i64::from(start)));
                 }
                 Ok(Some(Value::array_from(out)))
             }
@@ -2664,12 +2635,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if let Some(v) = ignored_opt {
                     value_cells_vec(v)
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let weapon_item = if weapon == -1 {
@@ -2688,7 +2654,6 @@ impl InterpreterHost for FightHost {
                 let mut out: Vec<Value> = Vec::new();
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2715,7 +2680,7 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    out.push(Value::Integer(start as i64));
+                    out.push(Value::Integer(i64::from(start)));
                 }
                 Ok(Some(Value::array_from(out)))
             }
@@ -2730,12 +2695,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if user_args.len() >= 3 {
                     value_cells_vec(&user_args[2])
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let Some(cs) = w.chips_by_id.get(&cid) else {
@@ -2750,7 +2710,6 @@ impl InterpreterHost for FightHost {
                 let target_cell = t.cell;
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if !map::is_valid_cell(w.map_w, w.map_h, start) || w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2777,7 +2736,7 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    return Ok(Some(Value::Integer(start as i64)));
+                    return Ok(Some(Value::Integer(i64::from(start))));
                 }
                 Ok(Some(Value::Integer(-1)))
             }
@@ -2792,12 +2751,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if user_args.len() >= 3 {
                     value_cells_vec(&user_args[2])
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let Some(cs) = w.chips_by_id.get(&cid) else {
@@ -2810,7 +2764,6 @@ impl InterpreterHost for FightHost {
                 }
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2837,7 +2790,7 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    return Ok(Some(Value::Integer(start as i64)));
+                    return Ok(Some(Value::Integer(i64::from(start))));
                 }
                 Ok(Some(Value::Integer(-1)))
             }
@@ -2859,12 +2812,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if let Some(v) = ignored_opt {
                     value_cells_vec(v)
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let weapon_item = if weapon == -1 {
@@ -2884,7 +2832,6 @@ impl InterpreterHost for FightHost {
                 let target_cell = t.cell;
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2911,7 +2858,7 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    return Ok(Some(Value::Integer(start as i64)));
+                    return Ok(Some(Value::Integer(i64::from(start))));
                 }
                 Ok(Some(Value::Integer(-1)))
             }
@@ -2933,12 +2880,7 @@ impl InterpreterHost for FightHost {
                 let ignored_cells: Vec<i32> = if let Some(v) = ignored_opt {
                     value_cells_vec(v)
                 } else {
-                    vec![self
-                        .world
-                        .borrow()
-                        .entity(fid)
-                        .map(|e| e.cell)
-                        .unwrap_or(-1)]
+                    vec![self.world.borrow().entity(fid).map_or(-1, |e| e.cell)]
                 };
                 let w = self.world.borrow();
                 let weapon_item = if weapon == -1 {
@@ -2956,7 +2898,6 @@ impl InterpreterHost for FightHost {
                 }
                 let n = map::nb_cells(w.map_w, w.map_h);
                 for start in 0..n {
-                    let start = start as i32;
                     if w.is_obstacle_cell(start) {
                         continue;
                     }
@@ -2983,15 +2924,15 @@ impl InterpreterHost for FightHost {
                             continue;
                         }
                     }
-                    return Ok(Some(Value::Integer(start as i64)));
+                    return Ok(Some(Value::Integer(i64::from(start))));
                 }
                 Ok(Some(Value::Integer(-1)))
             }
             "getChipMinRange" => {
                 let cid = arg0_as_i64_strict(args, "getChipMinRange")? as i32;
                 let w = self.world.borrow();
-                let v = w.chips_by_id.get(&cid).map(|cs| cs.min_range).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.chips_by_id.get(&cid).map_or(0, |cs| cs.min_range);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getChipMinScope" => {
                 // Alias.
@@ -3001,8 +2942,8 @@ impl InterpreterHost for FightHost {
             "getChipMaxRange" => {
                 let cid = arg0_as_i64_strict(args, "getChipMaxRange")? as i32;
                 let w = self.world.borrow();
-                let v = w.chips_by_id.get(&cid).map(|cs| cs.max_range).unwrap_or(0);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.chips_by_id.get(&cid).map_or(0, |cs| cs.max_range);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getChipMaxScope" => {
                 // Alias.
@@ -3012,12 +2953,8 @@ impl InterpreterHost for FightHost {
             "getChipLaunchType" => {
                 let cid = arg0_as_i64_strict(args, "getChipLaunchType")? as i32;
                 let w = self.world.borrow();
-                let v = w
-                    .chips_by_id
-                    .get(&cid)
-                    .map(|cs| cs.launch_type)
-                    .unwrap_or(7);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.chips_by_id.get(&cid).map_or(7, |cs| cs.launch_type);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getChipArea" => {
                 let cid = arg0_as_i64_strict(args, "getChipArea")? as i32;
@@ -3025,7 +2962,7 @@ impl InterpreterHost for FightHost {
                 let Some(cs) = w.chips_by_id.get(&cid) else {
                     return Ok(Some(Value::Null));
                 };
-                Ok(Some(Value::Integer(cs.area as i64)))
+                Ok(Some(Value::Integer(i64::from(cs.area))))
             }
             "canUseChipOnCell" => {
                 let (cid, cell) = pair_user_ints(args, "canUseChipOnCell")?;
@@ -3099,7 +3036,7 @@ impl InterpreterHost for FightHost {
                 let cell = value_as_i64(&args[1]).unwrap_or(-1) as i32;
                 // args[2] is the callback function in the official generator; ignored for now.
                 let name_override = args.get(3).and_then(|v| match v {
-                    Value::String(s) => Some(s.to_string()),
+                    Value::String(s) => Some(s.clone()),
                     Value::Null => None,
                     _ => Some(value_debug_string(v)),
                 });
@@ -3107,20 +3044,20 @@ impl InterpreterHost for FightHost {
                 let (me_cell, tp, has_chip, cs) = {
                     let w = self.world.borrow();
                     let Some(me) = w.entity(fid) else {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     };
                     let has_chip = me.chips.contains(&cid);
                     let cs = w.chips_by_id.get(&cid).cloned();
                     (me.cell, me.tp, has_chip, cs)
                 };
                 let Some(cs) = cs else {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 };
                 if !has_chip {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 }
                 if cs.cost > 0 && cs.cost > tp {
-                    return Ok(Some(Value::Integer(USE_NOT_ENOUGH_TP as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_NOT_ENOUGH_TP))));
                 }
                 {
                     let w = self.world.borrow();
@@ -3130,7 +3067,7 @@ impl InterpreterHost for FightHost {
                 }
                 let w = self.world.borrow();
                 if !map::is_valid_cell(w.map_w, w.map_h, cell) || w.is_obstacle_cell(cell) {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 if !self.verify_java_range(
                     me_cell,
@@ -3140,7 +3077,7 @@ impl InterpreterHost for FightHost {
                     cs.max_range,
                 ) || (cs.los && !self.verify_java_los(me_cell, cell))
                 {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 drop(w);
 
@@ -3184,7 +3121,7 @@ impl InterpreterHost for FightHost {
                         me.tp = (me.tp - cs.cost).max(0);
                     }
                     w.register_chip_use_after_success(fid, &cs);
-                    result as i64
+                    i64::from(result)
                 };
                 Ok(Some(Value::Integer(use_result)))
             }
@@ -3192,29 +3129,31 @@ impl InterpreterHost for FightHost {
                 // Official generator: `ChipClass.useChip(chip_id, leek_id?)` -> uses target's cell.
                 let cid = arg0_as_i64_strict(args, "useChip")? as i32;
                 let target_fid = match args.len() {
-                    n if n >= 3 => value_as_i64(args.get(2).unwrap()).unwrap_or(fid as i64) as i32,
+                    n if n >= 3 => {
+                        value_as_i64(args.get(2).unwrap()).unwrap_or(i64::from(fid)) as i32
+                    }
                     _ => fid,
                 };
                 let (me_cell, tp, has_chip, target_cell, target_dead, cs) = {
                     let w = self.world.borrow();
                     let Some(me) = w.entity(fid) else {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     };
                     let Some(t) = w.entity(target_fid) else {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     };
                     let has_chip = me.chips.contains(&cid);
                     let cs = w.chips_by_id.get(&cid).cloned();
                     (me.cell, me.tp, has_chip, t.cell, t.dead, cs)
                 };
                 let Some(cs) = cs else {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 };
                 if !has_chip || target_dead {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 }
                 if cs.cost > 0 && cs.cost > tp {
-                    return Ok(Some(Value::Integer(USE_NOT_ENOUGH_TP as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_NOT_ENOUGH_TP))));
                 }
                 {
                     let w = self.world.borrow();
@@ -3226,7 +3165,7 @@ impl InterpreterHost for FightHost {
                 if !map::is_valid_cell(w.map_w, w.map_h, target_cell)
                     || w.is_obstacle_cell(target_cell)
                 {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 if !self.verify_java_range(
                     me_cell,
@@ -3236,7 +3175,7 @@ impl InterpreterHost for FightHost {
                     cs.max_range,
                 ) || (cs.los && !self.verify_java_los(me_cell, target_cell))
                 {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 drop(w);
                 let use_result = {
@@ -3283,7 +3222,7 @@ impl InterpreterHost for FightHost {
                         me.tp = (me.tp - cs.cost).max(0);
                     }
                     w.register_chip_use_after_success(fid, &cs);
-                    result as i64
+                    i64::from(result)
                 };
                 Ok(Some(Value::Integer(use_result)))
             }
@@ -3294,20 +3233,20 @@ impl InterpreterHost for FightHost {
                 let (me_cell, tp, has_chip, cs) = {
                     let w = self.world.borrow();
                     let Some(me) = w.entity(fid) else {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     };
                     let has_chip = me.chips.contains(&cid);
                     let cs = w.chips_by_id.get(&cid).cloned();
                     (me.cell, me.tp, has_chip, cs)
                 };
                 let Some(cs) = cs else {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 };
                 if !has_chip {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 }
                 if cs.cost > 0 && cs.cost > tp {
-                    return Ok(Some(Value::Integer(USE_NOT_ENOUGH_TP as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_NOT_ENOUGH_TP))));
                 }
                 {
                     let w = self.world.borrow();
@@ -3317,7 +3256,7 @@ impl InterpreterHost for FightHost {
                 }
                 let w = self.world.borrow();
                 if !map::is_valid_cell(w.map_w, w.map_h, cell) || w.is_obstacle_cell(cell) {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 if !self.verify_java_range(
                     me_cell,
@@ -3327,7 +3266,7 @@ impl InterpreterHost for FightHost {
                     cs.max_range,
                 ) || (cs.los && !self.verify_java_los(me_cell, cell))
                 {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 drop(w);
                 let use_result = {
@@ -3367,7 +3306,7 @@ impl InterpreterHost for FightHost {
                         me.tp = (me.tp - cs.cost).max(0);
                     }
                     w.register_chip_use_after_success(fid, &cs);
-                    result as i64
+                    i64::from(result)
                 };
                 Ok(Some(Value::Integer(use_result)))
             }
@@ -3428,22 +3367,22 @@ impl InterpreterHost for FightHost {
                 let (me_cell, tp, template_id, full_life, cs, target_summon, target_team) = {
                     let w = self.world.borrow();
                     if w.active_fid != fid {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     }
                     let Some(me) = w.entity(fid) else {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     };
                     if me.dead {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     }
                     let has_84 = me.chips.contains(&CHIP_RESURRECTION)
                         && w.chips_by_id
                             .get(&CHIP_RESURRECTION)
-                            .map_or(false, Self::chip_has_resurrect_effect);
+                            .is_some_and(Self::chip_has_resurrect_effect);
                     let has_415 = me.chips.contains(&CHIP_AWEKENING)
                         && w.chips_by_id
                             .get(&CHIP_AWEKENING)
-                            .map_or(false, Self::chip_has_resurrect_effect);
+                            .is_some_and(Self::chip_has_resurrect_effect);
                     if !has_84 && !has_415 {
                         return Ok(Some(Value::Integer(-1)));
                     }
@@ -3457,10 +3396,12 @@ impl InterpreterHost for FightHost {
                         return Ok(Some(Value::Integer(-1)));
                     };
                     let Some(target) = w.entity(target_fid) else {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     };
                     if !target.dead {
-                        return Ok(Some(Value::Integer(USE_RESURRECT_INVALID_ENTITY as i64)));
+                        return Ok(Some(Value::Integer(i64::from(
+                            USE_RESURRECT_INVALID_ENTITY,
+                        ))));
                     }
                     (
                         me.cell,
@@ -3477,10 +3418,10 @@ impl InterpreterHost for FightHost {
                     && self.world.borrow().team_summon_count(target_team)
                         >= FightWorld::SUMMON_LIMIT
                 {
-                    return Ok(Some(Value::Integer(USE_TOO_MANY_SUMMONS as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_TOO_MANY_SUMMONS))));
                 }
                 if cs.cost > 0 && cs.cost > tp {
-                    return Ok(Some(Value::Integer(USE_NOT_ENOUGH_TP as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_NOT_ENOUGH_TP))));
                 }
                 {
                     let w = self.world.borrow();
@@ -3490,10 +3431,10 @@ impl InterpreterHost for FightHost {
                 }
                 let w = self.world.borrow();
                 if !map::is_valid_cell(w.map_w, w.map_h, cell) || w.is_obstacle_cell(cell) {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 if w.living_entity_on_cell(cell, None).is_some() {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 if !self.verify_java_range(
                     me_cell,
@@ -3503,7 +3444,7 @@ impl InterpreterHost for FightHost {
                     cs.max_range,
                 ) || (cs.los && !self.verify_java_los(me_cell, cell))
                 {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 drop(w);
 
@@ -3520,7 +3461,7 @@ impl InterpreterHost for FightHost {
                     if let Some(me) = w.entity_mut(fid) {
                         me.tp = (me.tp - cs.cost).max(0);
                     }
-                    result as i64
+                    i64::from(result)
                 };
                 Ok(Some(Value::Integer(use_result)))
             }
@@ -3530,7 +3471,7 @@ impl InterpreterHost for FightHost {
                 if !map::is_valid_cell(w.map_w, w.map_h, c) {
                     return Ok(Some(Value::Integer(-1)));
                 }
-                let v = w.living_entity_on_cell(c, None).unwrap_or(-1) as i64;
+                let v = i64::from(w.living_entity_on_cell(c, None).unwrap_or(-1));
                 Ok(Some(Value::Integer(v)))
             }
             "isEmptyCell" => {
@@ -3569,7 +3510,7 @@ impl InterpreterHost for FightHost {
                     })?;
                     e.weapons
                         .iter()
-                        .map(|&i| Value::Integer(i as i64))
+                        .map(|&i| Value::Integer(i64::from(i)))
                         .collect::<Vec<_>>()
                 };
                 Ok(Some(Value::array_from(w)))
@@ -3578,7 +3519,7 @@ impl InterpreterHost for FightHost {
                 // Official generator: `FightClass.getWeapon()`: equipped weapon item id, -1 when none.
                 let w = self.world.borrow();
                 let v = w.entity(fid).and_then(|e| e.equipped_weapon).unwrap_or(-1);
-                Ok(Some(Value::Integer(v as i64)))
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getWeaponName" => {
                 let wid = arg0_as_i64_loose(args, "getWeaponName")? as i32;
@@ -3593,7 +3534,7 @@ impl InterpreterHost for FightHost {
                     .get(&item_id)
                     .map(|ws| ws.name.clone())
                     .unwrap_or_default();
-                Ok(Some(Value::String(v.into())))
+                Ok(Some(Value::String(v)))
             }
             "getWeaponCost" => {
                 let wid = arg0_as_i64_loose(args, "getWeaponCost")? as i32;
@@ -3603,12 +3544,8 @@ impl InterpreterHost for FightHost {
                 } else {
                     wid
                 };
-                let v = w
-                    .weapons_by_item
-                    .get(&item_id)
-                    .map(|ws| ws.cost)
-                    .unwrap_or(-1);
-                Ok(Some(Value::Integer(v as i64)))
+                let v = w.weapons_by_item.get(&item_id).map_or(-1, |ws| ws.cost);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getWeaponMaxUses" => {
                 // Official generator: currently returns -1 (unlimited) for weapons.
@@ -3625,9 +3562,8 @@ impl InterpreterHost for FightHost {
                 let v = w
                     .weapons_by_item
                     .get(&item_id)
-                    .map(|ws| ws.min_range)
-                    .unwrap_or(-1);
-                Ok(Some(Value::Integer(v as i64)))
+                    .map_or(-1, |ws| ws.min_range);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getWeaponMaxRange" | "getWeaponMaxScope" => {
                 let wid = arg0_as_i64_loose(args, name)? as i32;
@@ -3640,9 +3576,8 @@ impl InterpreterHost for FightHost {
                 let v = w
                     .weapons_by_item
                     .get(&item_id)
-                    .map(|ws| ws.max_range)
-                    .unwrap_or(-1);
-                Ok(Some(Value::Integer(v as i64)))
+                    .map_or(-1, |ws| ws.max_range);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getWeaponLaunchType" => {
                 let wid = arg0_as_i64_loose(args, "getWeaponLaunchType")? as i32;
@@ -3655,9 +3590,8 @@ impl InterpreterHost for FightHost {
                 let v = w
                     .weapons_by_item
                     .get(&item_id)
-                    .map(|ws| ws.launch_type)
-                    .unwrap_or(7);
-                Ok(Some(Value::Integer(v as i64)))
+                    .map_or(7, |ws| ws.launch_type);
+                Ok(Some(Value::Integer(i64::from(v))))
             }
             "getWeaponArea" => {
                 let wid = arg0_as_i64_loose(args, "getWeaponArea")? as i32;
@@ -3670,7 +3604,7 @@ impl InterpreterHost for FightHost {
                 let Some(ws) = w.weapons_by_item.get(&item_id) else {
                     return Ok(Some(Value::Null));
                 };
-                Ok(Some(Value::Integer(ws.area as i64)))
+                Ok(Some(Value::Integer(i64::from(ws.area))))
             }
             "getWeaponFailure" => Ok(Some(Value::Integer(0))),
             "getWeaponFailureRate" => Ok(Some(Value::Integer(0))),
@@ -3721,8 +3655,7 @@ impl InterpreterHost for FightHost {
                 let launch = w
                     .weapons_by_item
                     .get(&item_id)
-                    .map(|ws| ws.launch_type)
-                    .unwrap_or(0);
+                    .map_or(0, |ws| ws.launch_type);
                 Ok(Some(Value::Bool(launch == 1)))
             }
             "getAllWeapons" => {
@@ -3731,7 +3664,7 @@ impl InterpreterHost for FightHost {
                 ids.sort_unstable();
                 Ok(Some(Value::array_from(
                     ids.into_iter()
-                        .map(|id| Value::Integer(id as i64))
+                        .map(|id| Value::Integer(i64::from(id)))
                         .collect(),
                 )))
             }
@@ -3804,11 +3737,7 @@ impl InterpreterHost for FightHost {
                         reference: "INTERNAL_ERROR",
                         message: "entity missing".into(),
                     })?;
-                    if e.tp <= 0 {
-                        false
-                    } else if !e.weapons.contains(&wid) {
-                        false
-                    } else if !weapon_exists {
+                    if e.tp <= 0 || !e.weapons.contains(&wid) || !weapon_exists {
                         // Official generator: `Weapons.getWeapon(wid)` must exist (scenario can contain stale ids).
                         false
                     } else {
@@ -3825,28 +3754,27 @@ impl InterpreterHost for FightHost {
                 let target = arg0_as_i64_loose(args, "moveToward")? as i32;
                 let mut used = 0i32;
                 let mut path: Vec<i32> = Vec::new();
-                loop {
-                    // Official generator: `Map.getPathBeetween(start, targetCell, null)` (A*), then move up to MP.
-                    let planned = (|| -> Option<Vec<i32>> {
-                        let w = self.world.borrow();
-                        let (mw, mh) = (w.map_w, w.map_h);
-                        let me = w.entity(fid)?;
-                        if me.dead || me.mp <= 0 {
-                            return None;
-                        }
-                        let cur = me.cell;
-                        let target_cell = w.entity(target).filter(|t| !t.dead).map(|t| t.cell)?;
-                        if !map::is_valid_cell(mw, mh, target_cell) {
-                            return None;
-                        }
-                        let steps = pathfinding::get_path_between(&w, cur, target_cell, None)?;
-                        if steps.is_empty() {
-                            return None;
-                        }
-                        Some(steps)
-                    })();
+                // Official generator: `Map.getPathBeetween(start, targetCell, null)` (A*), then move up to MP.
+                let planned = (|| -> Option<Vec<i32>> {
+                    let w = self.world.borrow();
+                    let (mw, mh) = (w.map_w, w.map_h);
+                    let me = w.entity(fid)?;
+                    if me.dead || me.mp <= 0 {
+                        return None;
+                    }
+                    let cur = me.cell;
+                    let target_cell = w.entity(target).filter(|t| !t.dead).map(|t| t.cell)?;
+                    if !map::is_valid_cell(mw, mh, target_cell) {
+                        return None;
+                    }
+                    let steps = pathfinding::get_path_between(&w, cur, target_cell, None)?;
+                    if steps.is_empty() {
+                        return None;
+                    }
+                    Some(steps)
+                })();
 
-                    let Some(planned) = planned else { break };
+                if let Some(planned) = planned {
                     // Walk up to remaining MP.
                     for next in planned {
                         let mut w = self.world.borrow_mut();
@@ -3865,7 +3793,6 @@ impl InterpreterHost for FightHost {
                         used += 1;
                         path.push(next);
                     }
-                    break;
                 }
                 if used > 0 {
                     // Official generator: ActionMove: [MOVE_TO, leek, end, [path...]]
@@ -3874,7 +3801,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, path]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveTowardLine" => {
                 // Official generator: `FightClass.moveTowardLine(cellA, cellB, pm?)` → `Map.getPathTowardLine` + `moveEntity`.
@@ -3938,7 +3865,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveTowardCell" => {
                 // Official generator: `State.moveTowardCell(entity, cell_id, pm_to_use)`
@@ -4000,7 +3927,7 @@ impl InterpreterHost for FightHost {
                         if goals.is_empty() {
                             return None;
                         }
-                        goals.sort();
+                        goals.sort_unstable();
                         pathfinding::astar_path(&w, start, &goals, None)
                     } else {
                         pathfinding::get_path_between(&w, start, cell_id, None)
@@ -4034,7 +3961,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveTowardEntities" | "moveTowardLeeks" => {
                 // Official generator: `FightClass.moveTowardEntities(leeks, pm_to_use?)`: A* toward any alive target cell.
@@ -4094,7 +4021,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveTowardCells" => {
                 // Official generator: `FightClass.moveTowardCells(cells, pm_to_use?)`: A* toward any target cell.
@@ -4123,7 +4050,6 @@ impl InterpreterHost for FightHost {
                     let start = me.cell;
                     let targets: Vec<i32> = value_i32_vec(cells_val)
                         .into_iter()
-                        .map(|c| c as i32)
                         .filter(|&c| map::is_valid_cell(w.map_w, w.map_h, c))
                         .collect();
                     if targets.is_empty() {
@@ -4153,7 +4079,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveAwayFrom" => {
                 // Official generator: `FightClass.moveAwayFrom(entity, mp?)`
@@ -4216,7 +4142,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveAwayFromCell" => {
                 let cell_id = arg0_as_i64_strict(args, "moveAwayFromCell")? as i32;
@@ -4278,7 +4204,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveAwayFromCells" => {
                 let cells_val = if args.len() >= 2 { &args[1] } else { &args[0] };
@@ -4302,7 +4228,6 @@ impl InterpreterHost for FightHost {
                     };
                     let bad = value_i32_vec(cells_val)
                         .into_iter()
-                        .map(|c| c as i32)
                         .filter(|&c| map::is_valid_cell(w.map_w, w.map_h, c))
                         .collect::<Vec<_>>();
                     (me.cell, pm, bad)
@@ -4338,7 +4263,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveAwayFromEntities" | "moveAwayFromLeeks" => {
                 let leeks_val = if args.len() >= 2 { &args[1] } else { &args[0] };
@@ -4398,7 +4323,7 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "moveAwayFromLine" => {
                 let (cell1, cell2) = pair_user_ints(args, "moveAwayFromLine")?;
@@ -4458,14 +4383,14 @@ impl InterpreterHost for FightHost {
                         .borrow_mut()
                         .log_action(json!([ACTION_MOVE_TO, fid, end, walked]));
                 }
-                Ok(Some(Value::Integer(used as i64)))
+                Ok(Some(Value::Integer(i64::from(used))))
             }
             "useWeapon" => {
                 let target_fid = arg0_as_i64_loose(args, "useWeapon")? as i32;
                 let w = self.world.borrow();
                 let (striker_cell, item_id) = match w.entity(fid) {
                     Some(e) if !e.dead => (e.cell, e.equipped_weapon),
-                    _ => return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64))),
+                    _ => return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET)))),
                 };
                 let Some(item_id) = item_id else {
                     let log_no_weapon = w
@@ -4475,14 +4400,14 @@ impl InterpreterHost for FightHost {
                     if log_no_weapon {
                         self.charge_no_weapon_equipped_system_log(fid, trace);
                     }
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 };
                 if target_fid < 0 {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 }
                 let victim_cell = match w.entity(target_fid) {
                     Some(v) if !v.dead && v.fid != fid => v.cell,
-                    _ => return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64))),
+                    _ => return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET)))),
                 };
                 let (cost, area, effects, weapon_item_id) =
                     if let Some(wstat) = w.weapons_by_item.get(&item_id) {
@@ -4494,18 +4419,18 @@ impl InterpreterHost for FightHost {
                             wstat.min_range,
                             wstat.max_range,
                         ) {
-                            return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                            return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                         }
                         if wstat.los && !self.verify_java_los(striker_cell, victim_cell) {
-                            return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                            return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                         }
-                        let striker_tp = w.entity(fid).map(|e| e.tp).unwrap_or(0);
+                        let striker_tp = w.entity(fid).map_or(0, |e| e.tp);
                         if striker_tp < wstat.cost {
-                            return Ok(Some(Value::Integer(USE_NOT_ENOUGH_TP as i64)));
+                            return Ok(Some(Value::Integer(i64::from(USE_NOT_ENOUGH_TP))));
                         }
                         (wstat.cost, wstat.area, wstat.effects.clone(), item_id)
                     } else {
-                        return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                        return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                     };
                 drop(w);
                 let mut w = self.world.borrow_mut();
@@ -4534,19 +4459,19 @@ impl InterpreterHost for FightHost {
                 }
                 // Official generator: ActionUseWeapon logs at use-time regardless of damage details.
                 w.log_action(json!([ACTION_USE_WEAPON, victim_cell, result]));
-                Ok(Some(Value::Integer(result as i64)))
+                Ok(Some(Value::Integer(i64::from(result))))
             }
             "useWeaponOnCell" => {
                 let target_cell = arg0_as_i64_strict(args, "useWeaponOnCell")? as i32;
                 let w = self.world.borrow();
                 let (striker_cell, item_id) = match w.entity(fid) {
                     Some(e) if !e.dead => (e.cell, e.equipped_weapon),
-                    _ => return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64))),
+                    _ => return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET)))),
                 };
                 let Some(item_id) = item_id else {
                     let striker_cell = match w.entity(fid) {
                         Some(e) if !e.dead => e.cell,
-                        _ => return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64))),
+                        _ => return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET)))),
                     };
                     let target_ok = map::is_valid_cell(w.map_w, w.map_h, target_cell)
                         && !w.is_obstacle_cell(target_cell)
@@ -4555,15 +4480,15 @@ impl InterpreterHost for FightHost {
                     if target_ok {
                         self.charge_no_weapon_equipped_system_log(fid, trace);
                     }
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 };
                 if !map::is_valid_cell(w.map_w, w.map_h, target_cell)
                     || w.is_obstacle_cell(target_cell)
                 {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
                 let Some(wstat) = w.weapons_by_item.get(&item_id) else {
-                    return Ok(Some(Value::Integer(USE_INVALID_TARGET as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_TARGET))));
                 };
                 if !self.verify_java_range(
                     striker_cell,
@@ -4573,11 +4498,11 @@ impl InterpreterHost for FightHost {
                     wstat.max_range,
                 ) || (wstat.los && !self.verify_java_los(striker_cell, target_cell))
                 {
-                    return Ok(Some(Value::Integer(USE_INVALID_POSITION as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_INVALID_POSITION))));
                 }
-                let striker_tp = w.entity(fid).map(|e| e.tp).unwrap_or(0);
+                let striker_tp = w.entity(fid).map_or(0, |e| e.tp);
                 if striker_tp < wstat.cost {
-                    return Ok(Some(Value::Integer(USE_NOT_ENOUGH_TP as i64)));
+                    return Ok(Some(Value::Integer(i64::from(USE_NOT_ENOUGH_TP))));
                 }
                 let (cost, area, effects, weapon_item_id) =
                     (wstat.cost, wstat.area, wstat.effects.clone(), item_id);
@@ -4607,7 +4532,7 @@ impl InterpreterHost for FightHost {
                     me.tp = (me.tp - cost).max(0);
                 }
                 w.log_action(json!([ACTION_USE_WEAPON, target_cell, result]));
-                Ok(Some(Value::Integer(result as i64)))
+                Ok(Some(Value::Integer(i64::from(result))))
             }
             _ => Ok(None),
         }
@@ -4642,8 +4567,7 @@ impl InterpreterHost for FightHost {
             .world
             .borrow()
             .entity(fid)
-            .map(|e| e.log_bucket_owner)
-            .unwrap_or(0);
+            .map_or(0, |e| e.log_bucket_owner);
         // Official generator: `SystemClass.debug*` → `AILog.STANDARD/WARNING/ERROR` + optional color (`debugC`).
         const STANDARD: i32 = 1;
         const WARNING: i32 = 2;
@@ -4664,14 +4588,13 @@ impl InterpreterHost for FightHost {
     }
 }
 
-/// Greedy grid step toward `to` using official-generator-style `(x,y)` neighbors.
-// (deprecated) `step_toward_cell`: replaced with shortest-path planning in `moveToward`.
+// Note: deprecated `step_toward_cell` was replaced with shortest-path planning in `moveToward`.
 
 fn int_user_arg(args: &[Value], ctx: &str) -> Result<i64, InterpretError> {
     let v = if args.len() >= 2 {
         args.get(1)
     } else {
-        args.get(0)
+        args.first()
     };
     let v = v.ok_or_else(|| InterpretError::invalid_parameter_count(1, args.len()))?;
     value_as_i64(v).ok_or_else(|| InterpretError {
@@ -4693,7 +4616,7 @@ fn pair_user_ints(args: &[Value], ctx: &str) -> Result<(i64, i64), InterpretErro
         }
         2 => {
             let a = args
-                .get(0)
+                .first()
                 .ok_or_else(|| InterpretError::invalid_parameter_count(2, 2))?;
             let b = args
                 .get(1)
@@ -4722,7 +4645,7 @@ fn entity_arg_or_current(args: &[Value], current: i32) -> Result<i32, InterpretE
     let v = if args.len() >= 2 {
         args.get(1)
     } else {
-        args.get(0)
+        args.first()
     };
     let v = v.ok_or_else(|| InterpretError::invalid_parameter_count(1, args.len()))?;
     match v {
@@ -4774,11 +4697,11 @@ fn value_i32_vec(v: &Value) -> Vec<i32> {
     }
 }
 
-fn pick_user_arg<'a>(args: &'a [Value]) -> Option<&'a Value> {
+fn pick_user_arg(args: &[Value]) -> Option<&Value> {
     if args.len() >= 2 {
         args.get(1)
     } else {
-        args.get(0)
+        args.first()
     }
 }
 

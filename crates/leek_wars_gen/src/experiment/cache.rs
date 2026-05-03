@@ -13,12 +13,14 @@ pub fn cache_key_for_task(task: &RunTask) -> Result<String, GenError> {
     let mut h = Sha256::new();
     h.update(stable_json_bytes(&task.scenario_value)?);
     h.update(task.arm_name.as_bytes());
-    let tun = serde_json::to_vec(&serde_json::json!(task.tunables)).map_err(GenError::ScenarioJson)?;
+    let tun =
+        serde_json::to_vec(&serde_json::json!(task.tunables)).map_err(GenError::ScenarioJson)?;
     h.update(&tun);
     h.update(env!("CARGO_PKG_VERSION").as_bytes());
     Ok(hex::encode(h.finalize()))
 }
 
+#[must_use]
 pub fn cache_outcome_path(cache_dir: &Path, key: &str) -> PathBuf {
     cache_dir.join(format!("{key}.outcome.json"))
 }

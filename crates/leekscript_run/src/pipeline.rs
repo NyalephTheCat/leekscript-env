@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 pub const PREAMBLE_MAX_LINES: usize = 64;
 
 /// CLI + manifest overrides for language settings (same precedence as `lek check`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct CompileOptions {
     pub manifest: Option<PathBuf>,
     pub cli_language_version: Option<u8>,
@@ -29,19 +29,6 @@ pub struct CompileOptions {
     pub snippet_origin: Option<PathBuf>,
     /// Names from signature TOML ([`leekscript_signatures`]) merged into the resolve global scope.
     pub signature_globals: Vec<String>,
-}
-
-impl Default for CompileOptions {
-    fn default() -> Self {
-        Self {
-            manifest: None,
-            cli_language_version: None,
-            cli_strict: None,
-            source_path: None,
-            snippet_origin: None,
-            signature_globals: Vec::new(),
-        }
-    }
 }
 
 /// Phase that produced a diagnostic (for display and JSON consumers).
@@ -59,6 +46,7 @@ pub enum CompilePhase {
 }
 
 impl CompilePhase {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             CompilePhase::Directives => "directives",
@@ -118,10 +106,12 @@ pub struct ModuleExpansionCache {
 }
 
 impl ModuleExpansionCache {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn get(&self, path: &Path) -> Option<&ExpandedSourceUnit> {
         self.expanded.get(path)
     }
@@ -385,7 +375,7 @@ fn collect_top_level_signature_names(hir: &HirFile) -> Vec<String> {
     out
 }
 
-/// Parse and lower a LeekScript **signature** file (`.sig.leek` / `.sig.ls`): same lexer → parse → HIR as a
+/// Parse and lower a `LeekScript` **signature** file (`.sig.leek` / `.sig.ls`): same lexer → parse → HIR as a
 /// normal `.leek` file, but only declaration **names** are returned (no resolve, types, or `include` expansion).
 ///
 /// Supported declaration shapes include:
@@ -934,8 +924,7 @@ pub fn compile_source(
 
     let main_file_path = opts
         .source_path
-        .as_ref()
-        .cloned()
+        .clone()
         .or_else(|| Path::new(&path_display).canonicalize().ok());
 
     let hir = if hir_contains_include(&pending.hir) {
@@ -970,8 +959,7 @@ pub fn compile_source(
     };
 
     let main_src_key = main_file_path
-        .as_ref()
-        .map(|p| p.as_path())
+        .as_deref()
         .unwrap_or_else(|| Path::new(&path_display));
 
     let mut failures: Vec<CompileDiagnostic> = Vec::new();
@@ -1057,7 +1045,7 @@ pub fn compile_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{interpret_hir, value_java_export, Value};
+    use crate::{interpret_hir, value_java_export, InterpretError, Value};
 
     #[test]
     fn smoke_compiles() {
@@ -1141,7 +1129,7 @@ mod tests {
             }
             if let Ok(unit) = &u {
                 let r = crate::interpret_hir_with_strict(&unit.hir, unit.language_version, unit.strict);
-                eprintln!("{label} interpret: {:?}", r);
+                eprintln!("{label} interpret: {r:?}");
             }
         }
     }
@@ -1162,7 +1150,7 @@ mod tests {
         .expect("compile");
         // Ensure lowering preserves declared return type so runtime coercion can match Java export.
         let leekscript_hir::HirStmt::FnDecl { return_ty, .. } = &u.hir.stmts[0] else {
-            panic!("expected FnDecl first stmt, got {:?}", u.hir.stmts.get(0));
+            panic!("expected FnDecl first stmt, got {:?}", u.hir.stmts.first());
         };
         assert_eq!(return_ty.as_deref(), Some("real"));
         let out = interpret_hir(&u.hir, u.language_version).expect("run");
@@ -2023,26 +2011,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// JVM / shipped fights: duplicate keys in `[k : v, …]` use the last value (not a hard error).
+    /// Language v4: duplicate keys in `[k : v, …]` are rejected (`MAP_DUPLICATED_KEY`), matching the Java VM suite.
     #[test]
-    fn map_literal_duplicate_key_v4_last_value_wins_export_matches_java_vm() {
+    fn map_literal_duplicate_key_v4_errors_like_java_vm() {
         let opts = CompileOptions {
             cli_language_version: Some(4),
             ..Default::default()
         };
         let cases = [
-            ("return [1 : 2, 1 : 3];\n", "[1 : 3]"),
-            ("return ['a' : 2, 'a' : 3];\n", "[\"a\" : 3]"),
-            ("return [true : 2, true : 3];\n", "[true : 3]"),
+            "return [1 : 2, 1 : 3];\n",
+            "return ['a' : 2, 'a' : 3];\n",
+            "return [true : 2, true : 3];\n",
         ];
-        for (src, want) in cases {
+        for src in cases {
             let u = compile_source("<dup>", src, &opts).expect("compile");
-            let v = interpret_hir(&u.hir, u.language_version)
-                .expect("run")
-                .expect("value");
+            let e = interpret_hir(&u.hir, u.language_version).expect_err("run should fail");
             assert_eq!(
-                value_java_export(&v, u.language_version),
-                want,
+                e.reference,
+                InterpretError::map_duplicated_key().reference,
                 "src={src:?}"
             );
         }
@@ -2224,7 +2210,7 @@ mod tests {
 
     #[test]
     fn class_new_method_and_field() {
-        let src = r#"class Box {
+        let src = r"class Box {
   function Box(v) {
     this.v = v;
   }
@@ -2234,7 +2220,7 @@ mod tests {
 }
 var b = new Box(7);
 return b.get();
-"#;
+";
         let u = compile_source("t.leek", src, &CompileOptions::default()).unwrap();
         assert_eq!(
             interpret_hir(&u.hir, u.language_version).unwrap(),
@@ -2244,7 +2230,7 @@ return b.get();
 
     #[test]
     fn class_constructor_keyword_works() {
-        let src = r#"class Box {
+        let src = r"class Box {
   constructor(v) {
     this.v = v;
   }
@@ -2254,7 +2240,7 @@ return b.get();
 }
 var b = new Box(7);
 return b.get();
-"#;
+";
         let u = compile_source("t.leek", src, &CompileOptions::default()).unwrap();
         assert_eq!(
             interpret_hir(&u.hir, u.language_version).unwrap(),
@@ -2264,7 +2250,7 @@ return b.get();
 
     #[test]
     fn constructor_precedence_over_legacy() {
-        let src = r#"class Box {
+        let src = r"class Box {
   function Box(v) {
     this.v = 1;
   }
@@ -2277,7 +2263,7 @@ return b.get();
 }
 var b = new Box(9);
 return b.get();
-"#;
+";
         let u = compile_source("t.leek", src, &CompileOptions::default()).unwrap();
         assert_eq!(
             interpret_hir(&u.hir, u.language_version).unwrap(),
@@ -2287,7 +2273,7 @@ return b.get();
 
     #[test]
     fn class_java_style_fields_and_typed_constructor() {
-        let src = r#"class Box {
+        let src = r"class Box {
   integer x
   constructor(integer n) {
     this.x = n;
@@ -2298,7 +2284,7 @@ return b.get();
 }
 var b = new Box(3);
 return b.get();
-"#;
+";
         let u = compile_source("t.leek", src, &CompileOptions::default()).unwrap();
         assert_eq!(
             interpret_hir(&u.hir, u.language_version).unwrap(),
@@ -2308,14 +2294,14 @@ return b.get();
 
     #[test]
     fn instance_this_class_name() {
-        let src = r#"class A {
+        let src = r"class A {
   function name() {
     return this.class.name;
   }
 }
 var a = new A();
 return a.name();
-"#;
+";
         let u = compile_source("t.leek", src, &CompileOptions::default()).unwrap();
         assert_eq!(
             interpret_hir(&u.hir, u.language_version).unwrap(),
@@ -2325,12 +2311,12 @@ return a.name();
 
     #[test]
     fn postfix_increment_decrement_runs() {
-        let src = r#"var i = 1;
+        let src = r"var i = 1;
 i++;
 i++;
 i--;
 return i;
-"#;
+";
         let u = compile_source("t.leek", src, &CompileOptions::default()).unwrap();
         assert_eq!(
             interpret_hir(&u.hir, u.language_version).unwrap(),

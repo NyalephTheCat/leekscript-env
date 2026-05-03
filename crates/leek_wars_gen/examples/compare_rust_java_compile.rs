@@ -54,6 +54,6 @@ fn main() {
         .expect("rust compile_ai_file");
     let rust_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
-    eprintln!("java --analyze: {:8.2} ms", java_ms);
-    eprintln!("rust compile:     {:8.2} ms", rust_ms);
+    eprintln!("java --analyze: {java_ms:8.2} ms");
+    eprintln!("rust compile:     {rust_ms:8.2} ms");
 }

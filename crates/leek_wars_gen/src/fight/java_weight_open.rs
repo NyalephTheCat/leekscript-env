@@ -44,7 +44,7 @@ impl JavaWeightTree {
     }
 
     fn color_of(&self, x: Option<usize>) -> Color {
-        x.map(|i| self.n[i].color).unwrap_or(Color::Black)
+        x.map_or(Color::Black, |i| self.n[i].color)
     }
 
     fn set_color(&mut self, x: Option<usize>, c: Color) {
@@ -114,10 +114,7 @@ impl JavaWeightTree {
     /// `java.util.TreeMap.fixAfterInsertion` — grandparent may be absent (`null`); never unwrap it.
     fn fix_after_insertion(&mut self, mut x: usize) {
         self.n[x].color = Color::Red;
-        loop {
-            let Some(root_idx) = self.root else {
-                break;
-            };
+        while let Some(root_idx) = self.root {
             if x == root_idx {
                 break;
             }
@@ -292,14 +289,10 @@ impl JavaWeightTree {
         if let Some(r) = replacement {
             let p_parent = self.n[p].parent;
             self.n[r].parent = p_parent;
-            if p_parent.is_none() {
-                self.root = Some(r);
-            } else if self.n[p_parent.unwrap()].l == Some(p) {
-                let pp = p_parent.unwrap();
-                self.n[pp].l = Some(r);
-            } else {
-                let pp = p_parent.unwrap();
-                self.n[pp].r = Some(r);
+            match p_parent {
+                None => self.root = Some(r),
+                Some(pp) if self.n[pp].l == Some(p) => self.n[pp].l = Some(r),
+                Some(pp) => self.n[pp].r = Some(r),
             }
             self.n[p].l = None;
             self.n[p].r = None;
@@ -372,6 +365,7 @@ impl JavaWeightTree {
 /// Replay a `TreeSetWeightProbe.java` script using this crate's [`JavaWeightTree`]. Each line is one
 /// `pollFirst` result (`"null"` if empty).
 #[doc(hidden)]
+#[must_use]
 pub fn replay_treeset_weight_probe_polls(script: &str) -> Vec<String> {
     use std::collections::HashMap;
 
@@ -452,7 +446,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    /// Matches `tools/treeset_probe` / OpenJDK `TreeSet` with `Comparator` `(a > b) ? 1 : -1`.
+    /// Matches `tools/treeset_probe` / `OpenJDK` `TreeSet` with `Comparator` `(a > b) ? 1 : -1`.
     #[test]
     fn equal_weights_poll_order_lifo() {
         let mut weights: HashMap<i32, f32> = HashMap::new();
@@ -475,7 +469,7 @@ mod tests {
         assert_eq!(out, vec![4, 3, 2, 1]);
     }
 
-    /// OpenJDK `TreeSet` with `(a.w > b.w) ? 1 : -1`, insert order 1,3,2,4 — see `/tmp/T.java`.
+    /// `OpenJDK` `TreeSet` with `(a.w > b.w) ? 1 : -1`, insert order 1,3,2,4 — see `/tmp/T.java`.
     #[test]
     fn equal_weights_insert_order_1324_matches_java() {
         let mut weights: HashMap<i32, f32> = HashMap::new();
@@ -521,7 +515,7 @@ mod tests {
     }
 }
 
-/// Random insert / `pollFirst` streams vs OpenJDK `TreeSet` (`tools/TreeSetWeightProbe.java`).
+/// Random insert / `pollFirst` streams vs `OpenJDK` `TreeSet` (`tools/TreeSetWeightProbe.java`).
 #[cfg(all(test, unix))]
 mod java_treeset_crosscheck {
     use super::{compile_treeset_weight_probe_java, replay_treeset_weight_probe_polls};
@@ -622,7 +616,7 @@ mod java_treeset_crosscheck {
         assert_eq!(r, vec!["4", "3", "2", "1"]);
     }
 
-    /// Fuzz `insert` + `pollFirst` against OpenJDK. On failure, panic message includes `seed` — save
+    /// Fuzz `insert` + `pollFirst` against `OpenJDK`. On failure, panic message includes `seed` — save
     /// the script from `random_script(seed, ops)` to reproduce.
     /// Live-weight `u` lines mirror Java `Cell.weight` updates while keys stay in the `TreeSet`.
     #[test]

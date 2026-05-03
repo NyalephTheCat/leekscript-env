@@ -34,7 +34,7 @@ fn extract_action_codes(outcome: &Value) -> Vec<i64> {
         let code = a
             .as_array()
             .and_then(|arr| arr.first())
-            .and_then(|v| v.as_i64());
+            .and_then(serde_json::Value::as_i64);
         if let Some(c) = code {
             out.push(c);
         }
@@ -57,9 +57,8 @@ fn is_subsequence(needle: &[i64], haystack: &[i64]) -> bool {
 
 #[test]
 fn scenario1_java_and_rust_match_filtered_action_codes() {
-    let jar = match resolve_generator_jar() {
-        Ok(j) => j,
-        Err(_) => return,
+    let Ok(jar) = resolve_generator_jar() else {
+        return;
     };
     let cwd = default_java_cwd(&jar);
     if !cwd.join("test/scenario/scenario1.json").is_file() {

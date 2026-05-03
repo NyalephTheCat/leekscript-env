@@ -22,12 +22,13 @@ impl Default for RetryPolicy {
         Self {
             max_attempts: 12,
             initial_backoff: Duration::from_secs(1),
-            max_backoff: Duration::from_secs(120),
+            max_backoff: Duration::from_mins(2),
         }
     }
 }
 
 impl RetryPolicy {
+    #[must_use]
     pub fn from_ms(max_attempts: u32, initial_ms: u64, max_ms: u64) -> Self {
         Self {
             max_attempts: max_attempts.max(1),
@@ -46,9 +47,8 @@ fn parse_retry_after_header(value: Option<&str>) -> Option<Duration> {
 fn jitter() -> Duration {
     let us = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_micros())
-        .unwrap_or(0);
-    Duration::from_millis((us % 350) as u64)
+        .map_or(0, |d| d.subsec_micros());
+    Duration::from_millis(u64::from(us % 350))
 }
 
 fn backoff_after_failure(policy: &RetryPolicy, failures_so_far: u32) -> Duration {
@@ -94,6 +94,7 @@ pub struct RankingPageParams<'a> {
     pub country: Option<&'a str>,
 }
 
+#[must_use]
 pub fn ranking_url(
     base: &str,
     active_only: bool,
@@ -126,7 +127,7 @@ pub fn get_json<T: DeserializeOwned>(
     for attempt in 1..=retry.max_attempts {
         let mut req = agent.get(url);
         if let Some(t) = token {
-            req = req.set("Authorization", &format!("Bearer {}", t));
+            req = req.set("Authorization", &format!("Bearer {t}"));
         }
         // ureq returns status >= 400 as `Err(Status(..))` by default; treat those as normal
         // `Response` values so 429/503 hit our retry path.
@@ -143,9 +144,10 @@ pub fn get_json<T: DeserializeOwned>(
         if should_retry_status(status) && attempt < retry.max_attempts {
             let body = resp.into_string().unwrap_or_default();
             let server_wait = parse_retry_after_header(retry_after.as_deref());
-            let wait = server_wait
-                .map(|d| d.min(retry.max_backoff) + jitter())
-                .unwrap_or_else(|| backoff_after_failure(retry, failures));
+            let wait = server_wait.map_or_else(
+                || backoff_after_failure(retry, failures),
+                |d| d.min(retry.max_backoff) + jitter(),
+            );
             failures += 1;
             eprintln!(
                 "lw-meta: HTTP {} (attempt {}/{}), backing off {:?} …",
@@ -194,11 +196,13 @@ pub fn fetch_service_catalog(
 }
 
 /// Public leek sheet (`leek/get/{id}`) — stats, chips, weapons, components, AI metadata (no source).
+#[must_use]
 pub fn leek_get_url(base: &str, leek_id: u64) -> String {
     format!("{}/leek/get/{}", trim_slash(base), leek_id)
 }
 
 /// Composition summary + roster stats (`team/composition-rich-tooltip/{id}`). For full loadouts, also call [`fetch_leek_public`] per leek id.
+#[must_use]
 pub fn composition_rich_tooltip_url(base: &str, composition_id: u64) -> String {
     format!(
         "{}/team/composition-rich-tooltip/{}",
@@ -208,6 +212,7 @@ pub fn composition_rich_tooltip_url(base: &str, composition_id: u64) -> String {
 }
 
 /// Public farmer profile (`farmer/get/{id}`) — team, compositions, leeks metadata.
+#[must_use]
 pub fn farmer_get_url(base: &str, farmer_id: u64) -> String {
     format!("{}/farmer/get/{}", trim_slash(base), farmer_id)
 }
@@ -220,12 +225,7 @@ pub fn fetch_farmer(
     token: Option<&str>,
     retry: &RetryPolicy,
 ) -> Result<serde_json::Value, ApiError> {
-    get_json(
-        agent,
-        &farmer_get_url(base, farmer_id),
-        token,
-        retry,
-    )
+    get_json(agent, &farmer_get_url(base, farmer_id), token, retry)
 }
 
 pub fn fetch_farmer_public(
@@ -260,7 +260,11 @@ pub fn fetch_composition_rich_tooltip(
     )
 }
 
-pub fn filter_catalog(services: &[ServiceDescriptor], modules: &[String]) -> Vec<ServiceDescriptor> {
+#[must_use]
+pub fn filter_catalog(
+    services: &[ServiceDescriptor],
+    modules: &[String],
+) -> Vec<ServiceDescriptor> {
     if modules.is_empty() {
         return services.to_vec();
     }
@@ -281,7 +285,10 @@ mod tests {
             parse_retry_after_header(Some("42")),
             Some(Duration::from_secs(42))
         );
-        assert_eq!(parse_retry_after_header(Some("  9  ")), Some(Duration::from_secs(9)));
+        assert_eq!(
+            parse_retry_after_header(Some("  9  ")),
+            Some(Duration::from_secs(9))
+        );
         assert_eq!(parse_retry_after_header(Some("nope")), None);
     }
 
@@ -293,7 +300,7 @@ mod tests {
             max_backoff: Duration::from_secs(15),
         };
         let w = backoff_after_failure(&p, 10);
-        assert!(w >= Duration::from_millis(15_000));
+        assert!(w >= Duration::from_secs(15));
         assert!(w <= Duration::from_millis(15_000 + 400));
     }
 
@@ -308,7 +315,14 @@ mod tests {
     #[test]
     fn ranking_url_country_inactive() {
         assert_eq!(
-            ranking_url("https://leekwars.com/api/", false, "team", "level", 1, Some("fr")),
+            ranking_url(
+                "https://leekwars.com/api/",
+                false,
+                "team",
+                "level",
+                1,
+                Some("fr")
+            ),
             "https://leekwars.com/api/ranking/get/team/level/1/fr"
         );
     }

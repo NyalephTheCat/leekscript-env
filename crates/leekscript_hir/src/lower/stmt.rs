@@ -38,7 +38,10 @@ fn decl_ty_src_before_name(
     if name_part_idx == 0 {
         return None;
     }
-    let range = TextRange::new(parts[0].text_range().start(), parts[name_part_idx - 1].text_range().end());
+    let range = TextRange::new(
+        parts[0].text_range().start(),
+        parts[name_part_idx - 1].text_range().end(),
+    );
     let start: usize = range.start().into();
     let end: usize = range.end().into();
     let raw = ctx.src.get(start..end)?.trim();
@@ -145,7 +148,8 @@ pub(super) fn lower_var_decl(
         ));
     }
     match &parts[0] {
-        NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "var" => {}
+        NodeOrToken::Token(t)
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "var" => {}
         _ => {
             return Err(diag(
                 "UNCOMPLETE_EXPRESSION",
@@ -176,8 +180,7 @@ pub(super) fn lower_var_decl(
             && matches!(
                 &parts[i],
                 NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Operator && token_text(t, ctx.src) == "="
-            )
-        {
+            ) {
             i += 1;
             let init_node = match parts.get(i) {
                 Some(NodeOrToken::Node(x)) if x.kind() == LeekSyntaxKind::Expr => x,
@@ -316,7 +319,7 @@ pub(super) fn lower_expr_stmt(
     ctx: &LowerCtx,
 ) -> Result<HirStmt, HirLoweringDiagnostic> {
     let parts: Vec<_> = non_trivia(n).collect();
-    if parts.len() < 1 || parts.len() > 2 {
+    if parts.is_empty() || parts.len() > 2 {
         return Err(diag(
             "INTERNAL_ERROR",
             span_of_node(n),
@@ -334,17 +337,17 @@ pub(super) fn lower_expr_stmt(
         }
     };
     let e = lower_expr_wrapped(expr_node, ctx)?;
-    if parts.len() == 2 {
-        if !matches!(
+    if parts.len() == 2
+        && !matches!(
             &parts[1],
             NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Semicolon
-        ) {
-            return Err(diag(
-                "END_OF_INSTRUCTION_EXPECTED",
-                span_of_node(n),
-                "expected `;`",
-            ));
-        }
+        )
+    {
+        return Err(diag(
+            "END_OF_INSTRUCTION_EXPECTED",
+            span_of_node(n),
+            "expected `;`",
+        ));
     }
     Ok(HirStmt::Expr(e))
 }
@@ -355,11 +358,7 @@ pub(super) fn lower_return_stmt(
 ) -> Result<HirStmt, HirLoweringDiagnostic> {
     let parts: Vec<_> = non_trivia(n).collect();
     if parts.is_empty() {
-        return Err(diag(
-            "INTERNAL_ERROR",
-            span_of_node(n),
-            "empty ReturnStmt",
-        ));
+        return Err(diag("INTERNAL_ERROR", span_of_node(n), "empty ReturnStmt"));
     }
     match &parts[0] {
         NodeOrToken::Token(t)
@@ -476,7 +475,8 @@ pub(super) fn lower_if_stmt(
         ));
     }
     match &parts[0] {
-        NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "if" => {}
+        NodeOrToken::Token(t)
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "if" => {}
         _ => {
             return Err(diag(
                 "UNCOMPLETE_EXPRESSION",
@@ -632,7 +632,8 @@ pub(super) fn lower_do_while_stmt(
         ));
     }
     match &parts[0] {
-        NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "do" => {}
+        NodeOrToken::Token(t)
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "do" => {}
         _ => {
             return Err(diag(
                 "UNCOMPLETE_EXPRESSION",
@@ -694,17 +695,17 @@ pub(super) fn lower_do_while_stmt(
             "expected `)`",
         ));
     }
-    if parts.len() == 7 {
-        if !matches!(
+    if parts.len() == 7
+        && !matches!(
             &parts[6],
             NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Semicolon
-        ) {
-            return Err(diag(
-                "UNEXPECTED_TOKEN",
-                span_of_node(n),
-                "expected `;` after `do` … `while`",
-            ));
-        }
+        )
+    {
+        return Err(diag(
+            "UNEXPECTED_TOKEN",
+            span_of_node(n),
+            "expected `;` after `do` … `while`",
+        ));
     }
     Ok(HirStmt::DoWhile { body, cond })
 }
@@ -860,8 +861,8 @@ pub(super) fn lower_case_label_value(
         ));
     }
     match &parts[0] {
-        NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "case" => {
-        }
+        NodeOrToken::Token(t)
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "case" => {}
         _ => {
             return Err(diag(
                 "UNCOMPLETE_EXPRESSION",
@@ -946,7 +947,8 @@ pub(super) fn lower_for_stmt(
         .next()
         .ok_or_else(|| diag("INTERNAL_ERROR", span_of_node(n), "empty ForStmt"))?;
     match &el {
-        NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "for" => {}
+        NodeOrToken::Token(t)
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "for" => {}
         _ => {
             return Err(diag(
                 "UNCOMPLETE_EXPRESSION",
@@ -1105,7 +1107,8 @@ pub(super) fn lower_for_in_stmt(
         .next()
         .ok_or_else(|| diag("INTERNAL_ERROR", span_of_node(n), "empty ForInStmt"))?;
     match &el {
-        NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "for" => {}
+        NodeOrToken::Token(t)
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "for" => {}
         _ => {
             return Err(diag(
                 "UNCOMPLETE_EXPRESSION",
@@ -1203,7 +1206,8 @@ pub(super) fn lower_for_in_key_value_stmt(
         .next()
         .ok_or_else(|| diag("INTERNAL_ERROR", span_of_node(n), "empty ForInKeyValueStmt"))?;
     match &el {
-        NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "for" => {}
+        NodeOrToken::Token(t)
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "for" => {}
         _ => {
             return Err(diag(
                 "UNCOMPLETE_EXPRESSION",
@@ -1254,8 +1258,7 @@ pub(super) fn lower_for_in_key_value_stmt(
             ));
         }
     };
-    let (value, value_is_declaration, value_by_ref) =
-        lower_for_in_binding_detail(&val_node, ctx)?;
+    let (value, value_is_declaration, value_by_ref) = lower_for_in_binding_detail(&val_node, ctx)?;
     match it.next() {
         Some(NodeOrToken::Token(ref t))
             if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "in" => {}
@@ -1435,8 +1438,7 @@ pub(super) fn lower_for_init_var_as_stmt(
             &parts[0],
             NodeOrToken::Token(t)
                 if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "var"
-        )
-    {
+        ) {
         None
     } else {
         decl_ty_src_before_name(&parts, eq_idx - 1, ctx)
@@ -1607,17 +1609,17 @@ pub(super) fn lower_assign_stmt(
         }
     };
     let value = lower_expr_wrapped(val_node, ctx)?;
-    if parts.len() == 4 {
-        if !matches!(
+    if parts.len() == 4
+        && !matches!(
             &parts[3],
             NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Semicolon
-        ) {
-            return Err(diag(
-                "END_OF_INSTRUCTION_EXPECTED",
-                span_of_node(n),
-                "expected `;`",
-            ));
-        }
+        )
+    {
+        return Err(diag(
+            "END_OF_INSTRUCTION_EXPECTED",
+            span_of_node(n),
+            "expected `;`",
+        ));
     }
     Ok(HirStmt::Assign {
         place: Box::new(place),
@@ -1631,7 +1633,7 @@ pub(super) fn lower_break_stmt(
     ctx: &LowerCtx,
 ) -> Result<HirStmt, HirLoweringDiagnostic> {
     let parts: Vec<_> = non_trivia(n).collect();
-    if parts.len() < 1 || parts.len() > 2 {
+    if parts.is_empty() || parts.len() > 2 {
         return Err(diag(
             "INTERNAL_ERROR",
             span_of_node(n),
@@ -1649,17 +1651,17 @@ pub(super) fn lower_break_stmt(
             ));
         }
     }
-    if parts.len() == 2 {
-        if !matches!(
+    if parts.len() == 2
+        && !matches!(
             &parts[1],
             NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Semicolon
-        ) {
-            return Err(diag(
-                "END_OF_INSTRUCTION_EXPECTED",
-                span_of_node(n),
-                "expected `;`",
-            ));
-        }
+        )
+    {
+        return Err(diag(
+            "END_OF_INSTRUCTION_EXPECTED",
+            span_of_node(n),
+            "expected `;`",
+        ));
     }
     Ok(HirStmt::Break)
 }
@@ -1669,7 +1671,7 @@ pub(super) fn lower_continue_stmt(
     ctx: &LowerCtx,
 ) -> Result<HirStmt, HirLoweringDiagnostic> {
     let parts: Vec<_> = non_trivia(n).collect();
-    if parts.len() < 1 || parts.len() > 2 {
+    if parts.is_empty() || parts.len() > 2 {
         return Err(diag(
             "INTERNAL_ERROR",
             span_of_node(n),
@@ -1687,17 +1689,17 @@ pub(super) fn lower_continue_stmt(
             ));
         }
     }
-    if parts.len() == 2 {
-        if !matches!(
+    if parts.len() == 2
+        && !matches!(
             &parts[1],
             NodeOrToken::Token(t) if t.kind() == LeekSyntaxKind::Semicolon
-        ) {
-            return Err(diag(
-                "END_OF_INSTRUCTION_EXPECTED",
-                span_of_node(n),
-                "expected `;`",
-            ));
-        }
+        )
+    {
+        return Err(diag(
+            "END_OF_INSTRUCTION_EXPECTED",
+            span_of_node(n),
+            "expected `;`",
+        ));
     }
     Ok(HirStmt::Continue)
 }
@@ -1709,25 +1711,19 @@ pub(super) fn lower_try_stmt(
     let parts: Vec<_> = non_trivia(n).collect();
     let mut i = 0usize;
     match parts.get(i) {
-        Some(NodeOrToken::Token(t)) if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "try" => {
+        Some(NodeOrToken::Token(t))
+            if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "try" =>
+        {
             i += 1;
         }
         _ => {
-            return Err(diag(
-                "UNCOMPLETE_EXPRESSION",
-                span,
-                "expected `try`",
-            ));
+            return Err(diag("UNCOMPLETE_EXPRESSION", span, "expected `try`"));
         }
     }
     let try_block = match parts.get(i) {
         Some(NodeOrToken::Node(x)) if x.kind() == LeekSyntaxKind::Block => x,
         _ => {
-            return Err(diag(
-                "UNCOMPLETE_EXPRESSION",
-                span,
-                "expected `try` body",
-            ));
+            return Err(diag("UNCOMPLETE_EXPRESSION", span, "expected `try` body"));
         }
     };
     i += 1;
@@ -1773,11 +1769,7 @@ pub(super) fn lower_try_stmt(
             let catch_block = match parts.get(i) {
                 Some(NodeOrToken::Node(x)) if x.kind() == LeekSyntaxKind::Block => x,
                 _ => {
-                    return Err(diag(
-                        "UNCOMPLETE_EXPRESSION",
-                        span,
-                        "expected `catch` body",
-                    ));
+                    return Err(diag("UNCOMPLETE_EXPRESSION", span, "expected `catch` body"));
                 }
             };
             i += 1;
@@ -2048,7 +2040,10 @@ pub(super) fn lower_include_stmt(
         return Err(diag(
             "INTERNAL_ERROR",
             span_of_node(n),
-            format!("malformed IncludeStmt: {} trailing elements", parts.len() - i),
+            format!(
+                "malformed IncludeStmt: {} trailing elements",
+                parts.len() - i
+            ),
         ));
     }
     Ok(HirStmt::Include {
@@ -2135,11 +2130,7 @@ pub(super) fn lower_class_decl(
     if let Some(NodeOrToken::Token(t)) = parts.get(brace_idx) {
         if t.kind() == LeekSyntaxKind::Kw && token_text(t, ctx.src) == "extends" {
             let super_tok = match parts.get(brace_idx + 1) {
-                Some(NodeOrToken::Token(t))
-                    if t.kind() == LeekSyntaxKind::Ident =>
-                {
-                    t
-                }
+                Some(NodeOrToken::Token(t)) if t.kind() == LeekSyntaxKind::Ident => t,
                 _ => {
                     return Err(diag(
                         "UNCOMPLETE_EXPRESSION",
@@ -2664,12 +2655,12 @@ pub(super) fn lower_fn_param(
     for ch in &parts {
         match ch {
             NodeOrToken::Token(t)
-                if t.kind() == LeekSyntaxKind::Operator && token_text(&t, ctx.src) == "@" =>
+                if t.kind() == LeekSyntaxKind::Operator && token_text(t, ctx.src) == "@" =>
             {
                 by_ref = true;
             }
             NodeOrToken::Token(t)
-                if t.kind() == LeekSyntaxKind::Operator && token_text(&t, ctx.src) == "=" =>
+                if t.kind() == LeekSyntaxKind::Operator && token_text(t, ctx.src) == "=" =>
             {
                 after_eq = true;
             }

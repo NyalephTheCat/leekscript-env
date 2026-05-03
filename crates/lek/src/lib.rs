@@ -1,4 +1,4 @@
-//! LeekScript CLI library (`lek`). The binary in `main.rs` wraps this for `registry`, `config`, and `check`.
+//! `LeekScript` CLI library (`lek`). The binary in `main.rs` wraps this for `registry`, `config`, and `check`.
 
 pub mod check;
 pub mod fmt;

@@ -39,6 +39,7 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
+    #[must_use]
     pub fn parse_str(s: &str) -> Option<Self> {
         match s.trim() {
             "pretty" => Some(Self::Pretty),
@@ -76,7 +77,9 @@ fn read_manifest_toml(path: &Path) -> Result<toml::Value, GenError> {
 }
 
 fn table_get_string(tbl: &toml::value::Table, key: &str) -> Option<String> {
-    tbl.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    tbl.get(key)
+        .and_then(|v| v.as_str())
+        .map(std::string::ToString::to_string)
 }
 
 fn table_get_path(tbl: &toml::value::Table, key: &str, base: &Path) -> Option<PathBuf> {
@@ -107,9 +110,8 @@ pub fn resolve_with_explain(
 
     if let Some(ref mp) = manifest_path {
         let base = mp.parent().unwrap_or_else(|| Path::new("."));
-        let v = read_manifest_toml(mp.as_path()).map_err(|e| {
-            GenError::Message(format!("failed to parse {}: {e}", mp.display()))
-        })?;
+        let v = read_manifest_toml(mp.as_path())
+            .map_err(|e| GenError::Message(format!("failed to parse {}: {e}", mp.display())))?;
         if let Some(gen) = v.get("generator").and_then(|t| t.as_table()) {
             root_from_manifest = table_get_path(gen, "generator_root", base);
             scenarios_dir = table_get_path(gen, "scenarios_dir", base);
@@ -146,11 +148,11 @@ pub fn resolve_with_explain(
 
     Ok((
         GeneratorConfig {
-        manifest_path,
-        root,
-        scenarios_dir,
-        ai_dir,
-        output,
+            manifest_path,
+            root,
+            scenarios_dir,
+            ai_dir,
+            output,
         },
         GeneratorConfigExplain {
             root: root_src,
@@ -174,8 +176,7 @@ mod tests {
             name,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_nanos())
         ));
         std::fs::create_dir_all(&dir).expect("mkdir");
         dir
@@ -209,4 +210,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(cfg.root);
     }
 }
-

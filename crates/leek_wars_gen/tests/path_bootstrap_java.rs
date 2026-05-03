@@ -63,7 +63,7 @@ fn path_exists_patrick_to_nearest_enemy_after_java_bootstrap() {
             continue;
         }
         let d2 = leek_wars_gen::fight::map::distance2(world.map_w, from, e.cell);
-        if best.map(|(bd, _)| d2 < bd).unwrap_or(true) {
+        if best.is_none_or(|(bd, _)| d2 < bd) {
             best = Some((d2, e.fid));
         }
     }
@@ -72,7 +72,7 @@ fn path_exists_patrick_to_nearest_enemy_after_java_bootstrap() {
 
     let path = get_path_between(&world, from, end, None);
     assert!(
-        path.as_ref().map(|p| !p.is_empty()).unwrap_or(false),
+        path.as_ref().is_some_and(|p| !p.is_empty()),
         "expected non-empty path from cell {from} to enemy fid {enemy_fid} cell {end}, got {path:?}"
     );
 }
@@ -107,7 +107,7 @@ fn java_treeset_probe_poll_lines(script: &str, cp: &Path) -> Result<Vec<String>,
         .collect())
 }
 
-/// For the Yolo snapshot, OpenJDK must replay our recorded `u`/`i`/`p` script the same as [`JavaWeightTree`].
+/// For the Yolo snapshot, `OpenJDK` must replay our recorded `u`/`i`/`p` script the same as [`JavaWeightTree`].
 #[test]
 fn scenario1_yolo_astar_probe_script_matches_openjdk_treeset() {
     let Ok(cp) = compile_treeset_weight_probe_java() else {

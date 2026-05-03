@@ -110,22 +110,21 @@ pub(super) fn eval_native(
         }
         return Err(InterpretError::function_not_available());
     }
-    match try_eval_builtin(cx, name, args, arg_idents)? {
-        Some(v) => Ok(v),
-        None => {
-            let trace = cx.java_style_system_log_trace();
-            if let Some(host) = cx.host.as_mut() {
-                if let Some(v) = host.call_native(name, args, trace.as_deref())? {
-                    let extra = host
-                        .java_native_wrapper_ops(name)
-                        .saturating_add(host.take_native_dispatch_extra_ops());
-                    if extra > 0 {
-                        cx.charge_ops(extra)?;
-                    }
-                    return Ok(v);
+    if let Some(v) = try_eval_builtin(cx, name, args, arg_idents)? {
+        Ok(v)
+    } else {
+        let trace = cx.java_style_system_log_trace();
+        if let Some(host) = cx.host.as_mut() {
+            if let Some(v) = host.call_native(name, args, trace.as_deref())? {
+                let extra = host
+                    .java_native_wrapper_ops(name)
+                    .saturating_add(host.take_native_dispatch_extra_ops());
+                if extra > 0 {
+                    cx.charge_ops(extra)?;
                 }
+                return Ok(v);
             }
-            Err(InterpretError::not_callable())
         }
+        Err(InterpretError::not_callable())
     }
 }

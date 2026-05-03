@@ -6,9 +6,9 @@ use super::metrics::RunMetrics;
 use super::planner::RunTask;
 use super::spec::ExperimentSpec;
 use crate::engine::{resolve_generator_jar, JavaEngineConfig, RunRequest};
+use crate::error::GenError;
 use crate::fight::{run_scenario_path_with_options, FightRunOptions, TraceConfig};
 use crate::harness::{run_scenario_harness, CompareMode, HarnessRunConfig};
-use crate::error::GenError;
 use rand::Rng;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -67,8 +67,7 @@ pub fn execute_run_task(
         task.run_id,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
+            .map_or(0, |d| d.as_nanos())
     ));
     std::fs::create_dir_all(&tmp_root).map_err(GenError::from)?;
     let scenario_file = tmp_root.join("scenario.json");
@@ -204,12 +203,8 @@ fn run_one_task(task: RunTask, env: &WorkerEnv) -> Result<RunRecord, GenError> {
             trace: env.trace_cfg.clone().filter(|t| t.enabled),
             ai_scripts_root: None,
         };
-        let out = run_scenario_path_with_options(
-            &scenario_path,
-            &env.generator_root,
-            overlay_opt,
-            opts,
-        )?;
+        let out =
+            run_scenario_path_with_options(&scenario_path, &env.generator_root, overlay_opt, opts)?;
         if let Some(events) = &out.trace_events {
             let trace_path = run_dir.join("trace.jsonl");
             let mut w = String::new();
@@ -294,7 +289,7 @@ pub fn run_experiment(
     let jobs = jobs.max(1);
     let (tx, rx) = channel::<Result<RunRecord, GenError>>();
     std::thread::scope(|s| {
-        let chunk_size = (n + jobs - 1) / jobs;
+        let chunk_size = n.div_ceil(jobs);
         for chunk in tasks.chunks(chunk_size.max(1)) {
             let tx = tx.clone();
             let env = Arc::clone(&env);
@@ -318,21 +313,14 @@ pub fn run_experiment(
 
     let mut agg = ExperimentAggregate::default();
     for r in &records {
-        agg.record(
-            &r.arm,
-            r.ok,
-            r.winner,
-            r.duration,
-        );
+        agg.record(&r.arm, r.ok, r.winner, r.duration);
     }
     agg.print_table();
 
     let ndjson_path = spec.output_dir.join("runs.ndjson");
     let mut nd = String::new();
     for r in &records {
-        nd.push_str(
-            &serde_json::to_string(r).map_err(|e| GenError::Message(e.to_string()))?,
-        );
+        nd.push_str(&serde_json::to_string(r).map_err(|e| GenError::Message(e.to_string()))?);
         nd.push('\n');
     }
     std::fs::write(&ndjson_path, nd).map_err(GenError::from)?;

@@ -29,13 +29,12 @@ pub fn normalize_outcome_json(s: &str) -> Result<Value, serde_json::Error> {
 
 fn normalize_logs_in_place(v: &mut Value) {
     match v {
-        Value::String(s) => {
+        Value::String(s)
             // The official generator’s logs sometimes degrade this marker depending on encoding/font.
             // Normalize to the generator-side placeholder so parity checks focus on semantics.
-            if s.contains('▶') {
+            if s.contains('▶') => {
                 *s = s.replace('▶', "?");
             }
-        }
         Value::Array(a) => {
             for el in a {
                 normalize_logs_in_place(el);
@@ -63,9 +62,9 @@ fn fmt_json_path(path: &[String]) -> String {
     } else {
         path.iter().fold(String::new(), |acc, seg| {
             if acc.is_empty() {
-                format!("/{}", seg)
+                format!("/{seg}")
             } else {
-                format!("{}/{}", acc, seg)
+                format!("{acc}/{seg}")
             }
         })
     }
@@ -119,11 +118,7 @@ fn diff_values(
                     }
                     (None, Some(vb)) => {
                         let p = fmt_json_path(path);
-                        push_diff_line(
-                            lines,
-                            budget,
-                            format!("- [{}] {}: <absent>", left_label, p),
-                        );
+                        push_diff_line(lines, budget, format!("- [{left_label}] {p}: <absent>"));
                         push_diff_line(
                             lines,
                             budget,
@@ -137,11 +132,7 @@ fn diff_values(
                             budget,
                             format!("- [{}] {}: {}", left_label, p, short_value_preview(va)),
                         );
-                        push_diff_line(
-                            lines,
-                            budget,
-                            format!("+ [{}] {}: <absent>", right_label, p),
-                        );
+                        push_diff_line(lines, budget, format!("+ [{right_label}] {p}: <absent>"));
                     }
                     (None, None) => {}
                 }
@@ -165,28 +156,28 @@ fn diff_values(
                 );
             }
             let n = aa.len().min(ab.len());
-            for i in 0..n {
+            for (i, (va, vb)) in aa.iter().zip(ab.iter()).take(n).enumerate() {
                 path.push(i.to_string());
-                diff_values(&aa[i], &ab[i], path, lines, budget, left_label, right_label);
+                diff_values(va, vb, path, lines, budget, left_label, right_label);
                 path.pop();
             }
-            for i in n..aa.len() {
+            for (i, v) in aa.iter().enumerate().skip(n) {
                 path.push(i.to_string());
                 let p = fmt_json_path(path);
                 push_diff_line(
                     lines,
                     budget,
-                    format!("- [{}] {}: {}", left_label, p, short_value_preview(&aa[i])),
+                    format!("- [{}] {}: {}", left_label, p, short_value_preview(v)),
                 );
                 path.pop();
             }
-            for i in n..ab.len() {
+            for (i, v) in ab.iter().enumerate().skip(n) {
                 path.push(i.to_string());
                 let p = fmt_json_path(path);
                 push_diff_line(
                     lines,
                     budget,
-                    format!("+ [{}] {}: {}", right_label, p, short_value_preview(&ab[i])),
+                    format!("+ [{}] {}: {}", right_label, p, short_value_preview(v)),
                 );
                 path.pop();
             }
@@ -237,8 +228,7 @@ pub fn diff_normalized_outcomes_labeled(
     );
     if budget == 0 && !lines.is_empty() {
         lines.push(format!(
-            "… diff truncated (increase leek_wars_gen::parity::MAX_NORMALIZED_DIFF_LINES; limit is {})",
-            MAX_NORMALIZED_DIFF_LINES
+            "… diff truncated (increase leek_wars_gen::parity::MAX_NORMALIZED_DIFF_LINES; limit is {MAX_NORMALIZED_DIFF_LINES})"
         ));
     }
     Ok(lines.join("\n"))
@@ -247,7 +237,10 @@ pub fn diff_normalized_outcomes_labeled(
 /// Structural diff with **Rust as the reference** (baseline on `-` lines).
 ///
 /// Arguments are `(official_generator_json, rust_json)` for call-site consistency with [`crate::harness::compare_outcomes`].
-pub fn diff_normalized_outcomes(official_generator_json: &str, rust_json: &str) -> Result<String, serde_json::Error> {
+pub fn diff_normalized_outcomes(
+    official_generator_json: &str,
+    rust_json: &str,
+) -> Result<String, serde_json::Error> {
     diff_normalized_outcomes_labeled(rust_json, official_generator_json, "rust", "generator")
 }
 

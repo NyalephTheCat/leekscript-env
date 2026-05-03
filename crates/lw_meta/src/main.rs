@@ -7,7 +7,8 @@ use clap::{Parser, Subcommand};
 use lw_meta::{
     fetch_composition_sim_bundle, fetch_leek_public, fetch_ranking_rows, fetch_service_catalog,
     filter_catalog, leek_sim_export_body, meta_agent, CompositionRankingRow, LeekRankingRow,
-    MetaExport, RankingRowsJob, RetryPolicy, ServiceCatalogExport, TeamRankingRow, DEFAULT_API_BASE,
+    MetaExport, RankingRowsJob, RetryPolicy, ServiceCatalogExport, TeamRankingRow,
+    DEFAULT_API_BASE,
 };
 
 #[derive(Parser, Debug)]
@@ -169,10 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             writeln!(io::stdout())?;
         }
         Command::Entity { kind } => match kind {
-            EntityKind::Leek {
-                id,
-                profile_only,
-            } => {
+            EntityKind::Leek { id, profile_only } => {
                 let raw = fetch_leek_public(&agent, &cli.api_base, id, &retry)?;
                 let body = leek_sim_export_body(&raw, profile_only);
                 serde_json::to_writer_pretty(io::stdout(), &body)?;
@@ -204,9 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 country,
                 include_inactive,
             } => {
-                let category = leek_level
-                    .map(|l| format!("level-{}", l))
-                    .unwrap_or_else(|| "leek".into());
+                let category = leek_level.map_or_else(|| "leek".into(), |l| format!("level-{l}"));
                 let job = RankingRowsJob {
                     api_base: &cli.api_base,
                     active_only: !include_inactive,
@@ -321,9 +317,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 let c = country.as_deref();
                 let active_only = !include_inactive;
-                let leek_cat = leek_level
-                    .map(|l| format!("level-{}", l))
-                    .unwrap_or_else(|| "leek".into());
+                let leek_cat = leek_level.map_or_else(|| "leek".into(), |l| format!("level-{l}"));
                 let job_leeks = RankingRowsJob {
                     api_base: &cli.api_base,
                     active_only,

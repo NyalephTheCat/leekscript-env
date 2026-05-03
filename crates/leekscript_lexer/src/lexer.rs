@@ -23,10 +23,12 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    #[must_use]
     pub fn new(src: &'a str, cfg: LexerConfig) -> Self {
         Self { src, pos: 0, cfg }
     }
 
+    #[must_use]
     pub fn tokenize(mut self) -> (Vec<Token>, Vec<LexError>) {
         let mut tokens = Vec::new();
         let mut errors = Vec::new();
@@ -219,9 +221,7 @@ impl<'a> Lexer<'a> {
                     if matches!(self.peek_char(), Some('+' | '-')) {
                         self.advance_char();
                     }
-                    while self.pos < self.src.len()
-                        && self.peek_char().unwrap().is_ascii_digit()
-                    {
+                    while self.pos < self.src.len() && self.peek_char().unwrap().is_ascii_digit() {
                         self.advance_char();
                     }
                 }
@@ -235,7 +235,10 @@ impl<'a> Lexer<'a> {
                         reference: "INVALID_NUMBER",
                         span: Span::new(start..self.pos),
                     });
-                    while self.peek_char().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    while self
+                        .peek_char()
+                        .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                    {
                         self.advance_char();
                     }
                 }
@@ -268,14 +271,18 @@ impl<'a> Lexer<'a> {
                         reference: "INVALID_CHAR",
                         span: Span::new(body..body),
                     });
-                } else if self.peek_char().is_some_and(|c| {
-                    c.is_ascii_digit() && c != '0' && c != '1'
-                }) {
+                } else if self
+                    .peek_char()
+                    .is_some_and(|c| c.is_ascii_digit() && c != '0' && c != '1')
+                {
                     errors.push(LexError {
                         reference: "INVALID_NUMBER",
                         span: Span::new(start..self.pos),
                     });
-                    while self.peek_char().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    while self
+                        .peek_char()
+                        .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+                    {
                         self.advance_char();
                     }
                 }
@@ -509,10 +516,7 @@ impl<'a> Lexer<'a> {
             | TokenKind::Lemniscate
             | TokenKind::Pi => true,
             TokenKind::ParClose | TokenKind::BracketClose => true,
-            TokenKind::Kw(k) => matches!(
-                k,
-                Kw::True | Kw::False | Kw::Null | Kw::This | Kw::Super
-            ),
+            TokenKind::Kw(k) => matches!(k, Kw::True | Kw::False | Kw::Null | Kw::This | Kw::Super),
             TokenKind::Operator => {
                 let tx = &src[t.span.start as usize..t.span.end as usize];
                 matches!(tx, "++" | "--")
@@ -615,9 +619,9 @@ impl<'a> Lexer<'a> {
 /// Java `LexicalParser.tryParseOperator` order (longest match via iteration order).
 const OPERATORS: &[&str] = &[
     ":", "&&", "&=", "&", "||", "|=", "|", "++", "+=", "+", "--", "-=", "-", "**=", "**", "*=",
-    "*", "/=", "/", "\\=", "\\", "%=", "%",     "===", "==", "=", "!==", "!=", "!", "<<<=", "<<<",
-    "<<=", "<<", "<=", "<", ">>>=", ">>>", ">>=", ">>", ">=", ">", "^=", "^", "~", "@",
-    "??=", "??", "?",
+    "*", "/=", "/", "\\=", "\\", "%=", "%", "===", "==", "=", "!==", "!=", "!", "<<<=", "<<<",
+    "<<=", "<<", "<=", "<", ">>>=", ">>>", ">>=", ">>", ">=", ">", "^=", "^", "~", "@", "??=",
+    "??", "?",
 ];
 
 fn is_leek_id_start(c: char) -> bool {

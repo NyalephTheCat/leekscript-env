@@ -10,9 +10,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use console::Style;
 use leek_wars_gen::engine::RunRequest;
 use leek_wars_gen::experiment::bench::{
-    apply_all_ai_override, apply_team0_ai_override, apply_team1_ai_override, build_pvp_scenario_value,
-    farmer_inner, fetch_side_row, list_farmer_leeks, list_team_compositions, print_pvp_summary,
-    run_pvp_batch, BenchSide, PvpBenchParams,
+    apply_all_ai_override, apply_team0_ai_override, apply_team1_ai_override,
+    build_pvp_scenario_value, farmer_inner, fetch_side_row, list_farmer_leeks,
+    list_team_compositions, print_pvp_summary, run_pvp_batch, BenchSide, PvpBenchParams,
 };
 use leek_wars_gen::{GenError, RustEngine};
 use lw_meta::{fetch_farmer, meta_agent, RetryPolicy};
@@ -21,7 +21,11 @@ use std::thread;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "leekgen", version, about = "Leek Wars fight generator CLI (Rust-only)")]
+#[command(
+    name = "leekgen",
+    version,
+    about = "Leek Wars fight generator CLI (Rust-only)"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Command,
@@ -41,7 +45,7 @@ enum Command {
     Experiment(ExperimentTop),
     /// Snapshot helpers: raw URL fetch or Leek Wars rankings (`lw_meta`).
     Meta(MetaTop),
-    /// Live composition/leek PvP batches (multi-seed, progress bar, win-rate table).
+    /// Live composition/leek `PvP` batches (multi-seed, progress bar, win-rate table).
     Pvp(PvpTop),
     /// Summarize a `trace.jsonl` from `experiment` into feature JSON.
     Trace(TraceTop),
@@ -207,7 +211,11 @@ struct MetaRankingsTop {
 
 #[derive(Args)]
 struct MetaLwHttpArgs {
-    #[arg(long, default_value = "https://leekwars.com/api/", env = "LEEKWARS_API_BASE")]
+    #[arg(
+        long,
+        default_value = "https://leekwars.com/api/",
+        env = "LEEKWARS_API_BASE"
+    )]
     api_base: String,
     #[arg(long, env = "LEEKWARS_TOKEN")]
     token: Option<String>,
@@ -695,7 +703,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn cmd_run(cmd: RunCmd) -> Result<(), GenError> {
     let cfg = leek_wars_gen::config::resolve(cmd.root)?;
-    let output = cmd.output.map(map_output).unwrap_or(cfg.output);
+    let output = cmd.output.map_or(cfg.output, map_output);
     let sim_data = load_sim_data(cfg.root.as_path());
 
     let scenario_arg_for_meta = cmd.scenario.clone();
@@ -703,7 +711,8 @@ fn cmd_run(cmd: RunCmd) -> Result<(), GenError> {
     let (scenario_json_path, _guard) =
         leek_wars_gen::scenario_io::materialize_json_path(scenario_input.as_path())?;
     let scenario_json_path = scenario_path_for_engine(scenario_json_path, cfg.root.as_path());
-    let scenario_json_for_bundle = read_scenario_json_for_bundle(&scenario_json_path, cfg.root.as_path())?;
+    let scenario_json_for_bundle =
+        read_scenario_json_for_bundle(&scenario_json_path, cfg.root.as_path())?;
 
     let req = RunRequest {
         file: scenario_json_path,
@@ -719,15 +728,17 @@ fn cmd_run(cmd: RunCmd) -> Result<(), GenError> {
             &scenario_arg_for_meta,
             &scenario_json_for_bundle,
             &out,
-            cmd.sim,
-            cmd.sim_style,
-            cmd.sim_verbosity,
-            cmd.sim_group_turns,
-            cmd.sim_only_code,
-            cmd.sim_only_fid,
-            cmd.sim_limit,
-            cmd.sim_diff,
-            sim_data.as_ref(),
+            SaveReproSimArgs {
+                also_write_sim: cmd.sim,
+                sim_style: cmd.sim_style,
+                sim_verbosity: cmd.sim_verbosity,
+                sim_group_turns: cmd.sim_group_turns,
+                sim_only_code: cmd.sim_only_code,
+                sim_only_fid: cmd.sim_only_fid,
+                sim_limit: cmd.sim_limit,
+                sim_diff: cmd.sim_diff,
+                sim_data: sim_data.as_ref(),
+            },
         )?;
     }
 
@@ -760,7 +771,10 @@ fn cmd_run(cmd: RunCmd) -> Result<(), GenError> {
                     data: sim_data.clone(),
                     show_live_stats: true,
                 };
-                print!("{}", leek_wars_gen::output::sim_text_with_options(&outcome, &sim_opts));
+                print!(
+                    "{}",
+                    leek_wars_gen::output::sim_text_with_options(&outcome, &sim_opts)
+                );
             }
         }
         leek_wars_gen::config::OutputFormat::Ndjson => {
@@ -792,7 +806,11 @@ fn scenario_path_for_engine(path: PathBuf, root: &std::path::Path) -> PathBuf {
     let Ok(cwd) = std::env::current_dir() else {
         return path;
     };
-    let root_abs = if root.is_absolute() { root.to_path_buf() } else { cwd.join(root) };
+    let root_abs = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        cwd.join(root)
+    };
     let path_abs = cwd.join(&path);
     if let Ok(rel) = path_abs.strip_prefix(&root_abs) {
         if !rel.as_os_str().is_empty() {
@@ -816,7 +834,9 @@ fn cmd_fuzz(cmd: FuzzCmd) -> Result<(), GenError> {
         )));
     }
 
-    let scenarios_dir = cmd.scenarios_dir.unwrap_or_else(|| cfg.scenarios_dir.clone());
+    let scenarios_dir = cmd
+        .scenarios_dir
+        .unwrap_or_else(|| cfg.scenarios_dir.clone());
     let scenario_rels = leek_wars_gen::fuzz::discover_fuzz_scenario_rels(
         root.as_path(),
         scenarios_dir.as_path(),
@@ -900,12 +920,7 @@ fn cmd_fuzz(cmd: FuzzCmd) -> Result<(), GenError> {
         None
     };
 
-    let bench = leek_wars_gen::fuzz::run_fuzz_timed(
-        &fuzz_cfg,
-        true,
-        None,
-        stop_flag.as_deref(),
-    );
+    let bench = leek_wars_gen::fuzz::run_fuzz_timed(&fuzz_cfg, true, None, stop_flag.as_deref());
 
     let out_fmt = cmd.output.unwrap_or_else(|| map_output_back(cfg.output));
     match out_fmt {
@@ -998,7 +1013,10 @@ fn cmd_sim(cmd: SimCmd) -> Result<(), GenError> {
         data: sim_data,
         show_live_stats: true,
     };
-    print!("{}", leek_wars_gen::output::sim_text_with_options(&outcome, &sim_opts));
+    print!(
+        "{}",
+        leek_wars_gen::output::sim_text_with_options(&outcome, &sim_opts)
+    );
     Ok(())
 }
 
@@ -1009,11 +1027,11 @@ fn load_sim_data(root: &std::path::Path) -> Option<leek_wars_gen::output::SimDat
     let mut out = leek_wars_gen::output::SimData::default();
     for (_id, c) in chips {
         out.chip_name_by_template
-            .insert(c.template_id as i64, c.name);
+            .insert(i64::from(c.template_id), c.name);
     }
     for (_tpl, w) in weapons {
         out.weapon_name_by_template
-            .insert(w.template_id as i64, w.name);
+            .insert(i64::from(w.template_id), w.name);
     }
     Some(out)
 }
@@ -1053,8 +1071,7 @@ fn resolve_scenario_arg(
         .filter(|p| {
             p.file_stem()
                 .and_then(|s| s.to_str())
-                .map(|s| s.to_ascii_lowercase().contains(&needle))
-                .unwrap_or(false)
+                .is_some_and(|s| s.to_ascii_lowercase().contains(&needle))
         })
         .collect();
     filtered.sort();
@@ -1081,7 +1098,10 @@ fn resolve_scenario_arg(
     }
 }
 
-fn collect_scenarios_recursive(dir: &std::path::Path, out: &mut Vec<PathBuf>) -> Result<(), GenError> {
+fn collect_scenarios_recursive(
+    dir: &std::path::Path,
+    out: &mut Vec<PathBuf>,
+) -> Result<(), GenError> {
     if !dir.is_dir() {
         return Ok(());
     }
@@ -1119,8 +1139,8 @@ fn cmd_replay(cmd: ReplayCmd) -> Result<(), GenError> {
             }
             Some(OutputFormat::Json) => print!("{outcome}"),
             Some(OutputFormat::Ndjson) => {
-                let outcome: serde_json::Value = serde_json::from_str(&outcome)
-                    .map_err(|e| GenError::Message(e.to_string()))?;
+                let outcome: serde_json::Value =
+                    serde_json::from_str(&outcome).map_err(|e| GenError::Message(e.to_string()))?;
                 let env = serde_json::json!({
                     "kind": "leekgen_replay_bundle",
                     "bundle_dir": cmd.artifact_dir.display().to_string(),
@@ -1179,12 +1199,7 @@ fn read_scenario_json_for_bundle(
     Ok(std::fs::read_to_string(full)?)
 }
 
-fn save_repro_bundle(
-    dir: &std::path::Path,
-    cfg: &leek_wars_gen::config::GeneratorConfig,
-    scenario_arg: &std::path::Path,
-    scenario_json: &str,
-    outcome_json: &str,
+struct SaveReproSimArgs<'a> {
     also_write_sim: bool,
     sim_style: SimStyleArg,
     sim_verbosity: SimVerbosityArg,
@@ -1193,10 +1208,33 @@ fn save_repro_bundle(
     sim_only_fid: Option<i64>,
     sim_limit: Option<usize>,
     sim_diff: bool,
-    sim_data: Option<&leek_wars_gen::output::SimData>,
+    sim_data: Option<&'a leek_wars_gen::output::SimData>,
+}
+
+fn save_repro_bundle(
+    dir: &std::path::Path,
+    cfg: &leek_wars_gen::config::GeneratorConfig,
+    scenario_arg: &std::path::Path,
+    scenario_json: &str,
+    outcome_json: &str,
+    sim: SaveReproSimArgs<'_>,
 ) -> Result<(), GenError> {
+    let SaveReproSimArgs {
+        also_write_sim,
+        sim_style,
+        sim_verbosity,
+        sim_group_turns,
+        sim_only_code,
+        sim_only_fid,
+        sim_limit,
+        sim_diff,
+        sim_data,
+    } = sim;
     std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join("config.json"), serde_json::to_string_pretty(cfg).map_err(|e| GenError::Message(e.to_string()))?)?;
+    std::fs::write(
+        dir.join("config.json"),
+        serde_json::to_string_pretty(cfg).map_err(|e| GenError::Message(e.to_string()))?,
+    )?;
     std::fs::write(dir.join("scenario.json"), scenario_json)?;
     std::fs::write(dir.join("outcome.json"), outcome_json)?;
     let meta = serde_json::json!({
@@ -1434,9 +1472,12 @@ fn cmd_bench(cmd: BenchCmd) -> Result<(), GenError> {
             println!("  warmup   {}", cmd.warmup);
             println!("  iters    {}", cmd.iters.max(1));
             println!();
-            println!("  {:<8} {:>9} {:>9} {:>9}  {}", "", "min", "median", "mean", "samples");
+            println!(
+                "  {:<8} {:>9} {:>9} {:>9}  samples",
+                "", "min", "median", "mean"
+            );
             if summary.iterations == 0 {
-                println!("  {:<8} {:>9} {:>9} {:>9}  {}", "Rust", "—", "—", "—", "n=0");
+                println!("  {:<8} {:>9} {:>9} {:>9}  n=0", "Rust", "—", "—", "—");
             } else {
                 println!(
                     "  {:<8} {:>8.2}ms {:>8.2}ms {:>8.2}ms  n={}",
@@ -1503,36 +1544,38 @@ fn cmd_pvp_list(cmd: PvpListCmd) -> Result<(), GenError> {
         &retry,
     )?;
     let fin = farmer_inner(&body);
-    let name = fin
-        .get("name")
-        .and_then(|x| x.as_str())
-        .unwrap_or("?");
+    let name = fin.get("name").and_then(|x| x.as_str()).unwrap_or("?");
     let rows = list_team_compositions(fin);
     let title = Style::new().cyan().bold();
     eprintln!(
         "{}",
         title.apply_to(format!("Farmer {} — {}", cmd.farmer, name))
     );
-    if !rows.is_empty() {
-        eprintln!("  {}", Style::new().dim().apply_to("team compositions"));
-        eprintln!("  {:>10}  {}", "id", "name");
-        for (id, cn) in &rows {
-            eprintln!("  {:>10}  {}", id, cn);
-        }
-    } else {
+    if rows.is_empty() {
         eprintln!(
             "  {}",
             Style::new().dim().apply_to(
                 "no compositions in this response — set LEEKWARS_TOKEN (or --token) for full team data"
             )
         );
+    } else {
+        eprintln!("  {}", Style::new().dim().apply_to("team compositions"));
+        eprintln!("  {:>10}  name", "id");
+        for (id, cn) in &rows {
+            eprintln!("  {id:>10}  {cn}");
+        }
     }
     let leeks = list_farmer_leeks(fin);
     if !leeks.is_empty() {
-        eprintln!("  {}", Style::new().dim().apply_to("leeks (use as leek:ID in pvp run)"));
-        eprintln!("  {:>10}  {}", "id", "name");
+        eprintln!(
+            "  {}",
+            Style::new()
+                .dim()
+                .apply_to("leeks (use as leek:ID in pvp run)")
+        );
+        eprintln!("  {:>10}  name", "id");
         for (id, cn) in &leeks {
-            eprintln!("  {:>10}  {}", id, cn);
+            eprintln!("  {id:>10}  {cn}");
         }
     }
     Ok(())
@@ -1545,38 +1588,17 @@ fn cmd_pvp_run(cmd: PvpRunCmd) -> Result<(), GenError> {
     let retry = pvp_retry(&cmd.http);
     let gap = Duration::from_millis(cmd.http.request_gap_ms);
 
-    let (row0, label0) = fetch_side_row(
-        &agent,
-        &cmd.http.api_base,
-        &cmd.team0,
-        &retry,
-        gap,
-    )?;
+    let (row0, label0) = fetch_side_row(&agent, &cmd.http.api_base, &cmd.team0, &retry, gap)?;
     if !gap.is_zero() {
         thread::sleep(gap);
     }
-    let (row1, label1) = fetch_side_row(
-        &agent,
-        &cmd.http.api_base,
-        &cmd.team1,
-        &retry,
-        gap,
-    )?;
+    let (row1, label1) = fetch_side_row(&agent, &cmd.http.api_base, &cmd.team1, &retry, gap)?;
 
     let n = cmd.pvp_run.seeds.max(1);
     let mut scenarios = Vec::with_capacity(n as usize);
     for i in 0..n {
-        let seed = cmd
-            .pvp_run
-            .seed_start
-            .saturating_add(i as i32);
-        let mut sc = build_pvp_scenario_value(
-            row0.clone(),
-            row1.clone(),
-            &label0,
-            &label1,
-            seed,
-        )?;
+        let seed = cmd.pvp_run.seed_start.saturating_add(i as i32);
+        let mut sc = build_pvp_scenario_value(row0.clone(), row1.clone(), &label0, &label1, seed)?;
         apply_pvp_ai_overrides(&mut sc, &cmd.pvp_run)?;
         scenarios.push((format!("{label0} | seed={seed}"), sc));
     }
@@ -1607,13 +1629,8 @@ fn cmd_pvp_compare(cmd: PvpCompareCmd) -> Result<(), GenError> {
     let retry = pvp_retry(&cmd.http);
     let gap = Duration::from_millis(cmd.http.request_gap_ms);
 
-    let (row_opponent, label_opponent) = fetch_side_row(
-        &agent,
-        &cmd.http.api_base,
-        &cmd.opponent,
-        &retry,
-        gap,
-    )?;
+    let (row_opponent, label_opponent) =
+        fetch_side_row(&agent, &cmd.http.api_base, &cmd.opponent, &retry, gap)?;
 
     let n = cmd.pvp_run.seeds.max(1) as usize;
     let mut scenarios = Vec::with_capacity(cmd.candidates.len() * n);
@@ -1622,13 +1639,9 @@ fn cmd_pvp_compare(cmd: PvpCompareCmd) -> Result<(), GenError> {
         if !gap.is_zero() {
             thread::sleep(gap);
         }
-        let (row0, label0) =
-            fetch_side_row(&agent, &cmd.http.api_base, cand, &retry, gap)?;
+        let (row0, label0) = fetch_side_row(&agent, &cmd.http.api_base, cand, &retry, gap)?;
         for i in 0..n {
-            let seed = cmd
-                .pvp_run
-                .seed_start
-                .saturating_add(i as i32);
+            let seed = cmd.pvp_run.seed_start.saturating_add(i as i32);
             let mut sc = build_pvp_scenario_value(
                 row0.clone(),
                 row_opponent.clone(),
@@ -1655,18 +1668,14 @@ fn cmd_pvp_compare(cmd: PvpCompareCmd) -> Result<(), GenError> {
             serde_json::to_string_pretty(&records).map_err(|e| GenError::Message(e.to_string()))?
         );
     } else {
-        print_pvp_summary(
-            &records,
-            "candidates (team 0)",
-            label_opponent.as_str(),
-        );
+        print_pvp_summary(&records, "candidates (team 0)", label_opponent.as_str());
     }
     Ok(())
 }
 
 fn cmd_experiment_run(cmd: ExperimentRunCmd) -> Result<(), GenError> {
     let has_cli_root = cmd.root.is_some();
-        let cfg = leek_wars_gen::config::resolve(cmd.root)?;
+    let cfg = leek_wars_gen::config::resolve(cmd.root)?;
     let spec = leek_wars_gen::experiment::ExperimentSpec::from_toml_path(cmd.spec.as_path())?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = if has_cli_root {
@@ -1680,8 +1689,7 @@ fn cmd_experiment_run(cmd: ExperimentRunCmd) -> Result<(), GenError> {
     } else {
         cfg.root
     };
-    let spec_path =
-        std::fs::canonicalize(cmd.spec.as_path()).unwrap_or_else(|_| cmd.spec.clone());
+    let spec_path = std::fs::canonicalize(cmd.spec.as_path()).unwrap_or_else(|_| cmd.spec.clone());
     leek_wars_gen::experiment::run_experiment(&spec, &spec_path, root, cmd.jobs)?;
     Ok(())
 }
@@ -1705,12 +1713,9 @@ fn cmd_meta_entity(top: MetaEntityTop) -> Result<(), GenError> {
         MetaEntityCmd::Composition(c) => c.output.clone(),
     };
     match top.cmd {
-        MetaEntityCmd::Leek(c) => meta_entity::run_leek(
-            &http,
-            c.output.as_path(),
-            c.id,
-            c.profile_only,
-        )?,
+        MetaEntityCmd::Leek(c) => {
+            meta_entity::run_leek(&http, c.output.as_path(), c.id, c.profile_only)?
+        }
         MetaEntityCmd::Composition(c) => meta_entity::run_composition(
             &http,
             c.output.as_path(),
@@ -1783,8 +1788,7 @@ fn cmd_meta_rankings(top: MetaRankingsTop) -> Result<(), GenError> {
 }
 
 fn cmd_trace_summarize(cmd: TraceSummarizeCmd) -> Result<(), GenError> {
-    let s =
-        leek_wars_gen::experiment::trace_summarize::summarize_trace_file(cmd.trace.as_path())?;
+    let s = leek_wars_gen::experiment::trace_summarize::summarize_trace_file(cmd.trace.as_path())?;
     let text = if cmd.compact {
         serde_json::to_string(&s).map_err(|e| GenError::Message(e.to_string()))?
     } else {
@@ -1845,9 +1849,8 @@ fn validate_path(path: &std::path::Path, recursive: bool) -> Result<(), GenError
         let files = list_scenarios(path, recursive)?;
         for f in files {
             let v = leek_wars_gen::scenario_io::load_value(f.as_path())?;
-            leek_wars_gen::scenario_io::validate_value(&v).map_err(|e| {
-                GenError::Message(format!("{}: {}", f.display(), e))
-            })?;
+            leek_wars_gen::scenario_io::validate_value(&v)
+                .map_err(|e| GenError::Message(format!("{}: {}", f.display(), e)))?;
         }
         Ok(())
     } else {
@@ -1887,11 +1890,7 @@ fn scenario_doctor(c: ScenarioDoctorCmd) -> Result<(), GenError> {
     Ok(())
 }
 
-fn apply_safe_doctor_fixes(
-    v: &mut serde_json::Value,
-    issues: &mut Vec<String>,
-    fix: bool,
-) -> bool {
+fn apply_safe_doctor_fixes(v: &mut serde_json::Value, issues: &mut Vec<String>, fix: bool) -> bool {
     let mut changed = false;
     let Some(obj) = v.as_object_mut() else {
         issues.push("scenario is not an object".into());
@@ -1915,7 +1914,10 @@ fn apply_safe_doctor_fixes(
     if !obj.contains_key("max_operations_per_entity") {
         issues.push("missing max_operations_per_entity (default 20000000)".into());
         if fix {
-            obj.insert("max_operations_per_entity".into(), serde_json::json!(20_000_000));
+            obj.insert(
+                "max_operations_per_entity".into(),
+                serde_json::json!(20_000_000),
+            );
             changed = true;
         }
     }
@@ -1930,9 +1932,13 @@ fn apply_safe_doctor_fixes(
     // Ensure each entity has `weapons`/`chips` arrays when entities are objects.
     if let Some(entities) = obj.get_mut("entities").and_then(|e| e.as_array_mut()) {
         for team in entities {
-            let Some(team_arr) = team.as_array_mut() else { continue };
+            let Some(team_arr) = team.as_array_mut() else {
+                continue;
+            };
             for ent in team_arr {
-                let Some(eobj) = ent.as_object_mut() else { continue };
+                let Some(eobj) = ent.as_object_mut() else {
+                    continue;
+                };
                 if !eobj.contains_key("weapons") {
                     issues.push("entity missing weapons (default [])".into());
                     if fix {

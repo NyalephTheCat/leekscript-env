@@ -1,4 +1,4 @@
-//! `lek` — LeekScript toolchain CLI (see [clap](https://docs.rs/clap/latest/clap/) for argument parsing).
+//! `lek` — `LeekScript` toolchain CLI (see [clap](https://docs.rs/clap/latest/clap/) for argument parsing).
 
 use clap::builder::styling::{AnsiColor, Effects};
 use clap::{Args, ColorChoice, Parser, Subcommand, ValueEnum};
@@ -389,7 +389,7 @@ struct JsonDiagnostic {
     phase: &'static str,
 }
 
-/// One input path in `--message-format json` (ok / error / io_error).
+/// One input path in `--message-format json` (ok / error / `io_error`).
 #[derive(Serialize)]
 struct JsonFileLine {
     file: String,
@@ -533,7 +533,7 @@ level = "warn"
 features = []
 "#
     );
-    match leekscript_config::LeekManifest::from_str(&toml) {
+    match toml.parse::<leekscript_config::LeekManifest>() {
         Ok(_) => {}
         Err(e) => {
             eprintln!("lek init: internal error, invalid template: {e}");

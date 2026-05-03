@@ -3,8 +3,7 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn check_stdin_json_lists_file_as_dash() {
-    let exe =
-        option_env!("CARGO_BIN_EXE_lek").expect("lek binary must be built (cargo test -p lek)");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let mut child = Command::new(exe)
         .args(["check", "--message-format", "json", "-"])
         .stdin(Stdio::piped())
@@ -30,7 +29,7 @@ fn check_stdin_json_lists_file_as_dash() {
 
 #[test]
 fn check_stdin_stdin_path_labels_diagnostics() {
-    let exe = option_env!("CARGO_BIN_EXE_lek").expect("lek binary");
+    let exe = env!("CARGO_BIN_EXE_lek");
     let mut child = Command::new(exe)
         .args([
             "check",

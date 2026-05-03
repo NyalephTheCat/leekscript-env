@@ -94,9 +94,9 @@ pub struct FunctionValue {
 /// Runtime value (minimal; grows with the language).
 #[derive(Debug, Clone)]
 pub enum Value {
-    /// Java / LeekScript `integer` (64-bit in this runtime).
+    /// Java / `LeekScript` `integer` (64-bit in this runtime).
     Integer(i64),
-    /// Java / LeekScript `real` (`double`).
+    /// Java / `LeekScript` `real` (`double`).
     Real(f64),
     /// v1 export quirk: some integral reals keep a `.0` suffix (e.g. coerced return values).
     RealDotZero(f64),
@@ -125,27 +125,33 @@ pub enum Value {
 }
 
 impl Value {
+    #[must_use]
     pub fn array_from(elements: Vec<Value>) -> Self {
         Value::Array(Rc::new(RefCell::new(elements)))
     }
 
+    #[must_use]
     pub fn map_from(pairs: Vec<(Value, Value)>) -> Self {
         Value::Map(Rc::new(RefCell::new(MapStore::from_pairs(pairs))))
     }
 
+    #[must_use]
     pub fn map_from_store(store: MapStore) -> Self {
         Value::Map(Rc::new(RefCell::new(store)))
     }
 
+    #[must_use]
     pub fn object_from(pairs: Vec<(Value, Value)>) -> Self {
         Value::Object(Rc::new(RefCell::new(MapStore::from_pairs(pairs))))
     }
 
+    #[must_use]
     pub fn object_from_store(store: MapStore) -> Self {
         Value::Object(Rc::new(RefCell::new(store)))
     }
 
     /// Rebuild key/value storage with the same runtime kind as `template` (`Map` vs `Object`).
+    #[must_use]
     pub fn wrap_keyed_pairs(template: &Value, pairs: Vec<(Value, Value)>) -> Self {
         match template {
             Value::Object(_) => Value::object_from(pairs),
@@ -153,6 +159,7 @@ impl Value {
         }
     }
 
+    #[must_use]
     pub fn set_from(elements: Vec<Value>) -> Self {
         // `set_from` is used for `new Set()` / `Set()` and should not auto-sort its export.
         let java_hash_export = false;
@@ -165,6 +172,7 @@ impl Value {
     }
 
     /// Set from angle-bracket literal `new SetLiteral(...)` (non-empty → hash-style export).
+    #[must_use]
     pub fn set_from_literal(elements: Vec<Value>) -> Self {
         // Set literals export with Java `HashSet`-like ordering.
         let java_hash_export = true;
@@ -178,7 +186,10 @@ impl Value {
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
-        use Value::*;
+        use Value::{
+            Array, Bool, Function, Instance, Integer, Interval, Map, Native, Null, Object, Real,
+            RealDotZero, Set, String, UserClass,
+        };
         match (self, other) {
             (Integer(a), Integer(b)) => a == b,
             (Real(a), Real(b)) => a == b,
@@ -216,14 +227,14 @@ fn display_value(
         Value::Integer(n) => write!(f, "{n}"),
         Value::Real(n) => {
             if n.is_finite() && n.fract() == 0.0 && n.abs() < 1e15 {
-                write!(f, "{:.0}", n)
+                write!(f, "{n:.0}")
             } else {
                 write!(f, "{n}")
             }
         }
         Value::RealDotZero(n) => {
             if n.is_finite() && n.fract() == 0.0 && n.abs() < 1e15 {
-                write!(f, "{:.0}", n)
+                write!(f, "{n:.0}")
             } else {
                 write!(f, "{n}")
             }
@@ -254,7 +265,7 @@ fn display_value(
                     write!(f, ", ")?;
                 }
                 let fv = &b.fields[*k];
-                write!(f, "{}: ", k)?;
+                write!(f, "{k}: ")?;
                 display_value(fv, f, visited)?;
             }
             write!(f, "}}")

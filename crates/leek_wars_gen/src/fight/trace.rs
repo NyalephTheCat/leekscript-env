@@ -35,6 +35,7 @@ pub struct TraceEvent {
 }
 
 impl TraceConfig {
+    #[must_use]
     pub fn disabled() -> Self {
         Self::default()
     }

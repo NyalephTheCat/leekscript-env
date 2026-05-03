@@ -52,10 +52,7 @@ fn clamp_span(span: Span, src_len: usize) -> std::ops::Range<usize> {
 
 /// Emit a single registry-backed diagnostic with source snippet.
 pub fn emit_diagnostic(root_src: &str, record: &DiagnosticRecord) {
-    let src = record
-        .snippet_source
-        .as_deref()
-        .unwrap_or(root_src);
+    let src = record.snippet_source.as_deref().unwrap_or(root_src);
     let range = clamp_span(record.span, src.len());
     let code = format!("{}::{}", record.code, record.reference);
     let help = format!(
@@ -64,7 +61,7 @@ pub fn emit_diagnostic(root_src: &str, record: &DiagnosticRecord) {
     );
     let named = NamedSource::new(record.file.clone(), src.to_string());
     let report: Report = if range.is_empty() {
-        miette::miette!(code = code, help = help, "{}", record.message).into()
+        miette::miette!(code = code, help = help, "{}", record.message)
     } else {
         miette::miette!(
             code = code,
@@ -74,7 +71,6 @@ pub fn emit_diagnostic(root_src: &str, record: &DiagnosticRecord) {
             record.message
         )
         .with_source_code(named)
-        .into()
     };
     eprintln!("{report:?}");
 }
@@ -99,7 +95,7 @@ fn emit_lex_error(path_display: &str, src: &str, err: &LexError) {
     let range = clamp_span(err.span, src.len());
     let msg = lexer_reference_display_message(err.reference);
     let code = format!("lexer::{}", err.reference);
-    let named = NamedSource::new(path_display.to_string(), src.to_string());
+    let named = NamedSource::new(path_display, src.to_string());
     let report: Report = if range.is_empty() {
         miette::miette!(
             code = code,
@@ -107,7 +103,6 @@ fn emit_lex_error(path_display: &str, src: &str, err: &LexError) {
             "{}",
             msg
         )
-        .into()
     } else {
         miette::miette!(
             code = code,
@@ -117,7 +112,6 @@ fn emit_lex_error(path_display: &str, src: &str, err: &LexError) {
             msg
         )
         .with_source_code(named)
-        .into()
     };
     eprintln!("{report:?}");
 }
@@ -125,7 +119,7 @@ fn emit_lex_error(path_display: &str, src: &str, err: &LexError) {
 fn emit_parse_diag(path_display: &str, src: &str, err: &ParseDiagnostic) {
     let range = clamp_span(err.span, src.len());
     let code = format!("parser::{}", err.reference);
-    let named = NamedSource::new(path_display.to_string(), src.to_string());
+    let named = NamedSource::new(path_display, src.to_string());
     let report: Report = if range.is_empty() {
         miette::miette!(
             code = code,
@@ -133,7 +127,6 @@ fn emit_parse_diag(path_display: &str, src: &str, err: &ParseDiagnostic) {
             "{}",
             err.message
         )
-        .into()
     } else {
         miette::miette!(
             code = code,
@@ -143,13 +136,12 @@ fn emit_parse_diag(path_display: &str, src: &str, err: &ParseDiagnostic) {
             err.message
         )
         .with_source_code(named)
-        .into()
     };
     eprintln!("{report:?}");
 }
 
 /// Simple message when there is no source buffer (I/O, config, …).
 pub fn emit_message(msg: impl std::fmt::Display) {
-    let report: Report = miette::miette!("{}", msg).into();
+    let report: Report = miette::miette!("{}", msg);
     eprintln!("{report:?}");
 }

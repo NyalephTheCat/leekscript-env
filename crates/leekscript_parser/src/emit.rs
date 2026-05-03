@@ -2,13 +2,10 @@
 
 use crate::ast::{
     ArrowFnBody, AssignStmt, Block, BreakStmt, CaseLabel, ClassDecl, ClassFieldDecl, ClassMember,
-    ConstructorDecl, ContinueStmt,
-    DoWhileStmt, ElseBranch, Expr, ForAssign, ForInBinding, ForInKeyValueStmt, ForInStmt, ForInit,
-    ForStmt, ForUpdate, FunctionBody, FunctionDecl, GlobalDecl, IfStmt, IncludeStmt,
-    ParsedFile, ReturnStmt, Stmt,
-    StmtBody,
-    SwitchClause, SwitchStmt, ThrowStmt, TryStmt, TypedVarDecl, VarDecl, VarDeclarator, VarDeclFor,
-    WhileStmt,
+    ConstructorDecl, ContinueStmt, DoWhileStmt, ElseBranch, Expr, ForAssign, ForInBinding,
+    ForInKeyValueStmt, ForInStmt, ForInit, ForStmt, ForUpdate, FunctionBody, FunctionDecl,
+    GlobalDecl, IfStmt, IncludeStmt, ParsedFile, ReturnStmt, Stmt, StmtBody, SwitchClause,
+    SwitchStmt, ThrowStmt, TryStmt, TypedVarDecl, VarDecl, VarDeclFor, VarDeclarator, WhileStmt,
 };
 use leekscript_lexer::{Token, TokenKind};
 use leekscript_syntax::green::emit_token_with_trivia;
@@ -44,7 +41,7 @@ fn emit_stmt(
         Stmt::While(w) => emit_while_stmt(b, src, tokens, last_end, w),
         Stmt::DoWhile(d) => emit_do_while_stmt(b, src, tokens, last_end, d),
         Stmt::Switch(sw) => emit_switch_stmt(b, src, tokens, last_end, sw),
-        Stmt::For(f) => emit_for_stmt(b, src, tokens, last_end, f),
+        Stmt::For(f) => emit_for_stmt(b, src, tokens, last_end, f.as_ref()),
         Stmt::ForIn(f) => emit_for_in_stmt(b, src, tokens, last_end, f),
         Stmt::ForInKeyValue(f) => emit_for_in_key_value_stmt(b, src, tokens, last_end, f),
         Stmt::Empty { semi } => emit_empty_stmt(b, src, tokens, last_end, *semi),
@@ -72,7 +69,7 @@ fn emit_typed_var_decl(
         emit_token_with_trivia(b, src, last_end, &tokens[*i]);
     }
     emit_token_with_trivia(b, src, last_end, &tokens[v.name]);
-    if let (Some(eq), Some(ref init)) = (v.eq, v.init.as_ref()) {
+    if let (Some(eq), Some(init)) = (v.eq, v.init.as_ref()) {
         emit_token_with_trivia(b, src, last_end, &tokens[eq]);
         b.start_node(rowan::SyntaxKind(LeekSyntaxKind::Expr as u16));
         emit_expr(b, src, tokens, last_end, init);
@@ -102,7 +99,7 @@ fn emit_global_decl(
     }
     for (i, item) in g.items.iter().enumerate() {
         emit_token_with_trivia(b, src, last_end, &tokens[item.name]);
-        if let (Some(eq), Some(ref init)) = (item.eq, item.init.as_ref()) {
+        if let (Some(eq), Some(init)) = (item.eq, item.init.as_ref()) {
             emit_token_with_trivia(b, src, last_end, &tokens[eq]);
             b.start_node(rowan::SyntaxKind(LeekSyntaxKind::Expr as u16));
             emit_expr(b, src, tokens, last_end, init);
@@ -427,7 +424,7 @@ fn emit_switch_stmt(
     for cl in &sw.clauses {
         match cl {
             SwitchClause::Case { labels, body } => {
-                emit_switch_case_clause(b, src, tokens, last_end, labels, body)
+                emit_switch_case_clause(b, src, tokens, last_end, labels, body);
             }
             SwitchClause::Default {
                 default_kw,
@@ -648,7 +645,7 @@ fn emit_function_decl(
     last_end: &mut usize,
     f: &FunctionDecl,
 ) {
-       b.start_node(rowan::SyntaxKind(LeekSyntaxKind::FunctionDecl as u16));
+    b.start_node(rowan::SyntaxKind(LeekSyntaxKind::FunctionDecl as u16));
     for m in &f.member_modifiers {
         emit_token_with_trivia(b, src, last_end, &tokens[*m]);
     }
@@ -725,7 +722,7 @@ fn emit_var_declarator(
     d: &VarDeclarator,
 ) {
     emit_token_with_trivia(b, src, last_end, &tokens[d.name]);
-    if let (Some(eq), Some(ref init)) = (d.eq, d.init.as_ref()) {
+    if let (Some(eq), Some(init)) = (d.eq, d.init.as_ref()) {
         emit_token_with_trivia(b, src, last_end, &tokens[eq]);
         b.start_node(rowan::SyntaxKind(LeekSyntaxKind::Expr as u16));
         emit_expr(b, src, tokens, last_end, init);
@@ -1135,12 +1132,7 @@ fn emit_expr(
             }
             b.finish_node();
         }
-        Expr::PreUpdate {
-            expr,
-            op1,
-            op2,
-            ..
-        } => {
+        Expr::PreUpdate { expr, op1, op2, .. } => {
             b.start_node(rowan::SyntaxKind(LeekSyntaxKind::PreUpdateExpr as u16));
             emit_token_with_trivia(b, src, last_end, &tokens[*op1]);
             if op2 != op1 {
@@ -1151,12 +1143,7 @@ fn emit_expr(
             b.finish_node();
             b.finish_node();
         }
-        Expr::PostUpdate {
-            expr,
-            op1,
-            op2,
-            ..
-        } => {
+        Expr::PostUpdate { expr, op1, op2, .. } => {
             b.start_node(rowan::SyntaxKind(LeekSyntaxKind::PostUpdateExpr as u16));
             b.start_node(rowan::SyntaxKind(LeekSyntaxKind::Expr as u16));
             emit_expr(b, src, tokens, last_end, expr);

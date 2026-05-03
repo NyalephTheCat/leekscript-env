@@ -35,9 +35,7 @@ pub struct ExperimentSpec {
 #[serde(untagged)]
 pub enum SeedsSpec {
     List { list: Vec<i32> },
-    Range {
-        range: RangeSpec,
-    },
+    Range { range: RangeSpec },
 }
 
 impl Default for SeedsSpec {

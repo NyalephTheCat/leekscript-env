@@ -23,6 +23,7 @@ pub struct RunRequest {
 
 impl RunRequest {
     /// Forward argv fragments for the Java `main` (excluding `java -jar …`).
+    #[must_use]
     pub fn java_argv(&self) -> Vec<String> {
         let mut v = Vec::new();
         if self.nocache {
@@ -38,10 +39,10 @@ impl RunRequest {
             v.push("--analyze".to_string());
         }
         if let Some(f) = self.farmer {
-            v.push(format!("--farmer={}", f));
+            v.push(format!("--farmer={f}"));
         }
         if let Some(f) = self.folder {
-            v.push(format!("--folder={}", f));
+            v.push(format!("--folder={f}"));
         }
         v.push(self.file.display().to_string());
         v

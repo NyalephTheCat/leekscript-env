@@ -1,19 +1,25 @@
 //! Hand-written recursive-descent parser over the lexer token stream.
 
 use crate::ast::{
-    ArrowFnBody, AssignStmt, Block, BreakStmt, CaseLabel, ClassDecl, ClassFieldDecl, ClassFieldInit, ContinueStmt,
-    DoWhileStmt, ElseBranch, ClassMember, ConstructorDecl, Expr, ForAssign, ForInBinding,
-    ForInKeyValueStmt,
-    ForInStmt, ForInit, ForStmt, ForUpdate, FunctionBody, FunctionDecl, FunctionValueExpr, GlobalDecl,
-    GlobalItem,
-    IfStmt, IncludeStmt, ParamDefault,
-    MapEntry, ObjectProperty, ParsedFile, ReturnStmt, Stmt, StmtBody, SwitchClause, SwitchStmt,
-    CatchClause, ThrowStmt, TryStmt, TypeExpr, TypedVarDecl, VarDecl, VarDeclarator, VarDeclFor,
+    ArrowFnBody, AssignStmt, Block, BreakStmt, CaseLabel, CatchClause, ClassDecl, ClassFieldDecl,
+    ClassFieldInit, ClassMember, ConstructorDecl, ContinueStmt, DoWhileStmt, ElseBranch, Expr,
+    ForAssign, ForInBinding, ForInKeyValueStmt, ForInStmt, ForInit, ForStmt, ForUpdate,
+    FunctionBody, FunctionDecl, FunctionValueExpr, GlobalDecl, GlobalItem, IfStmt, IncludeStmt,
+    MapEntry, ObjectProperty, ParamDefault, ParsedFile, ReturnStmt, Stmt, StmtBody, SwitchClause,
+    SwitchStmt, ThrowStmt, TryStmt, TypeExpr, TypedVarDecl, VarDecl, VarDeclFor, VarDeclarator,
     WhileStmt,
 };
 use crate::ParseDiagnostic;
 use leekscript_lexer::{Kw, Token, TokenKind, WordOp};
 use leekscript_span::Span;
+
+type ParsedParamListInner = (
+    Vec<usize>,
+    Vec<Vec<usize>>,
+    Vec<Option<ParamDefault>>,
+    Vec<usize>,
+    Vec<Option<usize>>,
+);
 
 #[cfg(feature = "parser-trace")]
 macro_rules! ptrace {
@@ -182,10 +188,7 @@ impl<'a> Parser<'a> {
             | TokenKind::ParOpen
             | TokenKind::BracketOpen
             | TokenKind::BraceOpen
-            | TokenKind::Kw(Kw::New)
-            | TokenKind::Kw(Kw::This)
-            | TokenKind::Kw(Kw::Super)
-            | TokenKind::Kw(Kw::True | Kw::False | Kw::Null)
+            | TokenKind::Kw(Kw::New | Kw::This | Kw::Super | Kw::True | Kw::False | Kw::Null)
             | TokenKind::Lemniscate
             | TokenKind::Pi => true,
             TokenKind::Operator => {
@@ -248,15 +251,14 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokenKind::BraceClose) {
                 break;
             }
-            match self.parse_stmt() {
-                Some(s) => out.push(s),
-                None => {
-                    if self.errors.is_empty() {
-                        self.error("UNEXPECTED_TOKEN", self.peek().span, "expected a statement");
-                    }
-                    if !self.at_eof() {
-                        self.bump();
-                    }
+            if let Some(s) = self.parse_stmt() {
+                out.push(s)
+            } else {
+                if self.errors.is_empty() {
+                    self.error("UNEXPECTED_TOKEN", self.peek().span, "expected a statement");
+                }
+                if !self.at_eof() {
+                    self.bump();
                 }
             }
         }
@@ -270,10 +272,10 @@ impl<'a> Parser<'a> {
             TokenKind::Kw(Kw::Return) => self.parse_return().map(Stmt::Return),
             TokenKind::Kw(Kw::Function) => {
                 // v1–v2: `function` matches case-insensitively, so `Function<…>` may be a type.
-                let next_is_type_param = self
-                    .tokens
-                    .get(self.cur + 1)
-                    .is_some_and(|t| matches!(t.kind, TokenKind::Operator) && self.text_tok(self.cur + 1).trim() == "<");
+                let next_is_type_param = self.tokens.get(self.cur + 1).is_some_and(|t| {
+                    matches!(t.kind, TokenKind::Operator)
+                        && self.text_tok(self.cur + 1).trim() == "<"
+                });
                 if next_is_type_param {
                     if let Some(tv) = self.try_parse_typed_var_decl() {
                         Some(Stmt::TypedVar(tv))
@@ -296,11 +298,9 @@ impl<'a> Parser<'a> {
             TokenKind::Kw(Kw::Class) => {
                 let n = self.cur + 1;
                 let class_expr = n < self.tokens.len()
-                    && (matches!(
-                        self.tokens[n].kind,
-                        TokenKind::BracketOpen | TokenKind::Dot
-                    ) || (matches!(self.tokens[n].kind, TokenKind::Operator)
-                        && self.text_tok(n) == "."));
+                    && (matches!(self.tokens[n].kind, TokenKind::BracketOpen | TokenKind::Dot)
+                        || (matches!(self.tokens[n].kind, TokenKind::Operator)
+                            && self.text_tok(n) == "."));
                 if class_expr {
                     self.parse_assign_or_expr_stmt()
                 } else {
@@ -325,7 +325,7 @@ impl<'a> Parser<'a> {
                 }
                 self.parse_assign_or_expr_stmt()
             }
-            TokenKind::Kw(Kw::This) | TokenKind::Kw(Kw::Super) => self.parse_assign_or_expr_stmt(),
+            TokenKind::Kw(Kw::This | Kw::Super) => self.parse_assign_or_expr_stmt(),
             _ => self
                 .parse_expr_stmt()
                 .map(|(expr, semi)| Stmt::ExprSemi(expr, semi)),
@@ -336,13 +336,12 @@ impl<'a> Parser<'a> {
         let save = self.cur;
         let save_slack = self.type_gt_slack;
         self.type_gt_slack = 0;
-        let (ty, type_tokens) = match self.try_parse_type_expression_union_ast() {
-            Ok(v) => v,
-            Err(()) => {
-                self.cur = save;
-                self.type_gt_slack = save_slack;
-                return None;
-            }
+        let (ty, type_tokens) = if let Ok(v) = self.try_parse_type_expression_union_ast() {
+            v
+        } else {
+            self.cur = save;
+            self.type_gt_slack = save_slack;
+            return None;
         };
         if !matches!(self.peek().kind, TokenKind::Ident) {
             self.cur = save;
@@ -350,21 +349,20 @@ impl<'a> Parser<'a> {
             return None;
         }
         let name = self.bump();
-        let (eq, init) = if matches!(self.peek().kind, TokenKind::Operator) && self.text_tok(self.cur) == "="
-        {
-            let eq = self.bump();
-            let init = match self.parse_expr(0) {
-                Some(e) => e,
-                None => {
+        let (eq, init) =
+            if matches!(self.peek().kind, TokenKind::Operator) && self.text_tok(self.cur) == "=" {
+                let eq = self.bump();
+                let init = if let Some(e) = self.parse_expr(0) {
+                    e
+                } else {
                     self.cur = save;
                     self.type_gt_slack = save_slack;
                     return None;
-                }
+                };
+                (Some(eq), Some(init))
+            } else {
+                (None, None)
             };
-            (Some(eq), Some(init))
-        } else {
-            (None, None)
-        };
         let semi = self.eat_optional_semicolon();
         self.type_gt_slack = save_slack;
         Some(TypedVarDecl {
@@ -639,7 +637,11 @@ impl<'a> Parser<'a> {
             None
         };
         if !matches!(self.peek().kind, TokenKind::BraceOpen) {
-            self.error("UNEXPECTED_TOKEN", self.peek().span, "expected `{` after class name");
+            self.error(
+                "UNEXPECTED_TOKEN",
+                self.peek().span,
+                "expected `{` after class name",
+            );
             return None;
         }
         let open_brace = self.bump();
@@ -658,10 +660,9 @@ impl<'a> Parser<'a> {
                 }
                 TokenKind::Kw(Kw::Function) => {
                     // v1–2: `function` matches case-insensitively, so `Function<…>` is a **generic type**, not `function` method syntax.
-                    let next_is_type_param = self
-                        .tokens
-                        .get(self.cur + 1)
-                        .is_some_and(|t| matches!(t.kind, TokenKind::Operator) && self.text_tok(self.cur + 1) == "<");
+                    let next_is_type_param = self.tokens.get(self.cur + 1).is_some_and(|t| {
+                        matches!(t.kind, TokenKind::Operator) && self.text_tok(self.cur + 1) == "<"
+                    });
                     let next_is_function_decl = self
                         .tokens
                         .get(self.cur + 1)
@@ -697,15 +698,11 @@ impl<'a> Parser<'a> {
 
     fn parse_class_member_modifiers(&mut self) -> Vec<usize> {
         let mut out = Vec::new();
-        loop {
-            match &self.peek().kind {
-                TokenKind::Kw(Kw::Private)
-                | TokenKind::Kw(Kw::Public)
-                | TokenKind::Kw(Kw::Protected)
-                | TokenKind::Kw(Kw::Static)
-                | TokenKind::Kw(Kw::Final) => out.push(self.bump()),
-                _ => break,
-            }
+        while matches!(
+            self.peek().kind,
+            TokenKind::Kw(Kw::Private | Kw::Public | Kw::Protected | Kw::Static | Kw::Final)
+        ) {
+            out.push(self.bump());
         }
         out
     }
@@ -716,13 +713,12 @@ impl<'a> Parser<'a> {
         member_modifiers: Vec<usize>,
     ) -> Option<ClassMember> {
         let save = self.cur;
-        let type_tokens = match self.try_parse_type_expression_union() {
-            Ok(t) => t,
-            Err(()) => {
-                self.cur = save;
-                // `static foo(...)` — omitted / `void` return type (Java `eatReturnType` empty).
-                Vec::new()
-            }
+        let type_tokens = if let Ok(t) = self.try_parse_type_expression_union() {
+            t
+        } else {
+            self.cur = save;
+            // `static foo(...)` — omitted / `void` return type (Java `eatReturnType` empty).
+            Vec::new()
         };
         // Java allows omitted return type; method names can collide with type keywords (e.g. `string()`).
         // If the "type" parse consumed exactly one token and we're now looking at `(`, treat that token
@@ -732,7 +728,10 @@ impl<'a> Parser<'a> {
             self.bump()
         } else if matches!(self.peek().kind, TokenKind::ParOpen)
             && type_tokens.len() == 1
-            && matches!(self.tokens[type_tokens[0]].kind, TokenKind::Ident | TokenKind::Kw(_))
+            && matches!(
+                self.tokens[type_tokens[0]].kind,
+                TokenKind::Ident | TokenKind::Kw(_)
+            )
         {
             let n = type_tokens[0];
             type_tokens.clear();
@@ -804,14 +803,14 @@ impl<'a> Parser<'a> {
                 body,
             }));
         }
-        let init = if matches!(self.peek().kind, TokenKind::Operator) && self.text_tok(self.cur) == "="
-        {
-            let eq = self.bump();
-            let value = self.parse_expr(0)?;
-            Some(ClassFieldInit { eq, value })
-        } else {
-            None
-        };
+        let init =
+            if matches!(self.peek().kind, TokenKind::Operator) && self.text_tok(self.cur) == "=" {
+                let eq = self.bump();
+                let value = self.parse_expr(0)?;
+                Some(ClassFieldInit { eq, value })
+            } else {
+                None
+            };
         let semi = self.eat_optional_semicolon();
         Some(ClassMember::Field(ClassFieldDecl {
             modifiers: member_modifiers,
@@ -851,8 +850,8 @@ impl<'a> Parser<'a> {
             open_paren,
             params,
             param_type_tokens,
-            param_defaults,
             param_commas,
+            param_defaults,
             param_at,
             close_paren,
             body,
@@ -1004,20 +1003,19 @@ impl<'a> Parser<'a> {
         while !self.at_eof() {
             match &self.peek().kind {
                 TokenKind::BraceClose => break,
-                TokenKind::Kw(Kw::Case) | TokenKind::Kw(Kw::Default) => break,
+                TokenKind::Kw(Kw::Case | Kw::Default) => break,
                 _ => {}
             }
-            match self.parse_stmt() {
-                Some(s) => out.push(s),
-                None => {
-                    if self.errors.is_empty() {
-                        self.error("UNEXPECTED_TOKEN", self.peek().span, "expected a statement");
-                    }
-                    if !self.at_eof() && !matches!(self.peek().kind, TokenKind::BraceClose) {
-                        self.bump();
-                    } else {
-                        break;
-                    }
+            if let Some(s) = self.parse_stmt() {
+                out.push(s)
+            } else {
+                if self.errors.is_empty() {
+                    self.error("UNEXPECTED_TOKEN", self.peek().span, "expected a statement");
+                }
+                if !self.at_eof() && !matches!(self.peek().kind, TokenKind::BraceClose) {
+                    self.bump();
+                } else {
+                    break;
                 }
             }
         }
@@ -1271,13 +1269,7 @@ impl<'a> Parser<'a> {
                 let t = self.text_tok(n);
                 // `Array<Cell>`, `T|U`, trailing `>` / `>>` closes generics (`>>` token).
                 // Not `)`: that follows parameter *names* (`a)`).
-                t == "@"
-                    || t == "<"
-                    || t == "|"
-                    || t == "?"
-                    || t == ">"
-                    || t == ">>"
-                    || t == ">>>"
+                t == "@" || t == "<" || t == "|" || t == "?" || t == ">" || t == ">>" || t == ">>>"
             }
             _ => false,
         }
@@ -1297,16 +1289,13 @@ impl<'a> Parser<'a> {
         let save = self.cur;
         let save_slack = self.type_gt_slack;
         self.type_gt_slack = 0;
-        match self.try_parse_type_expression_union() {
-            Ok(v) => {
-                self.type_gt_slack = save_slack;
-                Some(v)
-            }
-            Err(()) => {
-                self.cur = save;
-                self.type_gt_slack = save_slack;
-                None
-            }
+        if let Ok(v) = self.try_parse_type_expression_union() {
+            self.type_gt_slack = save_slack;
+            Some(v)
+        } else {
+            self.cur = save;
+            self.type_gt_slack = save_slack;
+            None
         }
     }
 
@@ -1441,26 +1430,26 @@ impl<'a> Parser<'a> {
             toks.extend(ret_toks);
             arrow_ret = Some((arrow, Box::new(ret)));
         } else {
-        loop {
-            let (arg, arg_toks) = self.try_parse_type_expression_union_ast()?;
-            toks.extend(arg_toks);
-            args.push(arg);
+            loop {
+                let (arg, arg_toks) = self.try_parse_type_expression_union_ast()?;
+                toks.extend(arg_toks);
+                args.push(arg);
 
-            if matches!(self.peek().kind, TokenKind::Comma) {
-                let c = self.bump();
-                toks.push(c);
-                commas.push(c);
-                continue;
+                if matches!(self.peek().kind, TokenKind::Comma) {
+                    let c = self.bump();
+                    toks.push(c);
+                    commas.push(c);
+                    continue;
+                }
+                if matches!(self.peek().kind, TokenKind::Arrow) {
+                    let arrow = self.bump();
+                    toks.push(arrow);
+                    let (ret, ret_toks) = self.try_parse_type_expression_union_ast()?;
+                    toks.extend(ret_toks);
+                    arrow_ret = Some((arrow, Box::new(ret)));
+                }
+                break;
             }
-            if matches!(self.peek().kind, TokenKind::Arrow) {
-                let arrow = self.bump();
-                toks.push(arrow);
-                let (ret, ret_toks) = self.try_parse_type_expression_union_ast()?;
-                toks.extend(ret_toks);
-                arrow_ret = Some((arrow, Box::new(ret)));
-            }
-            break;
-        }
         }
 
         let gt = match self.eat_type_gt_close()? {
@@ -1749,13 +1738,13 @@ impl<'a> Parser<'a> {
                 }));
                 return self
                     .parse_for_c_style_after_init(for_kw, open_paren, init)
-                    .map(Stmt::For);
+                    .map(|f| Stmt::For(Box::new(f)));
             }
             self.cur = binding.name;
             let init = Some(ForInit::Assign(self.parse_for_assign_in_header()?));
             return self
                 .parse_for_c_style_after_init(for_kw, open_paren, init)
-                .map(Stmt::For);
+                .map(|f| Stmt::For(Box::new(f)));
         }
         self.error(
             "UNEXPECTED_TOKEN",
@@ -1850,7 +1839,7 @@ impl<'a> Parser<'a> {
                 }));
                 return self
                     .parse_for_c_style_after_init(for_kw, open_paren, init)
-                    .map(Stmt::For);
+                    .map(|f| Stmt::For(Box::new(f)));
             }
         }
         if opt_type.is_some() {
@@ -1876,7 +1865,7 @@ impl<'a> Parser<'a> {
             return None;
         };
         self.parse_for_c_style_after_init(for_kw, open_paren, init)
-            .map(Stmt::For)
+            .map(|f| Stmt::For(Box::new(f)))
     }
 
     fn parse_for_c_style_after_init(
@@ -1929,15 +1918,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parameter list after `(`; leaves `)` to be consumed by caller.
-    fn parse_param_list_inner(
-        &mut self,
-    ) -> Option<(
-        Vec<usize>,
-        Vec<Vec<usize>>,
-        Vec<Option<ParamDefault>>,
-        Vec<usize>,
-        Vec<Option<usize>>,
-    )> {
+    fn parse_param_list_inner(&mut self) -> Option<ParsedParamListInner> {
         let mut params = Vec::new();
         let mut param_type_tokens = Vec::new();
         let mut param_defaults = Vec::new();
@@ -1956,13 +1937,12 @@ impl<'a> Parser<'a> {
             let checkpoint = self.cur;
             let save_slack = self.type_gt_slack;
             self.type_gt_slack = 0;
-            let mut pt = match self.try_parse_type_expression_union() {
-                Ok(t) => t,
-                Err(()) => {
-                    self.cur = checkpoint;
-                    self.type_gt_slack = save_slack;
-                    Vec::new()
-                }
+            let mut pt = if let Ok(t) = self.try_parse_type_expression_union() {
+                t
+            } else {
+                self.cur = checkpoint;
+                self.type_gt_slack = save_slack;
+                Vec::new()
             };
             // User-class types may be followed by `,` inside `Function<A, B => R>`; the same
             // rule lets bare `a` look like a type before `,` in `(a, b)`. If we parsed a type but
@@ -1984,7 +1964,8 @@ impl<'a> Parser<'a> {
             params.push(self.bump());
             param_at.push(at_tok);
             param_type_tokens.push(pt);
-            let default = if matches!(self.peek().kind, TokenKind::Operator) && self.text_tok(self.cur) == "="
+            let default = if matches!(self.peek().kind, TokenKind::Operator)
+                && self.text_tok(self.cur) == "="
             {
                 let eq = self.bump();
                 let value = self.parse_expr(0)?;
@@ -2095,16 +2076,15 @@ impl<'a> Parser<'a> {
 
     fn parse_function_decl(&mut self, member_modifiers: Vec<usize>) -> Option<FunctionDecl> {
         let function_kw = self.bump();
-        let name = match self.parse_function_name_token() {
-            Some(n) => n,
-            None => {
-                self.error(
-                    "UNEXPECTED_TOKEN",
-                    self.peek().span,
-                    "expected function name",
-                );
-                return None;
-            }
+        let name = if let Some(n) = self.parse_function_name_token() {
+            n
+        } else {
+            self.error(
+                "UNEXPECTED_TOKEN",
+                self.peek().span,
+                "expected function name",
+            );
+            return None;
         };
         if !matches!(self.peek().kind, TokenKind::ParOpen) {
             self.error(
@@ -2214,10 +2194,7 @@ impl<'a> Parser<'a> {
     /// `this` / `super` `.` field then `=` / `+=` / … — not a valid `return` value, so treat as ASI.
     fn lookahead_this_member_assign_after_return(&mut self) -> bool {
         let save = self.cur;
-        if !matches!(
-            self.peek().kind,
-            TokenKind::Kw(Kw::This | Kw::Super)
-        ) {
+        if !matches!(self.peek().kind, TokenKind::Kw(Kw::This | Kw::Super)) {
             return false;
         }
         self.bump();
@@ -2231,20 +2208,17 @@ impl<'a> Parser<'a> {
             return false;
         }
         self.bump();
-        let ok = matches!(self.peek().kind, TokenKind::Operator)
-            && {
-                let t = self.text_tok(self.cur);
-                t == "=" || is_compound_assign_op(t)
-            };
+        let ok = matches!(self.peek().kind, TokenKind::Operator) && {
+            let t = self.text_tok(self.cur);
+            t == "=" || is_compound_assign_op(t)
+        };
         self.cur = save;
         ok
     }
 
     fn peek_starts_new_stmt_after_naked_return(&mut self) -> bool {
         match &self.peek().kind {
-            TokenKind::Kw(Kw::This) | TokenKind::Kw(Kw::Super) => {
-                self.lookahead_this_member_assign_after_return()
-            }
+            TokenKind::Kw(Kw::This | Kw::Super) => self.lookahead_this_member_assign_after_return(),
             // `return function() { ... }` is one expression; `return` newline `function name(...)` is
             // a naked return plus a named `function` decl.
             TokenKind::Kw(Kw::Function) => {
@@ -2309,10 +2283,7 @@ impl<'a> Parser<'a> {
                             TokenKind::BraceOpen => brc += 1,
                             TokenKind::BraceClose => brc = brc.saturating_sub(1),
                             TokenKind::Operator
-                                if par == 0
-                                    && bra == 0
-                                    && brc == 0
-                                    && self.text_tok(j) == ":" =>
+                                if par == 0 && bra == 0 && brc == 0 && self.text_tok(j) == ":" =>
                             {
                                 return false;
                             }
@@ -2356,11 +2327,9 @@ impl<'a> Parser<'a> {
         let value = if matches!(
             self.peek().kind,
             TokenKind::Semicolon | TokenKind::BraceClose
-        ) {
-            None
-        } else if self.at_eof() {
-            None
-        } else if self.peek_starts_new_stmt_after_naked_return() {
+        ) || self.at_eof()
+            || self.peek_starts_new_stmt_after_naked_return()
+        {
             None
         } else {
             ptrace!(self, "parse_return: parse value expr");
@@ -2431,7 +2400,10 @@ impl<'a> Parser<'a> {
                         )
                 )
             {
-                ptrace!(self, "stop expr: next token starts stmt (implicit `;` rule)");
+                ptrace!(
+                    self,
+                    "stop expr: next token starts stmt (implicit `;` rule)"
+                );
                 break;
             }
             ptrace!(self, "loop top (min_bp={min_bp})");
@@ -2444,7 +2416,8 @@ impl<'a> Parser<'a> {
                 ptrace!(self, "ternary: saw '?'");
                 let question = self.bump();
                 let then_expr = Box::new(self.parse_expr(0)?);
-                if !(matches!(self.peek().kind, TokenKind::Operator) && self.text_tok(self.cur) == ":")
+                if !(matches!(self.peek().kind, TokenKind::Operator)
+                    && self.text_tok(self.cur) == ":")
                 {
                     ptrace!(self, "ternary: missing ':'");
                     self.error(
@@ -2492,12 +2465,15 @@ impl<'a> Parser<'a> {
                 }
                 ptrace!(self, "parse `as` cast");
                 let as_kw = self.bump();
-                let (ty, type_tokens) = match self.try_parse_type_expression_union_ast() {
-                    Ok(v) => v,
-                    Err(()) => {
-                        self.error("TYPE_EXPECTED", self.peek().span, "expected type after `as`");
-                        return None;
-                    }
+                let (ty, type_tokens) = if let Ok(v) = self.try_parse_type_expression_union_ast() {
+                    v
+                } else {
+                    self.error(
+                        "TYPE_EXPECTED",
+                        self.peek().span,
+                        "expected type after `as`",
+                    );
+                    return None;
                 };
                 lhs = Expr::AsCast {
                     expr: Box::new(lhs),
@@ -2522,7 +2498,10 @@ impl<'a> Parser<'a> {
                 break;
             };
             if l_bp < min_bp {
-                ptrace!(self, "operator too loose (l_bp={l_bp} < min_bp={min_bp}); break");
+                ptrace!(
+                    self,
+                    "operator too loose (l_bp={l_bp} < min_bp={min_bp}); break"
+                );
                 break;
             }
             // Ternary `cond ? then : else` (right-assoc). We route it through the operator loop by
@@ -2531,7 +2510,8 @@ impl<'a> Parser<'a> {
                 ptrace!(self, "ternary(loop): saw '?' (l_bp={l_bp})");
                 let question = self.bump();
                 let then_expr = Box::new(self.parse_expr(0)?);
-                if !(matches!(self.peek().kind, TokenKind::Operator) && self.text_tok(self.cur) == ":")
+                if !(matches!(self.peek().kind, TokenKind::Operator)
+                    && self.text_tok(self.cur) == ":")
                 {
                     ptrace!(self, "ternary(loop): missing ':'");
                     self.error(
@@ -2613,35 +2593,38 @@ impl<'a> Parser<'a> {
                 if prev_is_call_paren || matches!(prev, TokenKind::Comma) {
                     // fall through: do not attempt the shorthand here
                 } else {
-            let save = self.cur;
-            let mut params = Vec::new();
-            let mut commas = Vec::new();
-            params.push(self.bump());
-            while matches!(self.peek().kind, TokenKind::Comma) {
-                commas.push(self.bump());
-                if !matches!(self.peek().kind, TokenKind::Ident) {
+                    let save = self.cur;
+                    let mut params = Vec::new();
+                    let mut commas = Vec::new();
+                    params.push(self.bump());
+                    while matches!(self.peek().kind, TokenKind::Comma) {
+                        commas.push(self.bump());
+                        if !matches!(self.peek().kind, TokenKind::Ident) {
+                            self.cur = save;
+                            break;
+                        }
+                        params.push(self.bump());
+                    }
+                    if self.cur != save
+                        && matches!(self.peek().kind, TokenKind::Arrow)
+                        && params.len() >= 2
+                    {
+                        let arrow = self.bump();
+                        let body = if matches!(self.peek().kind, TokenKind::BraceOpen) {
+                            ArrowFnBody::Block(self.parse_block()?)
+                        } else {
+                            ArrowFnBody::Expr(Box::new(self.parse_expr(0)?))
+                        };
+                        return Some(Expr::ArrowFn {
+                            open_paren: None,
+                            params,
+                            param_commas: commas,
+                            close_paren: None,
+                            arrow,
+                            body,
+                        });
+                    }
                     self.cur = save;
-                    break;
-                }
-                params.push(self.bump());
-            }
-            if self.cur != save && matches!(self.peek().kind, TokenKind::Arrow) && params.len() >= 2 {
-                let arrow = self.bump();
-                let body = if matches!(self.peek().kind, TokenKind::BraceOpen) {
-                    ArrowFnBody::Block(self.parse_block()?)
-                } else {
-                    ArrowFnBody::Expr(Box::new(self.parse_expr(0)?))
-                };
-                return Some(Expr::ArrowFn {
-                    open_paren: None,
-                    params,
-                    param_commas: commas,
-                    close_paren: None,
-                    arrow,
-                    body,
-                });
-            }
-            self.cur = save;
                 }
             }
         }
@@ -2888,32 +2871,31 @@ impl<'a> Parser<'a> {
         colon1: usize,
         start: Option<Box<Expr>>,
     ) -> Option<Expr> {
-        let (end, colon_step, step) =
+        let (end, colon_step, step) = if matches!(self.peek().kind, TokenKind::BracketClose) {
+            (None, None, None)
+        } else if self.is_operator_text(":") {
+            let colon2 = self.bump();
             if matches!(self.peek().kind, TokenKind::BracketClose) {
-                (None, None, None)
-            } else if self.is_operator_text(":") {
+                // `[::]` / `[start::]` — omitted `end` and `step` (defaults).
+                (None, Some(colon2), None)
+            } else {
+                let step = Box::new(self.parse_expr(0)?);
+                (None, Some(colon2), Some(step))
+            }
+        } else {
+            let end_e = Box::new(self.parse_expr(0)?);
+            if self.is_operator_text(":") {
                 let colon2 = self.bump();
                 if matches!(self.peek().kind, TokenKind::BracketClose) {
-                    // `[::]` / `[start::]` — omitted `end` and `step` (defaults).
-                    (None, Some(colon2), None)
+                    (Some(end_e), Some(colon2), None)
                 } else {
                     let step = Box::new(self.parse_expr(0)?);
-                    (None, Some(colon2), Some(step))
+                    (Some(end_e), Some(colon2), Some(step))
                 }
             } else {
-                let end_e = Box::new(self.parse_expr(0)?);
-                if self.is_operator_text(":") {
-                    let colon2 = self.bump();
-                    if matches!(self.peek().kind, TokenKind::BracketClose) {
-                        (Some(end_e), Some(colon2), None)
-                    } else {
-                        let step = Box::new(self.parse_expr(0)?);
-                        (Some(end_e), Some(colon2), Some(step))
-                    }
-                } else {
-                    (Some(end_e), None, None)
-                }
-            };
+                (Some(end_e), None, None)
+            }
+        };
         if !matches!(self.peek().kind, TokenKind::BracketClose) {
             self.error("UNEXPECTED_TOKEN", self.peek().span, "expected `]`");
             return None;
@@ -2965,11 +2947,10 @@ impl<'a> Parser<'a> {
 
     fn finish_member(&mut self, base: Expr) -> Option<Expr> {
         let dot = self.bump();
-        let field = if matches!(self.peek().kind, TokenKind::Ident) {
-            self.bump()
-        } else if matches!(self.peek().kind, TokenKind::Kw(Kw::Class)) {
-            self.bump()
-        } else if matches!(self.peek().kind, TokenKind::Kw(Kw::Super)) {
+        let field = if matches!(self.peek().kind, TokenKind::Ident)
+            || matches!(self.peek().kind, TokenKind::Kw(Kw::Class))
+            || matches!(self.peek().kind, TokenKind::Kw(Kw::Super))
+        {
             self.bump()
         } else {
             self.error(
@@ -3011,11 +2992,11 @@ impl<'a> Parser<'a> {
                     arg_commas.push(Some(self.bump()));
                     continue;
                 }
-                if matches!(self.peek().kind, TokenKind::String) {
-                    if args.last().is_some_and(|a| self.expr_is_string_leaf(a)) {
-                        arg_commas.push(None);
-                        continue;
-                    }
+                if matches!(self.peek().kind, TokenKind::String)
+                    && args.last().is_some_and(|a| self.expr_is_string_leaf(a))
+                {
+                    arg_commas.push(None);
+                    continue;
                 }
                 self.error("UNEXPECTED_TOKEN", self.peek().span, "expected `,` or `)`");
                 return None;
@@ -3472,11 +3453,11 @@ impl<'a> Parser<'a> {
                     arg_commas.push(Some(self.bump()));
                     continue;
                 }
-                if matches!(self.peek().kind, TokenKind::String) {
-                    if args.last().is_some_and(|a| self.expr_is_string_leaf(a)) {
-                        arg_commas.push(None);
-                        continue;
-                    }
+                if matches!(self.peek().kind, TokenKind::String)
+                    && args.last().is_some_and(|a| self.expr_is_string_leaf(a))
+                {
+                    arg_commas.push(None);
+                    continue;
                 }
                 self.error("UNEXPECTED_TOKEN", self.peek().span, "expected `,` or `)`");
                 return None;
@@ -3654,11 +3635,7 @@ impl<'a> Parser<'a> {
                     let left = self.bump();
                     self.parse_interval_leading_rbracket(left)
                 } else {
-                    self.error(
-                        "UNEXPECTED_TOKEN",
-                        self.peek().span,
-                        "unexpected `]`",
-                    );
+                    self.error("UNEXPECTED_TOKEN", self.peek().span, "unexpected `]`");
                     None
                 }
             }

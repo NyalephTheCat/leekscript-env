@@ -1,6 +1,6 @@
 //! Full Java `Test*.java` parity suite (generated `cases_generated.rs` + grouped tests).
 //!
-//! Regenerate from the reference JUnit sources:
+//! Regenerate from the reference `JUnit` sources:
 //!
 //! ```text
 //! python3 scripts/extract_java_vm_cases.py

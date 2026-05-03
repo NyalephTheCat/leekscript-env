@@ -31,9 +31,10 @@ fn repo_root() -> PathBuf {
 }
 
 fn test_resources_root() -> PathBuf {
-    std::env::var("LEEKSCRIPT_TEST_RESOURCES")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| repo_root().join("leek-wars-generator/leekscript/src/test/resources"))
+    std::env::var("LEEKSCRIPT_TEST_RESOURCES").map_or_else(
+        |_| repo_root().join("leek-wars-generator/leekscript/src/test/resources"),
+        PathBuf::from,
+    )
 }
 
 fn rust_export_string(case: &JavaVmCase, version: u8) -> String {

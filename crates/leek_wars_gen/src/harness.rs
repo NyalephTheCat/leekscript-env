@@ -43,7 +43,11 @@ pub fn discover_scenario_json_files(cwd: &Path, dir: &Path) -> std::io::Result<V
     Ok(paths)
 }
 
-fn collect_scenario_json_files_recursive(base: &Path, cwd: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+fn collect_scenario_json_files_recursive(
+    base: &Path,
+    cwd: &Path,
+    out: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
     for entry in std::fs::read_dir(base)? {
         let entry = entry?;
         let p = entry.path();
@@ -62,7 +66,10 @@ fn collect_scenario_json_files_recursive(base: &Path, cwd: &Path, out: &mut Vec<
 }
 
 /// Like [`discover_scenario_json_files`], but walks subdirectories (e.g. `test/scenario/generated/`).
-pub fn discover_scenario_json_files_recursive(cwd: &Path, dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+pub fn discover_scenario_json_files_recursive(
+    cwd: &Path,
+    dir: &Path,
+) -> std::io::Result<Vec<PathBuf>> {
     let base = if dir.is_absolute() {
         dir.to_path_buf()
     } else {
@@ -82,6 +89,7 @@ pub fn discover_scenario_json_files_recursive(cwd: &Path, dir: &Path) -> std::io
 pub const INCOMPLETE_SCENARIO_BASELINES: &[&str] = &["battleroyale.json"];
 
 /// Subset of action codes used while the Rust engine still omits many log lines (legacy parity test).
+#[must_use]
 pub fn minimal_action_code_filter() -> BTreeSet<i64> {
     [0_i64, 5, 6, 7, 8, 10, 12, 13, 16, 101]
         .into_iter()
@@ -113,6 +121,7 @@ pub struct TimingSummary {
 }
 
 impl TimingSummary {
+    #[must_use]
     pub fn from_samples(mut samples: Vec<f64>) -> Self {
         let n = samples.len();
         if n == 0 {
@@ -129,7 +138,7 @@ impl TimingSummary {
         let median_ms = if n % 2 == 1 {
             samples[n / 2]
         } else {
-            (samples[n / 2 - 1] + samples[n / 2]) / 2.0
+            f64::midpoint(samples[n / 2 - 1], samples[n / 2])
         };
         let mean_ms = samples.iter().sum::<f64>() / n as f64;
         Self {
@@ -211,6 +220,7 @@ pub struct ScenarioHarnessReport {
 
 impl ScenarioHarnessReport {
     /// `true` when the chosen compare mode detected a real mismatch (not “engine skipped”).
+    #[must_use]
     pub fn comparison_failed(&self) -> bool {
         match &self.compare {
             CompareResult::FullMatch
@@ -224,11 +234,13 @@ impl ScenarioHarnessReport {
     }
 
     /// `true` when a configured engine exited with an error before producing an outcome.
+    #[must_use]
     pub fn engine_run_failed(&self) -> bool {
         self.java_error.is_some() || self.rust_error.is_some()
     }
 
     /// Human-readable combined engine errors for logs and fuzz [`crate::error::GenError::Message`].
+    #[must_use]
     pub fn engine_errors_display(&self) -> Option<String> {
         if self.java_error.is_none() && self.rust_error.is_none() {
             return None;
@@ -276,7 +288,7 @@ fn extract_action_codes(outcome: &Value) -> Vec<i64> {
         let code = a
             .as_array()
             .and_then(|arr| arr.first())
-            .and_then(|x| x.as_i64());
+            .and_then(serde_json::Value::as_i64);
         if let Some(c) = code {
             v.push(c);
         }
@@ -301,12 +313,16 @@ fn outcome_json_parse_errors(java: &str, rust: &str) -> Option<(Option<String>, 
     let je = if java.trim().is_empty() {
         Some("empty stdout".into())
     } else {
-        serde_json::from_str::<Value>(java).err().map(|e| e.to_string())
+        serde_json::from_str::<Value>(java)
+            .err()
+            .map(|e| e.to_string())
     };
     let re = if rust.trim().is_empty() {
         Some("empty stdout".into())
     } else {
-        serde_json::from_str::<Value>(rust).err().map(|e| e.to_string())
+        serde_json::from_str::<Value>(rust)
+            .err()
+            .map(|e| e.to_string())
     };
     if je.is_none() && re.is_none() {
         None
@@ -318,6 +334,7 @@ fn outcome_json_parse_errors(java: &str, rust: &str) -> Option<(Option<String>, 
 /// Compare two raw outcome JSON strings according to `mode`.
 ///
 /// Invalid JSON is reported as [`CompareResult::OutcomeNotJson`] instead of failing the harness.
+#[must_use]
 pub fn compare_outcomes(mode: CompareMode, java: &str, rust: &str) -> CompareResult {
     match mode {
         CompareMode::FullNormalized => {
@@ -593,10 +610,10 @@ pub fn run_scenario_harness(
             }
         }
         _ => CompareResult::FullMismatch {
-            note: if !cfg.run_java {
-                "Official generator skipped; no A/B comparison".into()
-            } else {
+            note: if cfg.run_java {
                 "Rust skipped; no A/B comparison".into()
+            } else {
+                "Official generator skipped; no A/B comparison".into()
             },
             normalized_diff: None,
         },

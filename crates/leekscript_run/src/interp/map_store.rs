@@ -15,17 +15,20 @@ pub struct MapStore {
 
 fn mix(tag: u8, payload: u64) -> u64 {
     0x9e37_79b9_7f4a_7c15u64
-        .wrapping_mul(tag as u64 + 1)
+        .wrapping_mul(u64::from(tag) + 1)
         .wrapping_add(payload)
 }
 
 /// Hash partition for bucket lookup. Must match for keys that [`values_equal_for_compare`] treats as equal
 /// for scalar numerics (integer / whole real / bool / null coercions).
 pub fn map_bucket_hash(k: &Value) -> u64 {
-    use Value::*;
+    use Value::{
+        Array, Bool, Function, Instance, Integer, Interval, Map, Native, Null, Object, Real,
+        RealDotZero, Set, String, Super, UserClass,
+    };
     match k {
         Integer(i) => mix(1, *i as u64),
-        Bool(b) => mix(1, if *b { 1 } else { 0 }),
+        Bool(b) => mix(1, u64::from(*b)),
         Null => mix(1, 0),
         Real(r) | RealDotZero(r) => {
             if r.is_finite() && r.fract() == 0.0 && *r >= i64::MIN as f64 && *r <= i64::MAX as f64 {
@@ -39,7 +42,7 @@ pub fn map_bucket_hash(k: &Value) -> u64 {
             for b in s.as_bytes().chunks(8) {
                 let mut x = 0u64;
                 for (i, &bb) in b.iter().enumerate() {
-                    x |= (bb as u64) << (i * 8);
+                    x |= u64::from(bb) << (i * 8);
                 }
                 h = h.wrapping_mul(0x100000001b3).wrapping_add(x);
             }
@@ -50,8 +53,8 @@ pub fn map_bucket_hash(k: &Value) -> u64 {
         Set(s) => mix(6, Rc::as_ptr(s) as usize as u64),
         Interval(iv) => mix(
             7,
-            (iv.min_closed as u8 as u64)
-                .wrapping_add((iv.max_closed as u8 as u64) << 8)
+            u64::from(u8::from(iv.min_closed))
+                .wrapping_add(u64::from(u8::from(iv.max_closed)) << 8)
                 .wrapping_add(iv.min.to_bits())
                 .wrapping_add(iv.max.to_bits().rotate_left(17)),
         ),
@@ -61,7 +64,7 @@ pub fn map_bucket_hash(k: &Value) -> u64 {
         UserClass(c) => {
             let mut h = 0u64;
             for b in c.as_bytes() {
-                h = h.wrapping_mul(31).wrapping_add(*b as u64);
+                h = h.wrapping_mul(31).wrapping_add(u64::from(*b));
             }
             mix(11, h.wrapping_add(c.len() as u64))
         }
@@ -99,16 +102,17 @@ impl MapStore {
 
     fn bucket_indices(&self, k: &Value) -> &[usize] {
         let h = map_bucket_hash(k);
-        self.buckets.get(&h).map(|v| v.as_slice()).unwrap_or(&[])
+        self.buckets
+            .get(&h)
+            .map(std::vec::Vec::as_slice)
+            .unwrap_or(&[])
     }
 
     pub fn find_key(&self, k: &Value) -> Option<usize> {
-        for &i in self.bucket_indices(k) {
-            if values_equal_for_compare(&self.entries[i].0, k) {
-                return Some(i);
-            }
-        }
-        None
+        self.bucket_indices(k)
+            .iter()
+            .find(|&&i| values_equal_for_compare(&self.entries[i].0, k))
+            .copied()
     }
 
     pub fn find_key_legacy(&self, k: &Value) -> Option<usize> {

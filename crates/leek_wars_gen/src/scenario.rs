@@ -16,7 +16,7 @@ where
         Some(serde_json::Value::Number(n)) => n.as_i64().unwrap_or(0) as i32,
         Some(serde_json::Value::Object(map)) => map
             .get("template")
-            .and_then(|x| x.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(0) as i32,
         _ => 0,
     })
@@ -193,6 +193,7 @@ pub struct EntityInfo {
 
 impl Scenario {
     /// `map.width` / `map.height` from JSON when present (official scenarios embed a `map` object).
+    #[must_use]
     pub fn map_size(&self) -> (i32, i32) {
         self.extra
             .get("map")
@@ -210,6 +211,7 @@ impl Scenario {
     /// `Scenario.fromFile` in the official generator does not copy the JSON `map` object into the scenario, so `Main`
     /// runs fights on this fixed size regardless of `map.width` / `map.height` in the file.
     /// The Rust engine uses the same dimensions when simulating that jar path.
+    #[must_use]
     pub fn engine_map_size_java_main(&self) -> (i32, i32) {
         let _ = self;
         (18, 18)
@@ -218,6 +220,7 @@ impl Scenario {
     /// Parse `map.obstacles` when present (official generator `Actions.addMap` serializes it).
     ///
     /// Returns `cell_id -> obstacle_size_or_id` (we store the raw JSON integer value).
+    #[must_use]
     pub fn map_obstacles(&self) -> BTreeMap<i32, i32> {
         let mut out = BTreeMap::new();
         let Some(map) = self.extra.get("map").and_then(|v| v.as_object()) else {
@@ -237,12 +240,13 @@ impl Scenario {
     }
 
     /// `map.type` when present (official generator `Map.getType()`), defaulting to `0`.
+    #[must_use]
     pub fn map_type(&self) -> i32 {
         self.extra
             .get("map")
             .and_then(|v| v.as_object())
             .and_then(|o| o.get("type"))
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(0) as i32
     }
 
@@ -254,8 +258,7 @@ impl Scenario {
             s.random_seed = Some(
                 1 + (std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| (d.as_nanos() % i32::MAX as u128) as i32)
-                    .unwrap_or(1)
+                    .map_or(1, |d| (d.as_nanos() % i32::MAX as u128) as i32)
                     .abs()
                     % i32::MAX),
             );

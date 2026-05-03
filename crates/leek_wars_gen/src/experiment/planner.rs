@@ -24,6 +24,7 @@ pub struct RunTask {
     pub overlay_sources: HashMap<String, String>,
 }
 
+#[must_use]
 pub fn expand_seeds(spec: &SeedsSpec) -> Vec<i32> {
     match spec {
         SeedsSpec::List { list } => list.clone(),
@@ -43,7 +44,9 @@ pub fn expand_seeds(spec: &SeedsSpec) -> Vec<i32> {
     }
 }
 
-fn cartesian_for_file(cmap: &HashMap<String, Vec<serde_json::Value>>) -> Vec<HashMap<String, serde_json::Value>> {
+fn cartesian_for_file(
+    cmap: &HashMap<String, Vec<serde_json::Value>>,
+) -> Vec<HashMap<String, serde_json::Value>> {
     let keys: Vec<String> = cmap.keys().cloned().collect();
     if keys.is_empty() {
         return vec![HashMap::new()];
@@ -65,7 +68,10 @@ fn cartesian_for_file(cmap: &HashMap<String, Vec<serde_json::Value>>) -> Vec<Has
 }
 
 /// Expand tunable grid for one arm: list of (file → const map).
-pub fn expand_arm_tunables(arm: &ArmSpec) -> Vec<HashMap<String, HashMap<String, serde_json::Value>>> {
+#[must_use]
+pub fn expand_arm_tunables(
+    arm: &ArmSpec,
+) -> Vec<HashMap<String, HashMap<String, serde_json::Value>>> {
     if !arm.variants.is_empty() {
         return arm.variants.clone();
     }
@@ -100,17 +106,28 @@ fn apply_ai_overrides(scenario: &mut Value, arm: &ArmSpec) -> Result<(), GenErro
         let team = entities
             .get_mut(ov.team)
             .and_then(|t| t.as_array_mut())
-            .ok_or_else(|| GenError::Message(format!("ai_overrides: bad team index {}", ov.team)))?;
+            .ok_or_else(|| {
+                GenError::Message(format!("ai_overrides: bad team index {}", ov.team))
+            })?;
         let ent = team
             .get_mut(ov.entity)
             .and_then(|e| e.as_object_mut())
-            .ok_or_else(|| GenError::Message(format!("ai_overrides: bad entity {} {}", ov.team, ov.entity)))?;
+            .ok_or_else(|| {
+                GenError::Message(format!(
+                    "ai_overrides: bad entity {} {}",
+                    ov.team, ov.entity
+                ))
+            })?;
         ent.insert("ai".to_string(), json!(ov.ai.clone()));
     }
     Ok(())
 }
 
-fn apply_loadout_preset(scenario: &mut Value, preset_path: &Path, seed: i32) -> Result<(), GenError> {
+fn apply_loadout_preset(
+    scenario: &mut Value,
+    preset_path: &Path,
+    seed: i32,
+) -> Result<(), GenError> {
     let preset = load_value(preset_path)?;
     let weapons = preset
         .get("weapons")
@@ -141,7 +158,8 @@ fn apply_loadout_preset(scenario: &mut Value, preset_path: &Path, seed: i32) -> 
                 continue;
             };
             if !weapons.is_empty() && obj.contains_key("weapons") {
-                let n = rng.gen_range(1..=weapons.len().min(4).max(1));
+                let cap = weapons.len().clamp(1, 4);
+                let n = rng.gen_range(1..=cap);
                 let mut idx: Vec<usize> = (0..weapons.len()).collect();
                 // partial shuffle
                 for i in 0..n {
@@ -169,7 +187,7 @@ fn apply_loadout_preset(scenario: &mut Value, preset_path: &Path, seed: i32) -> 
                         }
                     }
                     if v.is_empty() && !chips.is_empty() {
-                        let max_chips = chips.len().min(12).max(1);
+                        let max_chips = chips.len().clamp(1, 12);
                         let n = rng.gen_range(1..=max_chips);
                         let mut idx: Vec<usize> = (0..chips.len()).collect();
                         for i in 0..n.min(chips.len()) {
@@ -184,7 +202,7 @@ fn apply_loadout_preset(scenario: &mut Value, preset_path: &Path, seed: i32) -> 
                         v
                     }
                 } else if !chips.is_empty() {
-                    let max_chips = chips.len().min(12).max(1);
+                    let max_chips = chips.len().clamp(1, 12);
                     let n = rng.gen_range(1..=max_chips);
                     let mut idx: Vec<usize> = (0..chips.len()).collect();
                     for i in 0..n.min(chips.len()) {
@@ -228,7 +246,10 @@ pub fn build_overlay_sources(
 }
 
 /// Expand full experiment to run tasks (deterministic order: arms × tunable combos × seeds).
-pub fn plan_experiment(spec: &ExperimentSpec, generator_root: &Path) -> Result<Vec<RunTask>, GenError> {
+pub fn plan_experiment(
+    spec: &ExperimentSpec,
+    generator_root: &Path,
+) -> Result<Vec<RunTask>, GenError> {
     let scenario_path = if spec.scenario.is_absolute() {
         spec.scenario.clone()
     } else {
@@ -239,7 +260,9 @@ pub fn plan_experiment(spec: &ExperimentSpec, generator_root: &Path) -> Result<V
     let base_template = load_value(&scenario_path)?;
     let seeds = expand_seeds(&spec.seeds);
     if seeds.is_empty() {
-        return Err(GenError::Message("experiment needs at least one seed".into()));
+        return Err(GenError::Message(
+            "experiment needs at least one seed".into(),
+        ));
     }
 
     let mut tasks = Vec::new();
@@ -279,6 +302,18 @@ pub fn plan_experiment(spec: &ExperimentSpec, generator_root: &Path) -> Result<V
         }
     }
     Ok(tasks)
+}
+
+/// Reload base scenario from spec path (call after `plan_experiment` if you only need to refresh path).
+pub fn load_base_scenario(spec: &ExperimentSpec) -> Result<Value, GenError> {
+    let scenario_path = if spec.scenario.is_absolute() {
+        spec.scenario.clone()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(&spec.scenario)
+    };
+    load_value(&scenario_path)
 }
 
 #[cfg(test)]
@@ -329,8 +364,7 @@ mod tests {
             "lw_preset_test_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_nanos())
         ));
         let p = dir.join("p.json");
         std::fs::create_dir_all(&dir).unwrap();
@@ -344,16 +378,4 @@ mod tests {
         assert!(chips.contains(&json!(200)));
         let _ = std::fs::remove_dir_all(&dir);
     }
-}
-
-/// Reload base scenario from spec path (call after `plan_experiment` if you only need to refresh path).
-pub fn load_base_scenario(spec: &ExperimentSpec) -> Result<Value, GenError> {
-    let scenario_path = if spec.scenario.is_absolute() {
-        spec.scenario.clone()
-    } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(&spec.scenario)
-    };
-    load_value(&scenario_path)
 }

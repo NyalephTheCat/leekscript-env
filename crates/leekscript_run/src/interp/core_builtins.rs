@@ -227,7 +227,7 @@ fn dispatch(
         }
         "getMaxOperations" => {
             expect_arity(name, 0, args.len())?;
-            let v = cx.operations_limit.map(|x| x as i64).unwrap_or(i64::MAX);
+            let v = cx.operations_limit.map_or(i64::MAX, |x| x as i64);
             Ok(Value::Integer(v))
         }
         "getRam" => {
@@ -431,7 +431,7 @@ fn dispatch(
                     }
                     let s: f64 = b
                         .iter()
-                        .map(|v| number_from_value(v))
+                        .map(number_from_value)
                         .collect::<Result<Vec<_>, _>>()?
                         .into_iter()
                         .sum();
@@ -484,7 +484,9 @@ fn dispatch(
         }
         "bitCount" => {
             expect_arity(name, 1, args.len())?;
-            Ok(Value::Integer(int_operand(&args[0])?.count_ones() as i64))
+            Ok(Value::Integer(i64::from(
+                int_operand(&args[0])?.count_ones(),
+            )))
         }
         "bitReverse" => {
             expect_arity(name, 1, args.len())?;
@@ -631,7 +633,9 @@ fn dispatch(
         }
         "leadingZeros" => {
             expect_arity(name, 1, args.len())?;
-            Ok(Value::Integer(int_operand(&args[0])?.leading_zeros() as i64))
+            Ok(Value::Integer(i64::from(
+                int_operand(&args[0])?.leading_zeros(),
+            )))
         }
         "log" => {
             expect_arity(name, 1, args.len())?;
@@ -657,29 +661,27 @@ fn dispatch(
         }
         "max" => {
             expect_arity(name, 2, args.len())?;
-            match (&args[0], &args[1]) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(*a.max(b))),
-                _ => {
-                    let r = number_from_value(&args[0])?.max(number_from_value(&args[1])?);
-                    if cx.language_version == 1 && r.is_finite() && r.fract() == 0.0 {
-                        Ok(Value::Integer(r as i64))
-                    } else {
-                        Ok(Value::Real(r))
-                    }
+            if let (Value::Integer(a), Value::Integer(b)) = (&args[0], &args[1]) {
+                Ok(Value::Integer(*a.max(b)))
+            } else {
+                let r = number_from_value(&args[0])?.max(number_from_value(&args[1])?);
+                if cx.language_version == 1 && r.is_finite() && r.fract() == 0.0 {
+                    Ok(Value::Integer(r as i64))
+                } else {
+                    Ok(Value::Real(r))
                 }
             }
         }
         "min" => {
             expect_arity(name, 2, args.len())?;
-            match (&args[0], &args[1]) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(*a.min(b))),
-                _ => {
-                    let r = number_from_value(&args[0])?.min(number_from_value(&args[1])?);
-                    if cx.language_version == 1 && r.is_finite() && r.fract() == 0.0 {
-                        Ok(Value::Integer(r as i64))
-                    } else {
-                        Ok(Value::Real(r))
-                    }
+            if let (Value::Integer(a), Value::Integer(b)) = (&args[0], &args[1]) {
+                Ok(Value::Integer(*a.min(b)))
+            } else {
+                let r = number_from_value(&args[0])?.min(number_from_value(&args[1])?);
+                if cx.language_version == 1 && r.is_finite() && r.fract() == 0.0 {
+                    Ok(Value::Integer(r as i64))
+                } else {
+                    Ok(Value::Real(r))
                 }
             }
         }
@@ -742,12 +744,11 @@ fn dispatch(
         }
         "signum" => {
             expect_arity(name, 1, args.len())?;
-            match &args[0] {
-                Value::Integer(i) => Ok(Value::Integer(i.signum())),
-                _ => {
-                    let x = number_from_value(&args[0])?;
-                    Ok(Value::Integer(x.signum() as i64))
-                }
+            if let Value::Integer(i) = &args[0] {
+                Ok(Value::Integer(i.signum()))
+            } else {
+                let x = number_from_value(&args[0])?;
+                Ok(Value::Integer(x.signum() as i64))
             }
         }
         "sin" => {
@@ -829,9 +830,9 @@ fn dispatch(
         }
         "trailingZeros" => {
             expect_arity(name, 1, args.len())?;
-            Ok(Value::Integer(
-                int_operand(&args[0])?.trailing_zeros() as i64
-            ))
+            Ok(Value::Integer(i64::from(
+                int_operand(&args[0])?.trailing_zeros(),
+            )))
         }
 
         "charAt" => {
@@ -1475,7 +1476,7 @@ fn dispatch(
         "shuffle" => {
             expect_arity(name, 1, args.len())?;
             let a = expect_array(&args[0])?;
-            fastrand::shuffle(&mut *a.borrow_mut());
+            fastrand::shuffle(&mut a.borrow_mut());
             Ok(Value::Null)
         }
         "sort" => sort_builtin(cx, args),
@@ -1872,12 +1873,12 @@ fn dispatch(
             let a = sa.borrow();
             let b = sb.borrow();
             let mut out = Vec::new();
-            for x in a.elems.iter() {
+            for x in &a.elems {
                 if !b.elems.iter().any(|y| values_equal_for_compare(x, y)) {
                     out.push(x.clone());
                 }
             }
-            for x in b.elems.iter() {
+            for x in &b.elems {
                 if !a.elems.iter().any(|y| values_equal_for_compare(x, y)) {
                     out.push(x.clone());
                 }
@@ -2004,7 +2005,7 @@ fn dispatch(
                 }
                 return Ok(Value::Real(sum / pairs.len() as f64));
             }
-            Ok(Value::Real((iv.min + iv.max) / 2.0))
+            Ok(Value::Real(f64::midpoint(iv.min, iv.max)))
         }
         "intervalCombine" => dispatch_interval_combine(args),
         "intervalIntersection" => dispatch_interval_intersection(args),
@@ -2170,17 +2171,17 @@ fn dispatch(
         "getRed" => {
             expect_arity(name, 1, args.len())?;
             let c = int_operand(&args[0])?;
-            Ok(Value::Integer(((c >> 16) & 255) as i64))
+            Ok(Value::Integer((c >> 16) & 255))
         }
         "getGreen" => {
             expect_arity(name, 1, args.len())?;
             let c = int_operand(&args[0])?;
-            Ok(Value::Integer(((c >> 8) & 255) as i64))
+            Ok(Value::Integer((c >> 8) & 255))
         }
         "getBlue" => {
             expect_arity(name, 1, args.len())?;
             let c = int_operand(&args[0])?;
-            Ok(Value::Integer((c & 255) as i64))
+            Ok(Value::Integer(c & 255))
         }
         "color" => {
             if cx.language_version >= 4 {
@@ -2241,7 +2242,7 @@ fn expect_array(v: &Value) -> Result<super::value::SharedArray, InterpretError> 
             if b.extends.as_deref() == Some("Array") {
                 b.array_backing
                     .clone()
-                    .ok_or_else(|| InterpretError::wrong_operand_types_binary())
+                    .ok_or_else(InterpretError::wrong_operand_types_binary)
             } else {
                 Err(InterpretError::wrong_operand_types_binary())
             }
@@ -2327,7 +2328,7 @@ fn legacy_partition_bucket_export(mut entries: Vec<(i64, Value)>) -> Value {
     if entries.is_empty() {
         return Value::array_from(Vec::new());
     }
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.sort_by_key(|a| a.0);
     let dense_prefix = entries.iter().enumerate().all(|(i, (k, _))| *k == i as i64);
     if dense_prefix {
         Value::array_from(entries.into_iter().map(|(_, v)| v).collect())
@@ -2342,7 +2343,7 @@ fn legacy_partition_bucket_export(mut entries: Vec<(i64, Value)>) -> Value {
 }
 
 fn cmp_sort_values(a: &Value, b: &Value) -> Result<Ordering, InterpretError> {
-    use Value::*;
+    use Value::{Bool, Integer, Null, String};
     let ord = match (a, b) {
         (Null, Null) => Ordering::Equal,
         (Null, _) => Ordering::Less,
@@ -2373,7 +2374,18 @@ fn invoke_user(
     if cx.language_version == 1 {
         cx.v1_array_cb_depth += 1;
     }
-    let out = match invoke_value(cx, None, None, f, args, false, arg_array_cells, None) {
+    let out = match invoke_value(
+        cx,
+        None,
+        None,
+        f,
+        args,
+        super::call::InvokeOptions {
+            enforce_min_arity: false,
+            arg_array_cells,
+            arg_idents: None,
+        },
+    ) {
         Ok(v) => Ok(v),
         Err(ExecAbort::Error(e)) => Err(e),
         Err(ExecAbort::Throw(_)) => Err(InterpretError::uncaught_throw()),
@@ -2670,7 +2682,7 @@ fn search_dispatch(cx: &mut InterpCx, args: &[Value]) -> Result<Value, Interpret
             if let Value::String(s) = &args[0] {
                 let needle = expect_str(&args[1])?;
                 return Ok(Value::Integer(
-                    s.find(needle.as_str()).map(|i| i as i64).unwrap_or(-1),
+                    s.find(needle.as_str()).map_or(-1, |i| i as i64),
                 ));
             }
             if let Value::Map(m) | Value::Object(m) = &args[0] {
@@ -2746,10 +2758,10 @@ fn code_point_at_java(s: &str, i: i64) -> Result<i64, InterpretError> {
         if !(0xDC00..=0xDFFF).contains(&low) {
             return Err(InterpretError::array_index_out_of_bounds());
         }
-        let cp = 0x10000u32 + (((u as u32 - 0xD800) << 10) | (low as u32 - 0xDC00));
-        return Ok(cp as i64);
+        let cp = 0x10000u32 + (((u32::from(u) - 0xD800) << 10) | (u32::from(low) - 0xDC00));
+        return Ok(i64::from(cp));
     }
-    Ok(u as i64)
+    Ok(i64::from(u))
 }
 
 fn index_of_dispatch(_cx: &mut InterpCx, args: &[Value]) -> Result<Value, InterpretError> {
@@ -2980,7 +2992,7 @@ fn array_slice_native(cx: &mut InterpCx, args: &[Value]) -> Result<Value, Interp
         let mut i = st as i64;
         while (i as usize) < en {
             out.push(b[i as usize].clone());
-            i += step as i64;
+            i += step;
         }
         cx.charge_ram_quads(out.len() as u64)?;
         Ok(Value::array_from(out))
@@ -2996,7 +3008,7 @@ fn array_slice_native(cx: &mut InterpCx, args: &[Value]) -> Result<Value, Interp
                 el
             }
         };
-        let mut i = start as i64;
+        let mut i = start;
         if i >= len_i {
             i = len_i - 1;
         }
@@ -3006,7 +3018,7 @@ fn array_slice_native(cx: &mut InterpCx, args: &[Value]) -> Result<Value, Interp
         i = i.clamp(0, len_i - 1);
         let b = a.borrow();
         let mut out = Vec::new();
-        let step_abs = (-step) as i64;
+        let step_abs = -step;
         while i > exclusive_low && i < len_i {
             out.push(b[i as usize].clone());
             i -= step_abs;
@@ -3311,13 +3323,13 @@ fn clone_value_deep(
             let mut inner = Vec::new();
             match &mut cx {
                 Some(c) => {
-                    for x in s.borrow().elems.iter() {
+                    for x in &s.borrow().elems {
                         inner.push(clone_value_deep(x, d, Some(&mut **c))?);
                     }
                     (*c).charge_ram_quads(inner.len() as u64)?;
                 }
                 None => {
-                    for x in s.borrow().elems.iter() {
+                    for x in &s.borrow().elems {
                         inner.push(clone_value_deep(x, d, None)?);
                     }
                 }
@@ -3327,42 +3339,39 @@ fn clone_value_deep(
         Value::Instance(inst) => {
             let b = inst.borrow();
             let mut fields: indexmap::IndexMap<String, Value> = indexmap::IndexMap::new();
-            let array_backing: Option<super::value::SharedArray> = match &mut cx {
-                Some(c) => {
-                    for (k, vv) in b.fields.iter() {
-                        fields.insert(k.clone(), clone_value_deep(vv, d, Some(&mut **c))?);
-                    }
-                    let ab = if let Some(arr) = &b.array_backing {
-                        let inner: Result<Vec<Value>, InterpretError> = arr
-                            .borrow()
-                            .iter()
-                            .map(|x| clone_value_deep(x, d, Some(&mut **c)))
-                            .collect();
-                        Some(std::rc::Rc::new(std::cell::RefCell::new(inner?)))
-                    } else {
-                        None
-                    };
-                    let mut n = MAP_RAM_QUADS_PER_ENTRY * fields.len() as u64;
-                    if let Some(arr) = &ab {
-                        n = n.saturating_add(arr.borrow().len() as u64);
-                    }
-                    (*c).charge_ram_quads(n)?;
-                    ab
+            let array_backing: Option<super::value::SharedArray> = if let Some(c) = &mut cx {
+                for (k, vv) in &b.fields {
+                    fields.insert(k.clone(), clone_value_deep(vv, d, Some(&mut **c))?);
                 }
-                None => {
-                    for (k, vv) in b.fields.iter() {
-                        fields.insert(k.clone(), clone_value_deep(vv, d, None)?);
-                    }
-                    if let Some(arr) = &b.array_backing {
-                        let inner: Result<Vec<Value>, InterpretError> = arr
-                            .borrow()
-                            .iter()
-                            .map(|x| clone_value_deep(x, d, None))
-                            .collect();
-                        Some(std::rc::Rc::new(std::cell::RefCell::new(inner?)))
-                    } else {
-                        None
-                    }
+                let ab = if let Some(arr) = &b.array_backing {
+                    let inner: Result<Vec<Value>, InterpretError> = arr
+                        .borrow()
+                        .iter()
+                        .map(|x| clone_value_deep(x, d, Some(&mut **c)))
+                        .collect();
+                    Some(std::rc::Rc::new(std::cell::RefCell::new(inner?)))
+                } else {
+                    None
+                };
+                let mut n = MAP_RAM_QUADS_PER_ENTRY * fields.len() as u64;
+                if let Some(arr) = &ab {
+                    n = n.saturating_add(arr.borrow().len() as u64);
+                }
+                (*c).charge_ram_quads(n)?;
+                ab
+            } else {
+                for (k, vv) in &b.fields {
+                    fields.insert(k.clone(), clone_value_deep(vv, d, None)?);
+                }
+                if let Some(arr) = &b.array_backing {
+                    let inner: Result<Vec<Value>, InterpretError> = arr
+                        .borrow()
+                        .iter()
+                        .map(|x| clone_value_deep(x, d, None))
+                        .collect();
+                    Some(std::rc::Rc::new(std::cell::RefCell::new(inner?)))
+                } else {
+                    None
                 }
             };
             let data = super::value::InstanceData {
@@ -3397,9 +3406,9 @@ fn json_encode_leek(
         Value::Null => JsonValue::Null,
         Value::Bool(b) => JsonValue::Bool(*b),
         Value::Integer(n) => JsonValue::Number(serde_json::Number::from(*n)),
-        Value::Real(r) | Value::RealDotZero(r) => serde_json::Number::from_f64(*r)
-            .map(JsonValue::Number)
-            .unwrap_or(JsonValue::Null),
+        Value::Real(r) | Value::RealDotZero(r) => {
+            serde_json::Number::from_f64(*r).map_or(JsonValue::Null, JsonValue::Number)
+        }
         Value::String(s) => JsonValue::String(s.clone()),
         Value::Array(a) => {
             let ap = Rc::as_ptr(a) as usize;
@@ -3419,7 +3428,7 @@ fn json_encode_leek(
             let mp = Rc::as_ptr(m) as usize;
             visited.insert(mp);
             let mut pairs: Vec<(Value, Value)> = m.borrow().iter().cloned().collect();
-            pairs.sort_by(|(k1, _), (k2, _)| string_builtin(k1, ver).cmp(&string_builtin(k2, ver)));
+            pairs.sort_by_key(|(k1, _)| string_builtin(k1, ver));
             let mut obj = serde_json::Map::new();
             for (k, vv) in pairs {
                 if let Some(p) = json_value_cycle_ptr(&vv) {
@@ -3439,7 +3448,7 @@ fn json_encode_leek(
             let sp = Rc::as_ptr(s) as usize;
             visited.insert(sp);
             let mut arr = Vec::new();
-            for x in s.borrow().elems.iter() {
+            for x in &s.borrow().elems {
                 if let Some(p) = json_value_cycle_ptr(x) {
                     if visited.contains(&p) {
                         continue;

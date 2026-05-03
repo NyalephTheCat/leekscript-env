@@ -1,4 +1,4 @@
-//! Lexical analysis for LeekScript (token order aligned with Java `LexicalParser`).
+//! Lexical analysis for `LeekScript` (token order aligned with Java `LexicalParser`).
 
 mod keyword;
 mod lexer;
@@ -16,7 +16,7 @@ mod tests {
         Lexer::new(src, LexerConfig::default()).tokenize()
     }
 
-    fn src_slice<'a>(src: &'a str, span: leekscript_span::Span) -> &'a str {
+    fn src_slice(src: &str, span: leekscript_span::Span) -> &str {
         &src[span.start as usize..span.end as usize]
     }
 
@@ -29,7 +29,7 @@ mod tests {
             .iter()
             .any(|x| { x.kind == TokenKind::Ident && src_slice("var x;", x.span) == "x" }));
         assert!(t.iter().any(|x| x.kind == TokenKind::Semicolon));
-        assert!(t.last().map(|x| x.kind == TokenKind::Eof).unwrap_or(false));
+        assert!(t.last().is_some_and(|x| x.kind == TokenKind::Eof));
     }
 
     #[test]

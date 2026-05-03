@@ -10,7 +10,7 @@ pub fn compute_turn_order(world: &FightWorld, rng: &mut impl TurnOrderRng) -> Ve
         return Vec::new();
     }
 
-    let total_entities: usize = world.team_fids.iter().map(|t| t.len()).sum();
+    let total_entities: usize = world.team_fids.iter().map(std::vec::Vec::len).sum();
     if total_entities == 0 {
         return Vec::new();
     }
@@ -22,8 +22,8 @@ pub fn compute_turn_order(world: &FightWorld, rng: &mut impl TurnOrderRng) -> Ve
             let mut v = fids.clone();
             // Java `Collections.sort` is stable; tie-break `fid` so equal frequencies keep scenario order.
             v.sort_by(|&a, &b| {
-                let fa = world.entity(a).map(|e| e.frequency).unwrap_or(0);
-                let fb = world.entity(b).map(|e| e.frequency).unwrap_or(0);
+                let fa = world.entity(a).map_or(0, |e| e.frequency);
+                let fb = world.entity(b).map_or(0, |e| e.frequency);
                 fb.cmp(&fa).then(a.cmp(&b))
             });
             v
@@ -36,8 +36,7 @@ pub fn compute_turn_order(world: &FightWorld, rng: &mut impl TurnOrderRng) -> Ve
         let f = t
             .first()
             .and_then(|&fid| world.entity(fid))
-            .map(|e| e.frequency)
-            .unwrap_or(0);
+            .map_or(0, |e| e.frequency);
         frequencies.push(f);
         sum += f;
     }
@@ -45,8 +44,8 @@ pub fn compute_turn_order(world: &FightWorld, rng: &mut impl TurnOrderRng) -> Ve
     let mut probas: Vec<f64> = Vec::new();
     let mut psum = 0.0f64;
     for f in frequencies {
-        let f = f as f64;
-        let sum_f = sum as f64;
+        let f = f64::from(f);
+        let sum_f = f64::from(sum);
         let p = 1.0 / (1.0 + 10f64.powf((sum_f - f) / 100.0));
         probas.push(p);
         psum += p;
@@ -73,8 +72,8 @@ pub fn compute_turn_order(world: &FightWorld, rng: &mut impl TurnOrderRng) -> Ve
             v -= p;
         }
 
-        for j in 0..team_count {
-            probas[j] /= psum;
+        for p in probas[..team_count].iter_mut() {
+            *p /= psum;
         }
         psum = 1.0;
     }

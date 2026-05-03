@@ -573,11 +573,11 @@ fn lower_arrow_fn_expr(
     let hir = if body_n.kind() == LeekSyntaxKind::Block {
         HirExpr::FunctionLiteral {
             params,
-            body: lower_block_stmts(&body_n, ctx)?,
+            body: lower_block_stmts(body_n, ctx)?,
             span,
         }
     } else {
-        let body = lower_expr(&body_n, ctx)?;
+        let body = lower_expr(body_n, ctx)?;
         HirExpr::ArrowClosure {
             params,
             body: Box::new(body),
@@ -1879,13 +1879,13 @@ fn parse_java_hex_float_lit(compact: &str) -> Option<f64> {
     };
     let mut sig: f64 = 0.0;
     for c in int_part.chars() {
-        let v = c.to_digit(16)? as f64;
+        let v = f64::from(c.to_digit(16)?);
         sig = sig * 16.0 + v;
     }
     let mut div = 1.0;
     for c in frac_part.chars() {
         div *= 16.0;
-        sig += (c.to_digit(16)? as f64) / div;
+        sig += f64::from(c.to_digit(16)?) / div;
     }
     Some(sig * 2.0_f64.powi(exp))
 }

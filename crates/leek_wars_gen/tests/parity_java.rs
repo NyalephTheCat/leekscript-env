@@ -48,7 +48,7 @@ fn java_generator_is_stable_modulo_timing() {
     let a = match engine.run(&req) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("skip: java run failed: {}", e);
+            eprintln!("skip: java run failed: {e}");
             return;
         }
     };
